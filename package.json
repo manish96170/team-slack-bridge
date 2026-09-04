@@ -13,9 +13,19 @@
   },
   "scripts": {
     "get-user-token": "node get-user-token.js",
-    "post": "node post.js"
+    "post": "node post.js",
+    "verify-dm": "node verify-dm.js"
   },
   "engines": {
     "node": ">=18"
-  }
+  },
+  "files": [
+    "post.js",
+    "get-user-token.js",
+    "verify-dm.js",
+    "env.js",
+    ".env.example",
+    "README.md",
+    "LICENSE"
+  ]
 }

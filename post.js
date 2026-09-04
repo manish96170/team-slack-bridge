@@ -3,7 +3,7 @@
 // identity (--as-user), and to a channel or as a DM (--dm).
 //
 // Usage:
-//   node post.js --text "Vite migration MR merged" --channel "#encore-merge-requests"
+//   node post.js --text "build finished" --channel "#your-channel-name"
 //   node post.js --text "reminder to self" --dm U0123ABC --as-user
 //
 // This is the outbound piece only — it does not read/listen to Slack.

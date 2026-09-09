@@ -1,0 +1,12 @@
+{
+  "users": [
+    { "name": "Jane Doe", "slackHandle": "@jane", "slackUserId": "U0123ABC", "jiraHandle": "jane.doe" }
+  ],
+  "watchedChannels": [
+    { "channel": "#code-review", "purpose": "review-request" },
+    { "channel": "#team-requests", "purpose": "team-request" }
+  ],
+  "owner": { "slackUserId": "U0123ABC" },
+  "dmAllowlist": [],
+  "remote": { "postableChannels": [], "readableChannels": [] }
+}

@@ -1,0 +1,45 @@
+{
+  "name": "team-slack-bridge",
+  "version": "0.1.0",
+  "description": "Post to Slack (as a bot, or explicitly as a specific authorized user) and DM, from any script, agent, or CI job. Standalone — no dependency on any particular orchestration system.",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/anchor-mani/team-slack-bridge.git"
+  },
+  "bin": {
+    "team-slack-bridge": "./post.js"
+  },
+  "scripts": {
+    "get-user-token": "node get-user-token.js",
+    "post": "node post.js",
+    "verify-dm": "node verify-dm.js",
+    "doctor": "node cli/doctor.js",
+    "mcp": "node mcp/server.js",
+    "listen": "node cli/listen.js",
+    "test": "node --test test/"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "post.js",
+    "get-user-token.js",
+    "verify-dm.js",
+    "env.js",
+    "core",
+    "cli",
+    "listen",
+    "mcp",
+    "skill",
+    "config",
+    ".env.example",
+    "README.md",
+    "PLAN.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@slack/bolt": "^5.1.0"
+  }
+}

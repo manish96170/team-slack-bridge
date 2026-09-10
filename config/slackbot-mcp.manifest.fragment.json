@@ -1,0 +1,15 @@
+{
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "mcp:connect"
+      ]
+    }
+  },
+  "mcp_servers": {
+    "team-slack-bridge": {
+      "url": "https://your-public-host.example.com/mcp",
+      "auth_type": "slack_identity_auth"
+    }
+  }
+}

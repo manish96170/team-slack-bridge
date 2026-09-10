@@ -2,8 +2,36 @@
 
 Post to Slack — as a bot, or explicitly as a specific authorized person — and DM,
 from any script, agent, or CI job. Standalone: no dependency on any particular
-orchestration system, AI agent framework, or dashboard. Outbound only for now
-(reading/listening to Slack is a separate, not-yet-built concern).
+orchestration system, AI agent framework, or dashboard.
+
+Runtime: **Node >=26** (`package.json`'s `engines`). `.nvmrc` pins `26` for local dev on
+this machine so the bridge stays on the current Node line rather than LTS.
+
+## Four surfaces, one core
+
+See `PLAN.md` for the full architecture and decisions log. In short: every capability is
+a plain function in `core/` (tokens as parameters, no ambient state, no logging), and
+each way of reaching it is a thin adapter that adds no behaviour of its own:
+
+- **Direct** — `node cli/post.js …`, or `import { postToChannel } from './core/post.js'`.
+  Root-level `post.js` / `get-user-token.js` / `verify-dm.js` still work unchanged.
+- **MCP server (local)** — `node mcp/server.js` over stdio, full tool set. Point any
+  MCP-capable client at it:
+  ```jsonc
+  { "mcpServers": { "team-slack-bridge": { "command": "node", "args": ["/abs/path/to/team-slack-bridge/mcp/server.js"] } } }
+  ```
+- **Skill** — `skill/SKILL.md`, shells out to the CLI. Invoke by name in Claude Code.
+- **Dashboard agent** — the dashboard imports `core/` directly or calls the CLI.
+
+Every outbound CLI/MCP command supports `--dry-run` (resolve and format the Slack call,
+send nothing) and `--json` (structured `{ ok, ... }` output, non-zero exit on failure).
+`node cli/doctor.js --json` reports install health without ever printing a token value.
+
+Built for local/team use now: outbound posting, DMs, channel/thread reads, scheduling,
+human approval/questions over DM, Socket Mode listening, listener daemon control,
+progress-message updates, and a locked-down Slackbot remote MCP surface.
+
+For the feature matrix and exact on/off switches, see `FEATURES.md`.
 
 ## Design principles
 
@@ -32,10 +60,10 @@ orchestration system, AI agent framework, or dashboard. Outbound only for now
 
 ## One-time setup
 
-1. Create a Slack app as a **Blank app** (not "Starter app" — that scaffolds a hosted
-   event-listener framework you don't need for outbound-only use). Under **OAuth &
+1. Create a Slack app from `config/slack-app-manifest.template.json`, or create a
+   **Blank app** and configure the same scopes/events by hand. Under **OAuth &
    Permissions -> Scopes**, add these **Bot Token Scopes**:
-   - `chat:write`, `chat:write.customize` — post messages as the bot
+   - `chat:write` — post messages as the bot
    - `im:write` — open/send DMs
    - `im:read`, `im:history` — only needed if you're also building DM-reading on top
      of this (e.g. a note-to-self pattern) — without these the bot can send a DM but
@@ -54,13 +82,19 @@ orchestration system, AI agent framework, or dashboard. Outbound only for now
    history is a user token authenticated as that person, which is a materially bigger
    privacy grant than anything else here — don't add it without deciding to.
 
+   For Socket Mode, create an app-level token with `connections:write`.
+   For future HTTP endpoints or slash commands, copy the Slack Signing Secret from
+   **Basic Information -> App Credentials** into `SLACK_SIGNING_SECRET`.
+
 2. Install the app to your workspace. Invite the bot to any channel you want it posting
    in (`/invite @your-app-name`). To DM the bot yourself, search its name in Slack or
    find it under **Apps** in the sidebar — no separate "invite to DM" step exists.
-3. `cp .env.example .env` — fill in `SLACK_BOT_TOKEN` (from Install to Workspace) and,
-   if you want the as-user capability, `SLACK_CLIENT_ID`/`SLACK_CLIENT_SECRET` (from
-   Basic Information). **Edit `.env` directly — don't paste token values anywhere
-   they'll be logged or shared.**
+3. Run the setup wizard:
+   ```bash
+   node cli/setup.js init
+   ```
+   It writes `.env` and `slack-config.json`. Token prompts are local terminal input;
+   do not run setup in a shared recording or paste tokens into chat.
 4. If you want the "post as me" capability:
    ```
    npm run get-user-token
@@ -79,7 +113,100 @@ node post.js --text "reviewing this now" --channel "#deploys" --as-user
 
 # DM someone (bot identity) — find their Slack member ID via their profile > "Copy member ID"
 node post.js --text "can you take a look at this?" --dm U0123ABC
+
+# setup and health
+node cli/setup.js init
+node cli/doctor.js --json
+
+# run the Socket Mode listener as a daemon
+node cli/daemon.js start --json
+node cli/daemon.js status --json
+node cli/daemon.js logs --lines 80
+node cli/daemon.js stop --json
+
+# progress message that gets edited in place
+node cli/progress.js start --channel "#deploys" --label "Deploy" --detail "starting" --json
+node cli/progress.js update --channel "#deploys" --ts "1699999999.000100" --label "Deploy" --status "running" --detail "tests passed" --json
+node cli/progress.js finish --channel "#deploys" --ts "1699999999.000100" --label "Deploy" --detail "released" --json
+
+# local output-mode control; the same can be exposed as Slack /outputmode
+node cli/output-mode.js medium --json
 ```
+
+## Runtime Notes
+
+Slack Web API calls go through the official `@slack/web-api` `WebClient`, with the
+existing core result shape preserved. Repeated DM sends cache the opened DM channel in
+the local SQLite DB, so later sends to the same user avoid another `conversations.open`.
+The listener uses Bolt Socket Mode; keep it running through `cli/daemon.js` for
+approval buttons and event-driven free-text answers.
+
+Dormant surfaces are config-gated and off by default:
+
+```jsonc
+{
+  "outputMode": "medium",
+  "http": { "enabled": false, "port": 8917, "verifySlackSignatures": true },
+  "slashCommands": { "enabled": false, "outputModeCommand": "/outputmode" },
+  "agentSessions": { "enabled": false, "autoCreateSession": false, "provider": "none" },
+  "openacp": { "enabled": false, "adapterPackage": "@openacp/slack-adapter", "autoCreateSession": false },
+  "slackbotMcp": {
+    "enabled": false,
+    "serverKey": "team-slack-bridge",
+    "url": "",
+    "authType": "slack_identity_auth",
+    "authProviderKey": "",
+    "exposeWriteTools": false,
+    "allowedTools": [],
+    "rateLimitPerMinute": 30
+  }
+}
+```
+
+`SLACK_SIGNING_SECRET` is required when `http.enabled` is true and signature verification
+remains enabled; it is always required when `slackbotMcp.enabled` is true, because `/mcp`
+trusts Slack identity only after verifying Slack's request signature. `openacp.enabled`
+only attempts to load the adapter package; it does not add OpenACP as a hard dependency or
+change bridge behavior while disabled.
+The HTTP Events API endpoint is `/webhook`, so a local listener runs at
+`http://localhost:8917/webhook`. Slack itself cannot reach `localhost`; use this for
+local tunnel testing or replace it with a public HTTPS URL in Slack Event Subscriptions.
+
+Slackbot MCP Client support is also dormant by default. Keep `slackbotMcp.enabled:false`
+until there is a public HTTPS MCP endpoint and a deliberately chosen safe tool set.
+When enabling it, merge `config/slackbot-mcp.manifest.fragment.json` into the Slack app
+manifest, set its `mcp_servers.<serverKey>.url` to the public `/mcp` endpoint, and add
+the `mcp:connect` bot scope. Prefer `slack_identity_auth` for this repo so Slack user
+and team identity are available to the MCP layer; leave `exposeWriteTools:false` unless
+write tools have explicit authorization rules. The `/mcp` endpoint is implemented in
+the optional HTTP listener, but it returns disabled by default; when enabled, it exposes
+only `slack_doctor` unless `slackbotMcp.allowedTools` is set. Channel read/write tools
+are additionally restricted by `remote.readableChannels` and `remote.postableChannels`;
+DMs, human ask/approval, post-as-user, search, App Home publishing, scheduling, progress
+mutation, and agent-session creation are absent from the remote registry by construction.
+
+**Two MCP-server options, if a typed-tool front door is wanted instead of/alongside the
+CLI — pick deliberately, don't default to whichever is more capable:**
+- **`@modelcontextprotocol/server-slack`** (reference implementation) — exposes Slack
+  as agent-callable tools. Provides no identity-bound authorization
+  (`requestedPersonName == callerIdentity`) or bot-default/as-user-explicit rule — a
+  consuming system still has to layer that on itself.
+- **`slack-mcp-server`** (community, more capable — search, threads, reactions, unread
+  tracking; posting disabled by default, matching this repo's own bot-default caution)
+  — but it also supports **browser-session "stealth mode" tokens (`xoxc`/`xoxd`)**: full
+  account access via browser cookie, no bot app install required. That's the opposite
+  of everything this repo is designed around (scoped bot tokens, real OAuth for user
+  tokens, identity-bound authorization). **If this server is ever used, OAuth-token
+  mode only — never stealth mode.** The extra capability (message/thread search) is
+  worth having; the bypass-every-guardrail auth mode is not.
+
+**Not Slack-specific, noted for a different reason — `novu`.** A general multi-channel
+notification platform (email/SMS/push/13 chat providers including Slack), not a
+Slack library. Conceptually a good fit for "integrations-as-data" — one provider
+abstraction instead of N bespoke outbound agents once email/Drive/etc. are real. But it
+requires running its own hosted/self-hosted backend (Docker) — no lightweight
+backend-free mode exists. Premature to adopt for "post to one Slack channel" — revisit
+only if/when Slack + email + something else *all* need unified outbound at once.
 
 ## Scope note
 

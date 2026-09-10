@@ -1,76 +1,63 @@
 #!/usr/bin/env node
-// Post a message to Slack — as the bot (default) or as your own user
-// identity (--as-user), and to a channel or as a DM (--dm).
+// Thin forwarder, kept working at the repo root for anything already
+// calling it (PLAN §5: "a rename is a breaking change to a tool whose whole
+// value is that scripts call it"). Superseded by cli/post.js / cli/dm.js,
+// which this delegates to — no behaviour lives here.
 //
-// Usage:
+// Usage (unchanged from before this repo grew a core/):
 //   node post.js --text "build finished" --channel "#your-channel-name"
 //   node post.js --text "reminder to self" --dm U0123ABC --as-user
-//
-// This is the outbound piece only — it does not read/listen to Slack.
-// Inbound (mentions, DM listening) is a separate, not-yet-built concern.
+// New, additive: --thread-ts, --idempotency-key, --dry-run, --json
 
 import { loadEnv } from './env.js'
+import { postToChannel } from './core/post.js'
+import { dm } from './core/dm.js'
+import { loadConfig } from './core/identity.js'
+import { parseFlags, output } from './cli/lib/args.js'
+import { LEDGER_PATH, CONFIG_PATH } from './cli/context.js'
 
+const flags = parseFlags(process.argv.slice(2), ['as-user', 'dry-run', 'json'])
 const env = loadEnv()
+const config = loadConfig(CONFIG_PATH)
 
-function parseArgs(argv) {
-  const args = { asUser: false }
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i]
-    if (a === '--as-user') args.asUser = true
-    else if (a === '--text') args.text = argv[++i]
-    else if (a === '--channel') args.channel = argv[++i]
-    else if (a === '--dm') args.dm = argv[++i]
-  }
-  return args
-}
-
-async function slackCall(method, token, body) {
-  const resp = await fetch(`https://slack.com/api/${method}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json; charset=utf-8',
-    },
-    body: JSON.stringify(body),
-  })
-  const data = await resp.json()
-  if (!data.ok) throw new Error(`Slack API ${method} failed: ${data.error}`)
-  return data
-}
-
-async function resolveDmChannel(botToken, userId) {
-  const { channel } = await slackCall('conversations.open', botToken, { users: userId })
-  return channel.id
-}
-
-async function main() {
-  const args = parseArgs(process.argv.slice(2))
-  if (!args.text) throw new Error('--text is required')
-  if (!args.channel && !args.dm) throw new Error('one of --channel or --dm is required')
-
-  const token = args.asUser ? env.SLACK_USER_TOKEN : env.SLACK_BOT_TOKEN
-  if (!token) {
-    throw new Error(
-      args.asUser
-        ? 'SLACK_USER_TOKEN not set — run `npm run get-user-token` first.'
-        : 'SLACK_BOT_TOKEN not set in slack/.env.'
-    )
-  }
-
-  let channel = args.channel
-  if (args.dm) {
-    // conversations.open must always use the bot token, even when the
-    // message itself will be sent as the user.
-    if (!env.SLACK_BOT_TOKEN) throw new Error('SLACK_BOT_TOKEN required to resolve a DM channel.')
-    channel = await resolveDmChannel(env.SLACK_BOT_TOKEN, args.dm)
-  }
-
-  await slackCall('chat.postMessage', token, { channel, text: args.text })
-  console.log(`Posted ${args.asUser ? 'as user' : 'as bot'} to ${args.dm ? `DM ${args.dm}` : channel}.`)
-}
-
-main().catch(err => {
-  console.error(err.message)
+if (!flags.text) {
+  console.error('--text is required')
   process.exit(1)
-})
+}
+if (!flags.channel && !flags.dm) {
+  console.error('one of --channel or --dm is required')
+  process.exit(1)
+}
+
+const result = flags.dm
+  ? await dm({
+      botToken: env.SLACK_BOT_TOKEN,
+      userToken: env.SLACK_USER_TOKEN,
+      userId: flags.dm,
+      text: flags.text,
+      asUser: flags['as-user'],
+      config,
+      dbPath: LEDGER_PATH,
+      dryRun: flags['dry-run'],
+    })
+  : await postToChannel({
+      token: flags['as-user'] ? env.SLACK_USER_TOKEN : env.SLACK_BOT_TOKEN,
+      channel: flags.channel,
+      text: flags.text,
+      threadTs: flags['thread-ts'],
+      idempotencyKey: flags['idempotency-key'],
+      ledgerPath: LEDGER_PATH,
+      config,
+      dryRun: flags['dry-run'],
+    })
+
+if (flags.json) {
+  output(result, { json: true })
+} else if (!result.ok) {
+  console.error(result.error)
+  process.exitCode = 1
+} else if (result.dryRun) {
+  console.log(`[dry-run] would post ${flags['as-user'] ? 'as user' : 'as bot'} to ${flags.dm ? `DM ${flags.dm}` : flags.channel}.`)
+} else {
+  console.log(`Posted ${flags['as-user'] ? 'as user' : 'as bot'} to ${flags.dm ? `DM ${flags.dm}` : flags.channel}.`)
+}

@@ -1,2 +1,7 @@
 .env
 node_modules/
+.DS_Store
+.ledger.sqlite
+.listener.pid
+.listener.log
+slack-config.json

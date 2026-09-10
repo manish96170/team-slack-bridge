@@ -1,0 +1,27 @@
+{
+  "users": [
+    { "name": "Jane Doe", "slackHandle": "@jane", "slackUserId": "U0123ABC", "jiraHandle": "jane.doe" }
+  ],
+  "watchedChannels": [
+    { "channel": "#code-review", "purpose": "review-request" },
+    { "channel": "#team-requests", "purpose": "team-request" }
+  ],
+  "owner": { "slackUserId": "U0123ABC" },
+  "dmAllowlist": [],
+  "outputMode": "medium",
+  "http": { "enabled": false, "port": 8917, "verifySlackSignatures": true },
+  "slashCommands": { "enabled": false, "outputModeCommand": "/outputmode" },
+  "agentSessions": { "enabled": false, "autoCreateSession": false, "provider": "none" },
+  "openacp": { "enabled": false, "adapterPackage": "@openacp/slack-adapter", "autoCreateSession": false },
+  "slackbotMcp": {
+    "enabled": false,
+    "serverKey": "team-slack-bridge",
+    "url": "",
+    "authType": "slack_identity_auth",
+    "authProviderKey": "",
+    "exposeWriteTools": false,
+    "allowedTools": [],
+    "rateLimitPerMinute": 30
+  },
+  "remote": { "postableChannels": [], "readableChannels": [] }
+}

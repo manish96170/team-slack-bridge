@@ -6,7 +6,7 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/anchor-mani/team-slack-bridge.git"
+    "url": "git+https://github.com/manish96170/team-slack-bridge.git"
   },
   "bin": {
     "team-slack-bridge": "./post.js"
@@ -14,18 +14,37 @@
   "scripts": {
     "get-user-token": "node get-user-token.js",
     "post": "node post.js",
-    "verify-dm": "node verify-dm.js"
+    "verify-dm": "node verify-dm.js",
+    "doctor": "node cli/doctor.js",
+    "mcp": "node mcp/server.js",
+    "listen": "node cli/listen.js",
+    "daemon": "node cli/daemon.js",
+    "http": "node cli/http.js",
+    "test": "node --test test/*.test.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=26"
   },
   "files": [
     "post.js",
     "get-user-token.js",
     "verify-dm.js",
     "env.js",
+    "core",
+    "cli",
+    "listen",
+    "mcp",
+    "skill",
+    "config",
     ".env.example",
+    ".nvmrc",
     "README.md",
+    "FEATURES.md",
+    "PLAN.md",
     "LICENSE"
-  ]
+  ],
+  "dependencies": {
+    "@slack/bolt": "^5.1.0",
+    "@slack/web-api": "^8.1.1"
+  }
 }

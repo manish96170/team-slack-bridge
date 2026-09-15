@@ -33,6 +33,20 @@ export function createAgentSession({ dbPath, config, source = 'slack', slackChan
   return { ok: true, session: getAgentSession({ dbPath, id }) }
 }
 
+// Used by ACP session resume (PLAN: ACP thread sessions, Phase 4) to persist
+// the ACP sessionId at creation and the 'closed' status on explicit close —
+// without this, every session (even a deliberately closed one) would look
+// eligible for resume forever, since `status` otherwise never leaves
+// 'created'.
+export function updateAgentSession({ dbPath, id, metadata, status }) {
+  if (!dbPath || !id) return { ok: false, error: 'db-path-and-id-required', retryable: false }
+  const now = new Date().toISOString()
+  const db = getDb(dbPath)
+  if (metadata !== undefined) db.prepare('UPDATE agent_sessions SET metadata = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(metadata), now, id)
+  if (status !== undefined) db.prepare('UPDATE agent_sessions SET status = ?, updated_at = ? WHERE id = ?').run(status, now, id)
+  return { ok: true, session: getAgentSession({ dbPath, id }) }
+}
+
 export function getAgentSession({ dbPath, id }) {
   if (!dbPath) return null
   return rowToSession(getDb(dbPath).prepare('SELECT * FROM agent_sessions WHERE id = ?').get(id))

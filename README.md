@@ -233,7 +233,16 @@ than silently picking something else.
 `--backend` defaults to `claude`; `--repo` defaults to whichever repo is registered as
 default. Permission requests render as Approve/Deny buttons in the thread itself (not
 a DM) using the same primitive as `core/ask.js`'s existing human-in-the-loop flow.
+`/agent-session close` (run from within the session's thread) ends it explicitly.
 Local-profile-only (D26) — this never touches `mcp/tools.remote.js`/`mcp/http.js`.
+
+**Surviving a listener restart (D29)**: a reply in a thread whose session was lost to a
+restart (the in-memory state is gone, but `agent_sessions` still has the row) triggers
+a resume attempt — `session/resume` first, `session/load` second, whichever the backend
+actually advertised support for at connect time. If neither is supported, the reply
+falls through to normal message handling exactly as if there had never been a session,
+rather than erroring. This is lazy (only on the next reply, never an eager
+resume-everything-at-startup pass) and gated by the same D24 allowlist as starting one.
 
 ## Connecting multiple AI coding harnesses / multiple Slack accounts (PLAN D21/D22)
 

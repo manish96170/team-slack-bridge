@@ -3,12 +3,12 @@
 // core/acp-client.js's per-backend persistent connections.
 
 import { methods } from '@agentclientprotocol/sdk'
-import { getBackendConnection, registerSession, unregisterSession } from './acp-client.js'
+import { getBackendConnection, registerSession, unregisterSession, createUpdateQueue } from './acp-client.js'
 import { getBackend, DEFAULT_BACKEND } from './acp-backends.js'
 import { resolveRepoPath } from './repos.js'
 import { createFsHandlers } from './acp-fs.js'
 import { createTerminalHandlers } from './acp-terminal.js'
-import { createAgentSession } from './agent-sessions.js'
+import { createAgentSession, findAgentSessionBySlackThread, updateAgentSession } from './agent-sessions.js'
 import { startProgress, updateProgress, finishProgress } from './progress.js'
 import { ask } from './ask.js'
 
@@ -101,6 +101,87 @@ async function handlePermissionRequest({ env, dbPath, channel, threadTs, request
   const chosen = params.options.find(option => option.name === result.answer?.label)
   if (!chosen) return { outcome: { outcome: 'cancelled' } }
   return { outcome: { outcome: 'selected', optionId: chosen.optionId } }
+}
+
+// The public SDK only builds an ActiveSession-shaped helper (queued
+// updates, prompt() that also enqueues its own completion) for session/new
+// — there's no equivalent public builder for session/load or
+// session/resume (PLAN: ACP thread sessions, Phase 4). This is the minimal
+// hand-rolled equivalent, fed by core/acp-client.js's global session/update
+// tap via the same updateQueue registered for this sessionId.
+function createResumedSessionHandle({ connection, sessionId, response, updateQueue }) {
+  return {
+    sessionId,
+    newSessionResponse: response,
+    async prompt(text) {
+      const promptResponse = await connection.agent.request(methods.agent.session.prompt, { sessionId, prompt: [{ type: 'text', text }] })
+      updateQueue.push({ kind: 'stop', response: promptResponse })
+      return promptResponse
+    },
+    nextUpdate() {
+      return updateQueue.next()
+    },
+    dispose() {},
+  }
+}
+
+// Tries to reconnect an already-persisted ACP session (e.g. after the
+// listener process restarted and lost the in-memory entry) rather than
+// treating the thread as having no session at all. Tries session/resume
+// first (no history replay — cleaner), then session/load, based on
+// whichever capability the backend actually advertised at initialize time.
+// Returns the same {ok:false, error:'no-active-session-for-thread'} shape
+// as "there was never a session here" on any failure, so callers degrade
+// to normal message handling exactly as they already do today.
+async function tryResumeSession({ env, config, dbPath, channel, threadTs, requestedBy }) {
+  const persisted = findAgentSessionBySlackThread({ dbPath, slackChannel: channel, slackThreadTs: threadTs })
+  if (!persisted || persisted.kind !== 'acp-session' || persisted.status === 'closed') {
+    return { ok: false, error: 'no-active-session-for-thread', retryable: false }
+  }
+  if (!isAllowedToStartSession(config, requestedBy)) {
+    return { ok: false, error: 'no-active-session-for-thread', retryable: false }
+  }
+  const { backend: backendName, repoName, repoPath, acpSessionId, model } = persisted.metadata || {}
+  const backend = getBackend(backendName)
+  if (!backend || !acpSessionId || !repoPath) return { ok: false, error: 'no-active-session-for-thread', retryable: false }
+
+  const { connection, sessions, initializeResponse } = await getBackendConnection(backend)
+  const caps = initializeResponse?.agentCapabilities
+  let response
+  if (caps?.sessionCapabilities?.resume) {
+    response = await connection.agent.request(methods.agent.session.resume, { sessionId: acpSessionId, cwd: repoPath })
+  } else if (caps?.loadSession) {
+    response = await connection.agent.request(methods.agent.session.load, { sessionId: acpSessionId, cwd: repoPath, mcpServers: [] })
+  } else {
+    return { ok: false, error: 'no-active-session-for-thread', retryable: false }
+  }
+
+  const updateQueue = createUpdateQueue()
+  registerSession(sessions, acpSessionId, {
+    fsHandlers: createFsHandlers(repoPath),
+    terminalHandlers: createTerminalHandlers(repoPath),
+    onPermissionRequest: params => handlePermissionRequest({ env, dbPath, channel, threadTs, requestedBy, params }),
+    updateQueue,
+  })
+  const activeSession = createResumedSessionHandle({ connection, sessionId: acpSessionId, response, updateQueue })
+
+  const progressPost = await startProgress({
+    token: env.SLACK_BOT_TOKEN,
+    channel,
+    label: `Agent session (${backend.name}${model ? ` · ${model}` : ''} · ${repoName})`,
+    detail: 'reconnected after a restart — continuing…',
+    threadTs,
+    config,
+  })
+  if (!progressPost.ok) {
+    unregisterSession(sessions, acpSessionId)
+    return progressPost
+  }
+
+  const entry = { activeSession, backend, sessions, repoName, model, agentSessionRowId: persisted.id, progressTs: progressPost.ts, channel, env, config, accumulatedText: '' }
+  activeSessionsByKey.set(sessionKey(channel, threadTs), entry)
+  updateAgentSession({ dbPath, id: persisted.id, status: 'active' })
+  return { ok: true, entry }
 }
 
 function describeUpdate(update) {
@@ -219,7 +300,10 @@ export async function startAgentSession({ env, config, dbPath, channel, threadTs
     slackChannel: channel,
     slackThreadTs: anchorThreadTs,
     kind: 'acp-session',
-    metadata: { backend: backend.name, repoName: repo.name, repoPath: repo.path, requestedBy, model: appliedModel },
+    // acpSessionId is what makes resume-after-restart (Phase 4) possible —
+    // without it, a restarted listener has no way to reconnect this thread
+    // to the agent's own persisted conversation state.
+    metadata: { backend: backend.name, repoName: repo.name, repoPath: repo.path, requestedBy, model: appliedModel, acpSessionId: activeSession.sessionId },
   })
   if (!created.ok) {
     activeSession.dispose()
@@ -232,30 +316,48 @@ export async function startAgentSession({ env, config, dbPath, channel, threadTs
     onPermissionRequest: params => handlePermissionRequest({ env, dbPath, channel, threadTs: anchorThreadTs, requestedBy, params }),
   })
 
-  const entry = { activeSession, backend, sessions, repoName: repo.name, model: appliedModel, progressTs: progressPost.ts, channel, env, config, accumulatedText: '' }
+  const entry = {
+    activeSession,
+    backend,
+    sessions,
+    repoName: repo.name,
+    model: appliedModel,
+    agentSessionRowId: created.session.id,
+    progressTs: progressPost.ts,
+    channel,
+    env,
+    config,
+    accumulatedText: '',
+  }
   activeSessionsByKey.set(sessionKey(channel, anchorThreadTs), entry)
 
   const response = await runPromptTurn(entry, task)
   return { ok: true, sessionId: activeSession.sessionId, channel, threadTs: anchorThreadTs, stopReason: response.stopReason }
 }
 
-export async function routeThreadReply({ channel, threadTs, text }) {
-  const entry = activeSessionsByKey.get(sessionKey(channel, threadTs))
-  if (!entry) return { ok: false, error: 'no-active-session-for-thread', retryable: false }
+// Callers (listen/socket.js) call this unconditionally for every thread
+// reply — it's a cheap indexed DB lookup in the common case where a thread
+// never had a session, and falls through to normal message handling
+// exactly as before whenever it returns ok:false, whether that's "never had
+// a session" or "had one but it's unresumable now".
+export async function routeThreadReply({ env, config, dbPath, channel, threadTs, text, requestedBy }) {
+  let entry = activeSessionsByKey.get(sessionKey(channel, threadTs))
+  if (!entry) {
+    const resumed = await tryResumeSession({ env, config, dbPath, channel, threadTs, requestedBy })
+    if (!resumed.ok) return resumed
+    entry = resumed.entry
+  }
   const response = await runPromptTurn(entry, text)
   return { ok: true, stopReason: response.stopReason }
 }
 
-export function hasActiveSession(channel, threadTs) {
-  return activeSessionsByKey.has(sessionKey(channel, threadTs))
-}
-
-export function closeAgentSession(channel, threadTs) {
+export function closeAgentSession({ dbPath, channel, threadTs }) {
   const key = sessionKey(channel, threadTs)
   const entry = activeSessionsByKey.get(key)
   if (!entry) return { ok: false, error: 'no-active-session-for-thread', retryable: false }
   entry.activeSession.dispose()
   unregisterSession(entry.sessions, entry.activeSession.sessionId)
   activeSessionsByKey.delete(key)
+  if (entry.agentSessionRowId) updateAgentSession({ dbPath, id: entry.agentSessionRowId, status: 'closed' })
   return { ok: true }
 }

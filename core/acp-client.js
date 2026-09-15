@@ -7,11 +7,16 @@
 // elsewhere — this is the "argued in writing" case for a new dependency,
 // D7).
 //
-// Notification-based session/update streaming is intentionally NOT
-// registered as a global handler here — the SDK's `ActiveSession.
-// nextUpdate()` already owns that per session internally. This module only
-// answers the agent's own REQUESTS (permission, fs, terminal), dispatched by
-// sessionId to whichever session registered a handler via `registerSession`.
+// session/update streaming for a `buildSession()`-created session is owned
+// by the SDK's own `ActiveSession.nextUpdate()` internally — this module
+// only answers the agent's own REQUESTS (permission, fs, terminal),
+// dispatched by sessionId to whichever session registered a handler via
+// `registerSession`. The one exception: a global `session/update`
+// notification tap IS registered below, for resumed/loaded sessions only
+// (PLAN: ACP thread sessions, Phase 4) — verified from the SDK's own source
+// (SessionUpdateRouter.handleMessage always returns Handled.no(), i.e. it
+// taps without consuming, so this coexists safely with ActiveSession's own
+// internal routing for every other session).
 
 import { spawn } from 'node:child_process'
 import { Writable, Readable } from 'node:stream'
@@ -41,6 +46,9 @@ function connectBackend(backend) {
     .onRequest(methods.client.terminal.waitForExit, ctx => forSession(sessions, ctx.params.sessionId, 'waitForTerminalExit').terminalHandlers.waitForTerminalExit(ctx.params))
     .onRequest(methods.client.terminal.kill, ctx => forSession(sessions, ctx.params.sessionId, 'killTerminal').terminalHandlers.killTerminal(ctx.params))
     .onRequest(methods.client.terminal.release, ctx => forSession(sessions, ctx.params.sessionId, 'releaseTerminal').terminalHandlers.releaseTerminal(ctx.params))
+    .onNotification(methods.client.session.update, ctx => {
+      sessions.get(ctx.params.sessionId)?.updateQueue?.push({ kind: 'session_update', notification: ctx.params, update: ctx.params.update })
+    })
 
   const connection = app.connect(stream)
 
@@ -49,7 +57,7 @@ function connectBackend(backend) {
       protocolVersion: PROTOCOL_VERSION,
       clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: true },
     })
-    .then(() => ({ connection, child, sessions }))
+    .then(initializeResponse => ({ connection, child, sessions, initializeResponse }))
 }
 
 export function getBackendConnection(backend) {
@@ -57,11 +65,14 @@ export function getBackendConnection(backend) {
   return backendConnections.get(backend.name)
 }
 
-// Called once a session/new response comes back, before any prompt is sent
-// — registers the handlers the agent's own requests for this session will
-// be dispatched to.
-export function registerSession(sessions, sessionId, { fsHandlers, terminalHandlers, onPermissionRequest }) {
-  sessions.set(sessionId, { fsHandlers, terminalHandlers, onPermissionRequest })
+// Called once a session/new (or resumed/loaded) session is established,
+// before any prompt is sent — registers the handlers the agent's own
+// requests for this session will be dispatched to. `updateQueue` is only
+// set for resumed/loaded sessions (see createUpdateQueue below); sessions
+// created via buildSession() get their updates from the SDK's own
+// ActiveSession instead and never populate it.
+export function registerSession(sessions, sessionId, { fsHandlers, terminalHandlers, onPermissionRequest, updateQueue }) {
+  sessions.set(sessionId, { fsHandlers, terminalHandlers, onPermissionRequest, updateQueue })
 }
 
 export function unregisterSession(sessions, sessionId) {
@@ -70,4 +81,34 @@ export function unregisterSession(sessions, sessionId) {
 
 export function resetBackendConnections() {
   backendConnections.clear()
+}
+
+// A minimal FIFO async queue standing in for the SDK's private
+// `ActiveSession` machinery, which the public API only builds for
+// session/new — session/load and session/resume have no equivalent public
+// builder, so resumed sessions get this instead, fed by the global
+// session/update tap above. `push` also accepts the synthetic `{kind:
+// 'stop', response}` message once a prompt resolves, mirroring
+// ActiveSession's own documented behavior ("the same completion is also
+// queued as a stop message for nextUpdate()").
+export function createUpdateQueue() {
+  const pending = []
+  let waiting = null
+  return {
+    push(message) {
+      if (waiting) {
+        const resolve = waiting
+        waiting = null
+        resolve(message)
+      } else {
+        pending.push(message)
+      }
+    },
+    next() {
+      if (pending.length) return Promise.resolve(pending.shift())
+      return new Promise(resolve => {
+        waiting = resolve
+      })
+    },
+  }
 }

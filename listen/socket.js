@@ -21,7 +21,7 @@ import { recordAnswer, recordAnswerByThread } from '../core/ask.js'
 import { publishHome } from '../core/home.js'
 import { setOutputModeInConfig } from '../core/config-write.js'
 import { maybeCreateAgentSessionForEvent } from '../core/agent-sessions.js'
-import { startAgentSession, routeThreadReply, hasActiveSession, parseAgentSessionCommand } from '../core/acp-sessions.js'
+import { startAgentSession, routeThreadReply, closeAgentSession, parseAgentSessionCommand } from '../core/acp-sessions.js'
 import { listBackendNames } from '../core/acp-backends.js'
 
 // Strips the leading "<@BOTID> " Slack always prepends to app_mention text,
@@ -100,14 +100,25 @@ export function createListener({ env, botToken, appToken, config, configPath, db
       if (captured) return
     }
 
-    // A reply in a thread that has a live ACP agent session (PLAN: ACP
-    // thread sessions) is a prompt into that session, not a new inbound
+    // A reply in a thread that has (or, after a listener restart, HAD) an
+    // ACP agent session is a prompt into that session, not a new inbound
     // proposal — same "capture and stop" shape as the ask short-circuit
     // above, checked after it so a pending ask still wins if somehow both
-    // exist on the same thread.
-    if (dbPath && message.thread_ts && hasActiveSession(message.channel, message.thread_ts)) {
-      await routeThreadReply({ channel: message.channel, threadTs: message.thread_ts, text: message.text })
-      return
+    // exist on the same thread. routeThreadReply falls back to a resume
+    // attempt (PLAN: ACP thread sessions, Phase 4) when there's no
+    // in-memory session, and returns ok:false — same as "never had one" —
+    // when nothing applies, so this always degrades to normal handling.
+    if (dbPath && message.thread_ts) {
+      const routed = await routeThreadReply({
+        env,
+        config,
+        dbPath,
+        channel: message.channel,
+        threadTs: message.thread_ts,
+        text: message.text,
+        requestedBy: message.user,
+      })
+      if (routed.ok) return
     }
 
     await dispatch(
@@ -155,8 +166,17 @@ export function createListener({ env, botToken, appToken, config, configPath, db
       return
     }
     const [subcommand, ...rest] = (command.text || '').trim().split(/\s+/)
+    if (subcommand === 'close') {
+      if (!command.thread_ts) {
+        await respond({ response_type: 'ephemeral', text: 'Run /agent-session close from within the session\'s thread.' })
+        return
+      }
+      const result = closeAgentSession({ dbPath, channel: command.channel_id, threadTs: command.thread_ts })
+      await respond({ response_type: 'ephemeral', text: result.ok ? 'Session closed.' : `Could not close: ${result.error}` })
+      return
+    }
     if (subcommand !== 'start') {
-      await respond({ response_type: 'ephemeral', text: 'Usage: /agent-session start [--backend name] [--repo name] [--model name] <task>' })
+      await respond({ response_type: 'ephemeral', text: 'Usage: /agent-session start [--backend name] [--repo name] [--model name] <task> | /agent-session close' })
       return
     }
     const { backendName, repoName, modelName, task } = parseAgentSessionCommand(rest.join(' '))

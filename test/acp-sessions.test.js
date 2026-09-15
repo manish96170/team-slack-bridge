@@ -3,7 +3,8 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { isAllowedToStartSession, startAgentSession, parseAgentSessionCommand, applyModelSelection } from '../core/acp-sessions.js'
+import { isAllowedToStartSession, startAgentSession, routeThreadReply, closeAgentSession, parseAgentSessionCommand, applyModelSelection } from '../core/acp-sessions.js'
+import { createAgentSession, updateAgentSession } from '../core/agent-sessions.js'
 
 function withTempHome(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'tsb-acp-sessions-'))
@@ -154,4 +155,72 @@ test('applyModelSelection fails clearly when the backend advertises no model sel
   const result = await applyModelSelection({ connection, activeSession, modelName: 'opus' })
   assert.equal(result.ok, false)
   assert.equal(result.error, 'backend-does-not-advertise-a-model-selector')
+})
+
+function tempDbPath() {
+  return join(mkdtempSync(join(tmpdir(), 'tsb-acp-sessions-db-')), 'db.sqlite')
+}
+
+// routeThreadReply's resume fallback (PLAN: ACP thread sessions, Phase 4) —
+// covering every guard clause that fails BEFORE ever spawning a backend
+// connection, same "no-active-session-for-thread" shape as "never had a
+// session" so callers always degrade to normal message handling.
+
+test('routeThreadReply returns no-active-session-for-thread when nothing was ever persisted for this thread', async () => {
+  const result = await routeThreadReply({ env: {}, config: baseConfig, dbPath: tempDbPath(), channel: 'C1', threadTs: '1.1', text: 'hi', requestedBy: 'U_OWNER' })
+  assert.equal(result.ok, false)
+  assert.equal(result.error, 'no-active-session-for-thread')
+})
+
+test('routeThreadReply refuses to resume a session an unauthorized user did not start (D24 applies to resume too)', async () => {
+  const dbPath = tempDbPath()
+  createAgentSession({
+    dbPath,
+    config: baseConfig,
+    slackChannel: 'C1',
+    slackThreadTs: '1.1',
+    kind: 'acp-session',
+    metadata: { backend: 'claude', repoPath: '/tmp', acpSessionId: 'sess-1' },
+  })
+  const result = await routeThreadReply({ env: {}, config: baseConfig, dbPath, channel: 'C1', threadTs: '1.1', text: 'hi', requestedBy: 'U_RANDOM' })
+  assert.equal(result.ok, false)
+  assert.equal(result.error, 'no-active-session-for-thread')
+})
+
+test('routeThreadReply will not resume a session that was explicitly closed', async () => {
+  const dbPath = tempDbPath()
+  const created = createAgentSession({
+    dbPath,
+    config: baseConfig,
+    slackChannel: 'C1',
+    slackThreadTs: '1.1',
+    kind: 'acp-session',
+    metadata: { backend: 'claude', repoPath: '/tmp', acpSessionId: 'sess-1' },
+  })
+  updateAgentSession({ dbPath, id: created.session.id, status: 'closed' })
+  const result = await routeThreadReply({ env: {}, config: baseConfig, dbPath, channel: 'C1', threadTs: '1.1', text: 'hi', requestedBy: 'U_OWNER' })
+  assert.equal(result.ok, false)
+  assert.equal(result.error, 'no-active-session-for-thread')
+})
+
+test('routeThreadReply will not resume a non-ACP agent-session row (e.g. the older review-request kind)', async () => {
+  const dbPath = tempDbPath()
+  createAgentSession({ dbPath, config: baseConfig, slackChannel: 'C1', slackThreadTs: '1.1', kind: 'review-request', metadata: {} })
+  const result = await routeThreadReply({ env: {}, config: baseConfig, dbPath, channel: 'C1', threadTs: '1.1', text: 'hi', requestedBy: 'U_OWNER' })
+  assert.equal(result.ok, false)
+  assert.equal(result.error, 'no-active-session-for-thread')
+})
+
+test('routeThreadReply will not resume a session with an unknown backend or missing ACP metadata, before ever connecting to anything', async () => {
+  const dbPath = tempDbPath()
+  createAgentSession({ dbPath, config: baseConfig, slackChannel: 'C1', slackThreadTs: '1.1', kind: 'acp-session', metadata: { backend: 'not-a-real-backend' } })
+  const result = await routeThreadReply({ env: {}, config: baseConfig, dbPath, channel: 'C1', threadTs: '1.1', text: 'hi', requestedBy: 'U_OWNER' })
+  assert.equal(result.ok, false)
+  assert.equal(result.error, 'no-active-session-for-thread')
+})
+
+test('closeAgentSession with no in-memory session for the thread fails clearly instead of pretending to succeed', () => {
+  const result = closeAgentSession({ dbPath: tempDbPath(), channel: 'C-never-had-one', threadTs: '9.9' })
+  assert.equal(result.ok, false)
+  assert.equal(result.error, 'no-active-session-for-thread')
 })

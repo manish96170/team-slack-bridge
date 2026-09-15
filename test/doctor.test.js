@@ -1,6 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { doctor } from '../core/doctor.js'
+import { tools as localTools } from '../mcp/tools.local.js'
+import { tools as remoteTools } from '../mcp/tools.remote.js'
 
 const emptyConfig = { users: [], watchedChannels: [], owner: {}, remote: { postableChannels: [], readableChannels: [] } }
 
@@ -70,4 +72,15 @@ test('doctor reports Slackbot MCP readiness without network calls', async () => 
   assert.equal(report.slackbotMcp.enabled, true)
   assert.equal(report.slackbotMcp.ready, false)
   assert.equal(report.slackbotMcp.error, 'slackbot-mcp-requires-https-url')
+})
+
+test('the local slack_doctor MCP tool reports ok:true on a healthy install, so mcp/server.js does not mark it isError', async () => {
+  const result = await localTools.slack_doctor.handler({}, { env: {}, config: emptyConfig })
+  assert.equal(result.ok, true)
+})
+
+test('the remote slack_doctor MCP tool reports ok:true regardless of connection state, so mcp/http.js does not mark it isError', async () => {
+  const result = await remoteTools.slack_doctor.handler({}, { env: {}, config: emptyConfig })
+  assert.equal(result.ok, true)
+  assert.equal(result.connected, false)
 })

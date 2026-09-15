@@ -235,7 +235,7 @@ test('/mcp remote doctor handles partial config objects without leaking local to
   })
   assert.equal(response.statusCode, 200)
   const result = JSON.parse(JSON.parse(response.body).result.content[0].text)
-  assert.deepEqual(result, { profile: 'remote', connected: false, postableChannels: [], readableChannels: [] })
+  assert.deepEqual(result, { ok: true, profile: 'remote', connected: false, postableChannels: [], readableChannels: [] })
 })
 
 test('/mcp requires Slack identity metadata for actionable remote calls', async () => {

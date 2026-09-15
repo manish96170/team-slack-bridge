@@ -117,6 +117,6 @@ export const tools = {
     name: 'slack_doctor',
     description: 'Report remote install health without local token-presence details.',
     inputSchema: schemas.slack_doctor,
-    handler: (args, ctx) => doctor({ env: ctx.env, config: ctx.config, profile: 'remote' }),
+    handler: (args, ctx) => doctor({ env: ctx.env, config: ctx.config, profile: 'remote' }).then(report => ({ ok: true, ...report })),
   },
 }

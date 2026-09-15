@@ -130,7 +130,7 @@ export const tools = {
     name: 'slack_doctor',
     description: 'Report install health — token presence, auth, and config summary. Never a token value.',
     inputSchema: schemas.slack_doctor,
-    handler: (args, ctx) => doctor({ env: ctx.env, config: ctx.config, profile: 'local' }),
+    handler: (args, ctx) => doctor({ env: ctx.env, config: ctx.config, profile: 'local' }).then(report => ({ ok: true, ...report })),
   },
   slack_schedule_message: {
     name: 'slack_schedule_message',

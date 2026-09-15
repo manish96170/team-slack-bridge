@@ -159,7 +159,8 @@ Dormant surfaces are config-gated and off by default:
     "exposeWriteTools": false,
     "allowedTools": [],
     "rateLimitPerMinute": 30
-  }
+  },
+  "localMcpDaemon": { "enabled": false, "port": 8918, "accountMode": "single" }
 }
 ```
 
@@ -184,6 +185,39 @@ only `slack_doctor` unless `slackbotMcp.allowedTools` is set. Channel read/write
 are additionally restricted by `remote.readableChannels` and `remote.postableChannels`;
 DMs, human ask/approval, post-as-user, search, App Home publishing, scheduling, progress
 mutation, and agent-session creation are absent from the remote registry by construction.
+
+## Connecting multiple AI coding harnesses / multiple Slack accounts (PLAN D21/D22)
+
+Two independent things, both local-only — the remote/hosted `slackbotMcp` profile above
+is untouched by either (D6 stands: no multi-tenancy there).
+
+**Multiple harnesses sharing one server**, instead of each spawning its own stdio
+`mcp/server.js` subprocess: enable `localMcpDaemon.enabled`, then
+
+```bash
+node cli/mcp-daemon.js start   # binds 127.0.0.1 only, full local tool set
+```
+
+and point every harness at `http://127.0.0.1:8918/mcp` (e.g. Claude Code:
+`claude mcp add --transport http team-slack-bridge http://127.0.0.1:8918/mcp`) instead
+of stdio-spawning the server. `cli/mcp-daemon.js stop|restart|status|logs` mirror
+`cli/daemon.js`'s controls for the Socket Mode listener.
+
+**Multiple Slack accounts/workspaces**, either:
+- register N stdio servers, one per account, each with a different `TSB_HOME`:
+  `claude mcp add team-slack-bridge-work -s user -- env TSB_HOME=~/.team-slack-bridge-work node mcp/server.js`
+  (works today, no config needed), or
+- one shared daemon in multi-account mode:
+  ```bash
+  node cli/accounts.js add work --home ~/.team-slack-bridge-work
+  TSB_HOME=~/.team-slack-bridge-work node cli/setup.js init   # that account's own .env/slack-config.json
+  ```
+  then set `localMcpDaemon.accountMode: "multi"` and pass `"account": "work"` in a
+  tool call's `arguments` to address that account; omit it for the default account.
+  `node cli/accounts.js list|remove|set-default` manage the registry
+  (`~/.team-slack-bridge/accounts.json`). This registry and daemon are fully opt-in —
+  absent `accounts.json`, everything behaves exactly as a single-account install always
+  has.
 
 **Two MCP-server options, if a typed-tool front door is wanted instead of/alongside the
 CLI — pick deliberately, don't default to whichever is more capable:**

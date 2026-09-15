@@ -8,10 +8,10 @@ const ENV_PATH = existsSync(join(HOME_DIR, '.env'))
   ? join(HOME_DIR, '.env')
   : join(dirname(fileURLToPath(import.meta.url)), '.env')
 
-export function loadEnv() {
+function readEnvFile(path) {
   const env = {}
-  if (existsSync(ENV_PATH)) {
-    for (const line of readFileSync(ENV_PATH, 'utf8').split('\n')) {
+  if (existsSync(path)) {
+    for (const line of readFileSync(path, 'utf8').split('\n')) {
       const trimmed = line.trim()
       if (!trimmed || trimmed.startsWith('#')) continue
       const idx = trimmed.indexOf('=')
@@ -20,6 +20,13 @@ export function loadEnv() {
     }
   }
   return env
+}
+
+// `homeDir` is for the multi-account path (core/accounts.js) only — every
+// existing caller omits it and keeps reading from TSB_HOME/~/.team-slack-bridge
+// exactly as before.
+export function loadEnv(homeDir) {
+  return readEnvFile(homeDir ? join(homeDir, '.env') : ENV_PATH)
 }
 
 export const ENV_FILE_PATH = ENV_PATH

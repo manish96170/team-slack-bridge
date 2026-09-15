@@ -421,6 +421,42 @@ Actionable remote calls are audited in `.ledger.sqlite` and rate-limited per Sla
 caller. Remote post/reply require an `idempotencyKey`; remote update/delete only touch
 messages that the same Slack caller created through the remote MCP path.
 
+### Local MCP daemon + multi-account (PLAN D21/D22)
+
+Local-only, separate from `slackbotMcp` above — not signature-gated, not restricted to
+9 tools, never touches the remote/hosted profile (D6 unchanged).
+
+Default:
+
+```json
+"localMcpDaemon": { "enabled": false, "port": 8918, "accountMode": "single" }
+```
+
+Enable to let multiple AI coding harnesses share one running server (binds
+`127.0.0.1` only, hardcoded) instead of each spawning their own stdio `mcp/server.js`:
+
+```bash
+node cli/mcp-daemon.js start|stop|restart|status|logs
+```
+
+`accountMode: "single"` (default) behaves exactly like the stdio server — any
+`account` argument naming a non-default account is rejected with a clear error, not
+silently ignored. `accountMode: "multi"` additionally resolves an optional `account`
+argument per tool call against `~/.team-slack-bridge/accounts.json`:
+
+```bash
+node cli/accounts.js add work --home ~/.team-slack-bridge-work
+node cli/accounts.js list
+node cli/accounts.js set-default work
+node cli/accounts.js remove work
+```
+
+Each account is its own home directory with its own `.env`/`slack-config.json`/
+`.ledger.sqlite` (run `TSB_HOME=<home> node cli/setup.js init` once per account to
+populate it). Absent `accounts.json` entirely, every account-aware code path
+synthesizes a single `"default"` account pointing at today's `TSB_HOME` — this feature
+is fully opt-in and changes nothing for an existing single-account install.
+
 ## Health checks
 
 Run:

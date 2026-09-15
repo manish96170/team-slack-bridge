@@ -13,5 +13,11 @@ export const CONFIG_PATH = join(REPO_ROOT, 'slack-config.json')
 export const LEDGER_PATH = join(HOME_DIR, '.ledger.sqlite')
 
 export function loadContext() {
-  return { env: loadEnv(), config: loadConfig(CONFIG_PATH) }
+  return { env: loadEnv(), config: loadConfig(CONFIG_PATH), dbPath: LEDGER_PATH }
+}
+
+// Multi-account path only (core/accounts.js) — every existing caller keeps
+// using loadContext()/CONFIG_PATH/LEDGER_PATH above, unchanged.
+export function loadContextForHome(homeDir) {
+  return { env: loadEnv(homeDir), config: loadConfig(join(homeDir, 'slack-config.json')), dbPath: join(homeDir, '.ledger.sqlite') }
 }

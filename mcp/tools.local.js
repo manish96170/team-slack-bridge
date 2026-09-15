@@ -15,7 +15,6 @@ import { ask } from '../core/ask.js'
 import { startProgress, updateProgress, finishProgress } from '../core/progress.js'
 import { publishHome } from '../core/home.js'
 import { createAgentSession } from '../core/agent-sessions.js'
-import { LEDGER_PATH } from '../cli/context.js'
 import { schemas } from './schema.js'
 
 export const tools = {
@@ -30,7 +29,7 @@ export const tools = {
         text: args.text,
         threadTs: args.threadTs,
         idempotencyKey: args.idempotencyKey,
-        ledgerPath: LEDGER_PATH,
+        ledgerPath: ctx.dbPath,
         config: ctx.config,
         dryRun: args.dryRun,
       }),
@@ -46,7 +45,7 @@ export const tools = {
         threadTs: args.threadTs,
         text: args.text,
         idempotencyKey: args.idempotencyKey,
-        ledgerPath: LEDGER_PATH,
+        ledgerPath: ctx.dbPath,
         config: ctx.config,
         dryRun: args.dryRun,
       }),
@@ -68,7 +67,7 @@ export const tools = {
         channel: args.channel,
         ts: args.ts,
         text: args.text,
-        ledgerPath: LEDGER_PATH,
+        ledgerPath: ctx.dbPath,
         config: ctx.config,
         dryRun: args.dryRun,
       }),
@@ -78,14 +77,14 @@ export const tools = {
     description: 'Delete a message previously posted by this install.',
     inputSchema: schemas.slack_delete_message,
     handler: (args, ctx) =>
-      deleteMessage({ token: ctx.env.SLACK_BOT_TOKEN, channel: args.channel, ts: args.ts, ledgerPath: LEDGER_PATH, dryRun: args.dryRun }),
+      deleteMessage({ token: ctx.env.SLACK_BOT_TOKEN, channel: args.channel, ts: args.ts, ledgerPath: ctx.dbPath, dryRun: args.dryRun }),
   },
   slack_dm: {
     name: 'slack_dm',
     description: 'Send a DM to a user as the bot. Local only.',
     inputSchema: schemas.slack_dm,
     handler: (args, ctx) =>
-      dm({ botToken: ctx.env.SLACK_BOT_TOKEN, userId: args.userId, text: args.text, config: ctx.config, dbPath: LEDGER_PATH, dryRun: args.dryRun }),
+      dm({ botToken: ctx.env.SLACK_BOT_TOKEN, userId: args.userId, text: args.text, config: ctx.config, dbPath: ctx.dbPath, dryRun: args.dryRun }),
   },
   slack_post_as_user: {
     name: 'slack_post_as_user',
@@ -177,7 +176,7 @@ export const tools = {
         question: args.question,
         kind: args.kind,
         options: args.options,
-        dbPath: LEDGER_PATH,
+        dbPath: ctx.dbPath,
         timeoutSeconds: args.timeoutSeconds,
         captureMode: args.captureMode,
       }),
@@ -194,7 +193,7 @@ export const tools = {
         detail: args.detail,
         threadTs: args.threadTs,
         idempotencyKey: args.idempotencyKey,
-        ledgerPath: LEDGER_PATH,
+        ledgerPath: ctx.dbPath,
         config: ctx.config,
         dryRun: args.dryRun,
       }),
@@ -211,7 +210,7 @@ export const tools = {
         label: args.label,
         status: args.status,
         detail: args.detail,
-        ledgerPath: LEDGER_PATH,
+        ledgerPath: ctx.dbPath,
         config: ctx.config,
         dryRun: args.dryRun,
       }),
@@ -228,7 +227,7 @@ export const tools = {
         label: args.label,
         detail: args.detail,
         ok: args.ok !== false,
-        ledgerPath: LEDGER_PATH,
+        ledgerPath: ctx.dbPath,
         config: ctx.config,
         dryRun: args.dryRun,
       }),
@@ -245,7 +244,7 @@ export const tools = {
     inputSchema: schemas.slack_agent_session_create,
     handler: (args, ctx) =>
       createAgentSession({
-        dbPath: LEDGER_PATH,
+        dbPath: ctx.dbPath,
         config: ctx.config,
         source: args.source || 'manual',
         slackChannel: args.slackChannel,

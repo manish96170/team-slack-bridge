@@ -4,5 +4,8 @@ node_modules/
 .ledger.sqlite
 .listener.pid
 .listener.log
+.mcp-daemon.pid
+.mcp-daemon.log
 slack-config.json
+accounts.json
 dist/

@@ -20,6 +20,7 @@ export function loadConfig(path) {
       openacp: { enabled: false, adapterPackage: '@openacp/slack-adapter', autoCreateSession: false },
       slackbotMcp: normalizeSlackbotMcp(),
       remote: { postableChannels: [], readableChannels: [] },
+      localMcpDaemon: { enabled: false, port: 8918, accountMode: 'single' },
     }
   }
   const raw = JSON.parse(readFileSync(path, 'utf8'))
@@ -52,6 +53,11 @@ export function loadConfig(path) {
     remote: {
       postableChannels: raw.remote?.postableChannels || [],
       readableChannels: raw.remote?.readableChannels || [],
+    },
+    localMcpDaemon: {
+      enabled: !!raw.localMcpDaemon?.enabled,
+      port: raw.localMcpDaemon?.port || 8918,
+      accountMode: raw.localMcpDaemon?.accountMode === 'multi' ? 'multi' : 'single',
     },
   }
 }

@@ -9,6 +9,14 @@
 // asserts these three keys are absent so a future refactor that forwards
 // unknown fields to Slack fails here, not in a channel.
 
+// Used only by the local multi-account MCP daemon (listen/mcp-http.js,
+// PLAN D21/D22) to add an optional `account` selector on top of every
+// existing schema, without touching the schemas used by the stdio server
+// or the remote/hosted profile.
+export function withAccountField(schema) {
+  return { ...schema, properties: { ...schema.properties, account: { type: 'string', description: 'Named account from accounts.json; omit for the default account' } } }
+}
+
 export const schemas = {
   slack_post: {
     type: 'object',

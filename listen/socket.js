@@ -21,11 +21,30 @@ import { recordAnswer, recordAnswerByThread } from '../core/ask.js'
 import { publishHome } from '../core/home.js'
 import { setOutputModeInConfig } from '../core/config-write.js'
 import { maybeCreateAgentSessionForEvent } from '../core/agent-sessions.js'
+import { startAgentSession, routeThreadReply, hasActiveSession } from '../core/acp-sessions.js'
+import { listBackendNames, DEFAULT_BACKEND } from '../core/acp-backends.js'
+
+function parseAgentSessionCommand(text) {
+  const tokens = (text || '').trim().split(/\s+/)
+  let backendName = DEFAULT_BACKEND
+  let repoName
+  const remaining = []
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i] === '--backend' && tokens[i + 1]) {
+      backendName = tokens[++i]
+    } else if (tokens[i] === '--repo' && tokens[i + 1]) {
+      repoName = tokens[++i]
+    } else {
+      remaining.push(tokens[i])
+    }
+  }
+  return { backendName, repoName, task: remaining.join(' ').trim() }
+}
 
 // `dbPath` is optional — pass it to capture ask/approval answers
 // (core/ask.js) as they arrive. Without it the listener still classifies
 // events exactly as before; the ask feature is additive.
-export function createListener({ botToken, appToken, config, configPath, dbPath, onClassified, onError }) {
+export function createListener({ env, botToken, appToken, config, configPath, dbPath, onClassified, onError }) {
   if (!botToken) throw new Error('botToken required')
   if (!appToken) throw new Error('appToken required — Socket Mode needs the app-level xapp- token alongside the bot token')
 
@@ -67,6 +86,16 @@ export function createListener({ botToken, appToken, config, configPath, dbPath,
       if (captured) return
     }
 
+    // A reply in a thread that has a live ACP agent session (PLAN: ACP
+    // thread sessions) is a prompt into that session, not a new inbound
+    // proposal — same "capture and stop" shape as the ask short-circuit
+    // above, checked after it so a pending ask still wins if somehow both
+    // exist on the same thread.
+    if (dbPath && message.thread_ts && hasActiveSession(message.channel, message.thread_ts)) {
+      await routeThreadReply({ channel: message.channel, threadTs: message.thread_ts, text: message.text })
+      return
+    }
+
     await dispatch(
       classify(
         { type: 'message', channel_type: message.channel_type, channel: message.channel, user: message.user, text: message.text, ts: message.ts },
@@ -97,6 +126,44 @@ export function createListener({ botToken, appToken, config, configPath, dbPath,
       response_type: 'ephemeral',
       text: result.ok ? `Output mode set to ${result.outputMode}.` : 'Usage: /outputmode low|medium|high',
     })
+  })
+
+  // Starts an ACP agent session (PLAN: ACP thread sessions, D23/D24).
+  // `/agent-session start [--backend name] [--repo name] <task>` — the
+  // resulting message's thread is the session; further replies in it are
+  // routed by the `app.message` short-circuit above, not classify(). Gated
+  // on config.agentSessions.enabled (feature toggle) AND D24's allowlist
+  // (who specifically may start one) — never on channel membership alone.
+  app.command('/agent-session', async ({ command, ack, respond }) => {
+    await ack()
+    if (!config.agentSessions?.enabled) {
+      await respond({ response_type: 'ephemeral', text: 'Agent sessions are disabled for this bridge.' })
+      return
+    }
+    const [subcommand, ...rest] = (command.text || '').trim().split(/\s+/)
+    if (subcommand !== 'start') {
+      await respond({ response_type: 'ephemeral', text: 'Usage: /agent-session start [--backend name] [--repo name] <task>' })
+      return
+    }
+    const { backendName, repoName, task } = parseAgentSessionCommand(rest.join(' '))
+    if (!task) {
+      await respond({ response_type: 'ephemeral', text: 'A task description is required: /agent-session start <task>' })
+      return
+    }
+    const result = await startAgentSession({
+      env,
+      config,
+      dbPath,
+      channel: command.channel_id,
+      threadTs: command.thread_ts,
+      backendName,
+      repoName,
+      task,
+      requestedBy: command.user_id,
+    })
+    if (!result.ok) {
+      await respond({ response_type: 'ephemeral', text: `Could not start agent session: ${result.error}` })
+    }
   })
 
   // Republishes the feature-guide Home tab whenever someone opens it —

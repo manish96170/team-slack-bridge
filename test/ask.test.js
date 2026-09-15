@@ -4,7 +4,29 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { getDb } from '../core/db.js'
-import { recordAnswer, recordAnswerByThread, getAsk, waitForAnswer, ask } from '../core/ask.js'
+import { recordAnswer, recordAnswerByThread, getAsk, waitForAnswer, ask, createAsk } from '../core/ask.js'
+
+// @slack/web-api's WebClient sends form-urlencoded bodies, not JSON.
+function parseFormBody(body) {
+  return Object.fromEntries(new URLSearchParams(body))
+}
+
+function mockChatPostMessage(capture) {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    const body = parseFormBody(init.body)
+    capture.push(body)
+    return {
+      status: 200,
+      headers: new Headers(),
+      url: url.toString(),
+      text: async () => JSON.stringify({ ok: true, channel: body.channel, ts: '100.001', message: {} }),
+    }
+  }
+  return () => {
+    globalThis.fetch = originalFetch
+  }
+}
 
 function tempDbPath() {
   return join(mkdtempSync(join(tmpdir(), 'ask-test-')), 'db.sqlite')
@@ -93,4 +115,60 @@ test('ask() without a bot token fails structured before touching the DB', async 
   const result = await ask({ userId: 'U1', question: 'deploy?', dbPath })
   assert.equal(result.ok, false)
   assert.equal(result.error, 'no-token')
+})
+
+test('createAsk with {channel, threadTs} posts into that thread instead of a DM, and correlates on the given threadTs', async () => {
+  const dbPath = tempDbPath()
+  const posted = []
+  const restore = mockChatPostMessage(posted)
+  try {
+    const result = await createAsk({
+      botToken: 'xoxb-test',
+      userId: 'U1',
+      question: 'ok to deploy?',
+      kind: 'approval',
+      dbPath,
+      channel: 'C123',
+      threadTs: '111.111',
+    })
+    assert.equal(result.ok, true)
+    assert.equal(result.channel, 'C123')
+    // Correlates on the GIVEN thread root, not this reply's own ts — later
+    // replies in that thread carry the root's thread_ts, not this message's.
+    assert.equal(result.threadTs, '111.111')
+    assert.equal(posted[0].channel, 'C123')
+    assert.equal(posted[0].thread_ts, '111.111')
+    assert.equal(getAsk(dbPath, result.askId).threadTs, '111.111')
+  } finally {
+    restore()
+  }
+})
+
+test('createAsk without a thread target still DMs, unchanged from before this feature', async () => {
+  const dbPath = tempDbPath()
+  const posted = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    if (url.toString().includes('conversations.open')) {
+      return { status: 200, headers: new Headers(), url: url.toString(), text: async () => JSON.stringify({ ok: true, channel: { id: 'D999' } }) }
+    }
+    const body = parseFormBody(init.body)
+    posted.push(body)
+    return { status: 200, headers: new Headers(), url: url.toString(), text: async () => JSON.stringify({ ok: true, channel: body.channel, ts: '200.002' }) }
+  }
+  try {
+    const result = await createAsk({ botToken: 'xoxb-test-dm', userId: 'U1', question: 'hi', dbPath })
+    assert.equal(result.ok, true)
+    assert.equal(result.channel, 'D999')
+    assert.equal(result.threadTs, '200.002')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('createAsk rejects channel without threadTs (and vice versa) rather than guessing', async () => {
+  const dbPath = tempDbPath()
+  const result = await createAsk({ botToken: 'xoxb-test', userId: 'U1', question: 'hi', dbPath, channel: 'C1' })
+  assert.equal(result.ok, false)
+  assert.equal(result.error, 'channel-and-threadTs-required-together')
 })

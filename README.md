@@ -29,7 +29,9 @@ send nothing) and `--json` (structured `{ ok, ... }` output, non-zero exit on fa
 
 Built for local/team use now: outbound posting, DMs, channel/thread reads, scheduling,
 human approval/questions over DM, Socket Mode listening, listener daemon control,
-progress-message updates, and a locked-down Slackbot remote MCP surface.
+progress-message updates, a locked-down Slackbot remote MCP surface, and ACP-driven
+agent sessions where a Slack thread *is* a live session with Claude/Codex/OpenCode/
+Gemini CLI (see "ACP agent sessions" below).
 
 For the feature matrix and exact on/off switches, see `FEATURES.md`.
 
@@ -185,6 +187,41 @@ only `slack_doctor` unless `slackbotMcp.allowedTools` is set. Channel read/write
 are additionally restricted by `remote.readableChannels` and `remote.postableChannels`;
 DMs, human ask/approval, post-as-user, search, App Home publishing, scheduling, progress
 mutation, and agent-session creation are absent from the remote registry by construction.
+
+## ACP agent sessions — a Slack thread is a live session (PLAN D23–D27)
+
+This is the reverse of the MCP surfaces above: instead of an agent calling a Slack
+tool, a Slack thread becomes a live [Agent Client Protocol](https://agentclientprotocol.com)
+(ACP v1) session with a real coding agent (Claude via `@agentclientprotocol/
+claude-agent-acp`, Codex via `@agentclientprotocol/codex-acp`, OpenCode via
+`opencode acp`, or Gemini CLI via `gemini --acp`). A human replies in the thread,
+that becomes a prompt into the agent; the agent's streamed output, tool calls, and
+permission requests render back into the same thread.
+
+Not every message starts a session — only an explicit `/agent-session start` slash
+command does, and only for `config.owner` or someone in the new
+`agentSessions.allowedUsers` allow-list (D24). This is a materially bigger capability
+than posting messages: the agent can read/write files and run real shell commands, via
+`fs/*`/`terminal/*` requests this bridge answers on the agent's behalf, scoped to a
+named repo registry (`core/repos.js`, D23) — a session can never reach a path outside
+the repo it was started against.
+
+```bash
+node cli/repos.js add team-slack-bridge --path /absolute/path/to/team-slack-bridge
+```
+
+```json
+"agentSessions": { "enabled": true, "allowedUsers": ["U0123ABC"] }
+```
+
+```
+/agent-session start --backend claude --repo team-slack-bridge fix the flaky test in core/db.js
+```
+
+`--backend` defaults to `claude`; `--repo` defaults to whichever repo is registered as
+default. Permission requests render as Approve/Deny buttons in the thread itself (not
+a DM) using the same primitive as `core/ask.js`'s existing human-in-the-loop flow.
+Local-profile-only (D26) — this never touches `mcp/tools.remote.js`/`mcp/http.js`.
 
 ## Connecting multiple AI coding harnesses / multiple Slack accounts (PLAN D21/D22)
 

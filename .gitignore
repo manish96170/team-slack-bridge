@@ -8,4 +8,5 @@ node_modules/
 .mcp-daemon.log
 slack-config.json
 accounts.json
+repos.json
 dist/

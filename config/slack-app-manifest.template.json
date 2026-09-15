@@ -18,6 +18,12 @@
         "description": "Set team-slack-bridge progress verbosity",
         "usage_hint": "low|medium|high",
         "should_escape": false
+      },
+      {
+        "command": "/agent-session",
+        "description": "Start an ACP agent session in this thread (owner/allowlisted users only)",
+        "usage_hint": "start [--backend name] [--repo name] <task>",
+        "should_escape": false
       }
     ]
   },

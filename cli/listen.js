@@ -31,6 +31,7 @@ if (!config.owner?.slackUserId) {
 }
 
 const listener = createListener({
+  env,
   botToken: env.SLACK_BOT_TOKEN,
   appToken: env.SLACK_APP_TOKEN,
   config,

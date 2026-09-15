@@ -8,6 +8,7 @@ import { callSlack } from './slack.js'
 import { getOpenAcpStatus } from './openacp.js'
 import { getSlackbotMcpStatus } from './slackbot-mcp.js'
 import { listAccounts } from './accounts.js'
+import { listRepos } from './repos.js'
 
 function uniqueChannels(config) {
   return [
@@ -91,6 +92,7 @@ export async function doctor({ env, config, profile = 'local', slackCall = callS
     slackbotMcp: getSlackbotMcpStatus(config),
     localMcpDaemon: config.localMcpDaemon,
     accounts: listAccounts(),
+    repos: listRepos(),
     listener: {
       configured: !!(env.SLACK_BOT_TOKEN && env.SLACK_APP_TOKEN && config.owner?.slackUserId),
       hasOwner: !!config.owner?.slackUserId,

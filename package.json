@@ -19,6 +19,7 @@
     "mcp": "node mcp/server.js",
     "mcp-daemon": "node cli/mcp-daemon.js",
     "accounts": "node cli/accounts.js",
+    "repos": "node cli/repos.js",
     "build:sea": "node scripts/build-sea.mjs",
     "listen": "node cli/listen.js",
     "daemon": "node cli/daemon.js",
@@ -47,6 +48,7 @@
     "LICENSE"
   ],
   "dependencies": {
+    "@agentclientprotocol/sdk": "^1.4.0",
     "@slack/bolt": "^5.1.0",
     "@slack/web-api": "^8.1.1"
   },

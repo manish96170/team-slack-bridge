@@ -46,11 +46,21 @@ function buildApprovalBlocks(askId, question, options) {
 
 // Posts the question and records a `pending` row. Does not wait — call
 // `waitForAnswer` (or the `ask()` convenience wrapper) for that.
-export async function createAsk({ botToken, userId, question, kind = 'question', options = ['Approve', 'Deny'], dbPath }) {
+//
+// `channel`+`threadTs` (both required together) target an EXISTING thread
+// instead of DM'ing — used by ACP session permission requests, which must
+// render in the session's own thread, not a DM (PLAN: ACP thread sessions).
+// Correlation for a thread-target ask uses the GIVEN threadTs (the thread's
+// root), not this reply's own ts, since later replies in that thread carry
+// the root's thread_ts, not this message's.
+export async function createAsk({ botToken, userId, question, kind = 'question', options = ['Approve', 'Deny'], dbPath, channel: targetChannel, threadTs: targetThreadTs }) {
   if (!botToken) return { ok: false, error: 'no-token', retryable: false }
   if (!userId || !question) return { ok: false, error: 'userId-and-question-required', retryable: false }
   if (kind !== 'question' && kind !== 'approval') return { ok: false, error: 'kind-must-be-question-or-approval', retryable: false }
   if (!dbPath) return { ok: false, error: 'db-path-required', retryable: false }
+  if ((targetChannel && !targetThreadTs) || (!targetChannel && targetThreadTs)) {
+    return { ok: false, error: 'channel-and-threadTs-required-together', retryable: false }
+  }
 
   const askId = randomUUID()
   const db = getDb(dbPath)
@@ -63,19 +73,26 @@ export async function createAsk({ botToken, userId, question, kind = 'question',
     new Date().toISOString()
   )
 
-  const opened = await resolveDmChannel({ token: botToken, userId, dbPath })
-  if (!opened.ok) {
-    db.prepare("UPDATE asks SET status = 'failed', answer = ?, answered_at = ? WHERE id = ?").run(
-      JSON.stringify({ error: opened.error }),
-      new Date().toISOString(),
-      askId
-    )
-    return opened
+  let channel = targetChannel
+  if (!channel) {
+    const opened = await resolveDmChannel({ token: botToken, userId, dbPath })
+    if (!opened.ok) {
+      db.prepare("UPDATE asks SET status = 'failed', answer = ?, answered_at = ? WHERE id = ?").run(
+        JSON.stringify({ error: opened.error }),
+        new Date().toISOString(),
+        askId
+      )
+      return opened
+    }
+    channel = opened.channel.id
   }
-  const channel = opened.channel.id
 
-  const body =
-    kind === 'approval' ? { channel, text: question, blocks: buildApprovalBlocks(askId, question, options) } : { channel, text: question }
+  const body = {
+    channel,
+    text: question,
+    ...(kind === 'approval' ? { blocks: buildApprovalBlocks(askId, question, options) } : {}),
+    ...(targetThreadTs ? { thread_ts: targetThreadTs } : {}),
+  }
 
   const posted = await callSlack('chat.postMessage', botToken, body)
   if (!posted.ok) {
@@ -88,9 +105,10 @@ export async function createAsk({ botToken, userId, question, kind = 'question',
     return posted
   }
 
-  db.prepare('UPDATE asks SET channel = ?, thread_ts = ? WHERE id = ?').run(channel, posted.ts, askId)
+  const threadTs = targetThreadTs || posted.ts
+  db.prepare('UPDATE asks SET channel = ?, thread_ts = ? WHERE id = ?').run(channel, threadTs, askId)
 
-  return { ok: true, askId, channel, threadTs: posted.ts }
+  return { ok: true, askId, channel, threadTs }
 }
 
 function rowToAsk(row) {
@@ -167,12 +185,12 @@ export async function pollThreadForReply({ token, channel, threadTs, timeoutSeco
 }
 
 // The convenience wrapper an MCP tool / CLI command actually calls.
-export async function ask({ botToken, userId, question, kind = 'question', options, dbPath, timeoutSeconds = 300, captureMode = 'listener' }) {
+export async function ask({ botToken, userId, question, kind = 'question', options, dbPath, timeoutSeconds = 300, captureMode = 'listener', channel, threadTs }) {
   if (captureMode === 'poll' && kind === 'approval') {
     return { ok: false, error: 'approval-buttons-require-the-listener-not-pollable', retryable: false }
   }
 
-  const created = await createAsk({ botToken, userId, question, kind, options, dbPath })
+  const created = await createAsk({ botToken, userId, question, kind, options, dbPath, channel, threadTs })
   if (!created.ok) return created
 
   if (captureMode === 'poll') {

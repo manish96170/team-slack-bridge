@@ -16,7 +16,7 @@ export function loadConfig(path) {
       outputMode: 'medium',
       http: { enabled: false, port: 8917, verifySlackSignatures: true },
       slashCommands: { enabled: false, outputModeCommand: '/outputmode' },
-      agentSessions: { enabled: false, autoCreateSession: false, provider: 'none' },
+      agentSessions: { enabled: false, autoCreateSession: false, provider: 'none', allowedUsers: [] },
       openacp: { enabled: false, adapterPackage: '@openacp/slack-adapter', autoCreateSession: false },
       slackbotMcp: normalizeSlackbotMcp(),
       remote: { postableChannels: [], readableChannels: [] },
@@ -43,6 +43,10 @@ export function loadConfig(path) {
       enabled: !!raw.agentSessions?.enabled,
       autoCreateSession: !!raw.agentSessions?.autoCreateSession,
       provider: raw.agentSessions?.provider || 'none',
+      // D24 — who may start an ACP agent session (any trigger). Owner is
+      // always allowed on top of this list; never gated by channel
+      // membership alone, since a session can run real shell commands.
+      allowedUsers: raw.agentSessions?.allowedUsers || [],
     },
     openacp: {
       enabled: !!raw.openacp?.enabled,

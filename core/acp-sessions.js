@@ -2,6 +2,7 @@
 // D23/D24/D25). One Slack thread == one ACP session, multiplexed on top of
 // core/acp-client.js's per-backend persistent connections.
 
+import { methods } from '@agentclientprotocol/sdk'
 import { getBackendConnection, registerSession, unregisterSession } from './acp-client.js'
 import { getBackend, DEFAULT_BACKEND } from './acp-backends.js'
 import { resolveRepoPath } from './repos.js'
@@ -21,23 +22,59 @@ function sessionKey(channel, threadTs) {
 }
 
 // Shared by every trigger (slash command, app-mention keyword, message
-// shortcut free-text) — `--backend name` / `--repo name` flags anywhere in
-// the text, remaining words are the task.
+// shortcut free-text) — `--backend name` / `--repo name` / `--model name`
+// flags anywhere in the text, remaining words are the task.
 export function parseAgentSessionCommand(text) {
   const tokens = (text || '').trim().split(/\s+/).filter(Boolean)
   let backendName = DEFAULT_BACKEND
   let repoName
+  let modelName
   const remaining = []
   for (let i = 0; i < tokens.length; i++) {
     if (tokens[i] === '--backend' && tokens[i + 1]) {
       backendName = tokens[++i]
     } else if (tokens[i] === '--repo' && tokens[i + 1]) {
       repoName = tokens[++i]
+    } else if (tokens[i] === '--model' && tokens[i + 1]) {
+      modelName = tokens[++i]
     } else {
       remaining.push(tokens[i])
     }
   }
-  return { backendName, repoName, task: remaining.join(' ').trim() }
+  return { backendName, repoName, modelName, task: remaining.join(' ').trim() }
+}
+
+// ACP's session/new response can advertise selectable config options
+// (schema: NewSessionResponse.configOptions) — a "model" category option is
+// the protocol-native way to pick a model, discovered at runtime rather than
+// hardcoded per backend (each backend's actual option id/choices are its
+// own business; this just looks for whichever one is tagged "model").
+function flattenSelectOptions(options) {
+  const flat = []
+  for (const entry of options || []) {
+    if (entry.group) flat.push(...entry.options)
+    else flat.push(entry)
+  }
+  return flat
+}
+
+function findModelConfigOption(configOptions) {
+  return (configOptions || []).find(option => option.category === 'model' && option.options)
+}
+
+export async function applyModelSelection({ connection, activeSession, modelName }) {
+  const option = findModelConfigOption(activeSession.newSessionResponse?.configOptions)
+  if (!option) return { ok: false, error: 'backend-does-not-advertise-a-model-selector', retryable: false }
+  const choices = flattenSelectOptions(option.options)
+  const needle = modelName.toLowerCase()
+  const match = choices.find(choice => choice.value.toLowerCase() === needle || choice.name.toLowerCase() === needle)
+  if (!match) return { ok: false, error: 'unknown-model', available: choices.map(choice => choice.name), retryable: false }
+  await connection.agent.request(methods.agent.session.setConfigOption, {
+    sessionId: activeSession.sessionId,
+    configId: option.id,
+    value: match.value,
+  })
+  return { ok: true, model: match.name }
 }
 
 // D24 — session-start gate. Owner is always allowed; everyone else needs
@@ -76,6 +113,10 @@ function describeUpdate(update) {
   return null
 }
 
+function sessionLabel(entry) {
+  return `Agent session (${entry.backend.name}${entry.model ? ` · ${entry.model}` : ''} · ${entry.repoName})`
+}
+
 // Runs one session/prompt turn, streaming session/update notifications into
 // a single debounced progress-message edit rather than one edit per chunk
 // (no rate-limit-aware coalescing exists in core/progress.js itself — this
@@ -92,7 +133,7 @@ async function runPromptTurn(entry, promptText) {
         token: entry.env.SLACK_BOT_TOKEN,
         channel: entry.channel,
         ts: entry.progressTs,
-        label: `Agent session (${entry.backend.name} · ${entry.repoName})`,
+        label: sessionLabel(entry),
         detail: entry.accumulatedText.slice(-MAX_RENDERED_CHARS) || 'working…',
         config: entry.config,
       })
@@ -109,7 +150,7 @@ async function runPromptTurn(entry, promptText) {
         token: entry.env.SLACK_BOT_TOKEN,
         channel: entry.channel,
         ts: entry.progressTs,
-        label: `Agent session (${entry.backend.name} · ${entry.repoName})`,
+        label: sessionLabel(entry),
         detail: entry.accumulatedText.slice(-MAX_RENDERED_CHARS) || message.response.stopReason,
         ok: message.response.stopReason === 'end_turn',
         config: entry.config,
@@ -124,7 +165,7 @@ async function runPromptTurn(entry, promptText) {
   }
 }
 
-export async function startAgentSession({ env, config, dbPath, channel, threadTs, backendName, repoName, task, requestedBy }) {
+export async function startAgentSession({ env, config, dbPath, channel, threadTs, backendName, repoName, modelName, task, requestedBy }) {
   if (!isAllowedToStartSession(config, requestedBy)) {
     return { ok: false, error: 'not-allowed-to-start-agent-session', retryable: false }
   }
@@ -149,6 +190,28 @@ export async function startAgentSession({ env, config, dbPath, channel, threadTs
   if (!progressPost.ok) return progressPost
   const anchorThreadTs = threadTs || progressPost.ts
 
+  const { connection, sessions } = await getBackendConnection(backend)
+  const activeSession = await connection.agent.buildSession(repo.path).start()
+
+  let appliedModel
+  if (modelName) {
+    const applied = await applyModelSelection({ connection, activeSession, modelName })
+    if (!applied.ok) {
+      activeSession.dispose()
+      await finishProgress({
+        token: env.SLACK_BOT_TOKEN,
+        channel,
+        ts: progressPost.ts,
+        label: `Agent session (${backend.name} · ${repo.name})`,
+        detail: `Could not start: ${applied.error}${applied.available ? ` (available: ${applied.available.join(', ')})` : ''}`,
+        ok: false,
+        config,
+      })
+      return applied
+    }
+    appliedModel = applied.model
+  }
+
   const created = createAgentSession({
     dbPath,
     config,
@@ -156,12 +219,12 @@ export async function startAgentSession({ env, config, dbPath, channel, threadTs
     slackChannel: channel,
     slackThreadTs: anchorThreadTs,
     kind: 'acp-session',
-    metadata: { backend: backend.name, repoName: repo.name, repoPath: repo.path, requestedBy },
+    metadata: { backend: backend.name, repoName: repo.name, repoPath: repo.path, requestedBy, model: appliedModel },
   })
-  if (!created.ok) return created
-
-  const { connection, sessions } = await getBackendConnection(backend)
-  const activeSession = await connection.agent.buildSession(repo.path).start()
+  if (!created.ok) {
+    activeSession.dispose()
+    return created
+  }
 
   registerSession(sessions, activeSession.sessionId, {
     fsHandlers: createFsHandlers(repo.path),
@@ -169,7 +232,7 @@ export async function startAgentSession({ env, config, dbPath, channel, threadTs
     onPermissionRequest: params => handlePermissionRequest({ env, dbPath, channel, threadTs: anchorThreadTs, requestedBy, params }),
   })
 
-  const entry = { activeSession, backend, sessions, repoName: repo.name, progressTs: progressPost.ts, channel, env, config, accumulatedText: '' }
+  const entry = { activeSession, backend, sessions, repoName: repo.name, model: appliedModel, progressTs: progressPost.ts, channel, env, config, accumulatedText: '' }
   activeSessionsByKey.set(sessionKey(channel, anchorThreadTs), entry)
 
   const response = await runPromptTurn(entry, task)

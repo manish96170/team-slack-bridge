@@ -215,14 +215,20 @@ node cli/repos.js add team-slack-bridge --path /absolute/path/to/team-slack-brid
 "agentSessions": { "enabled": true, "allowedUsers": ["U0123ABC"], "mentionKeyword": "start session" }
 ```
 
-Three ways to start one, all equivalent:
-1. **Slash command**: `/agent-session start --backend claude --repo team-slack-bridge fix the flaky test in core/db.js`
+Three ways to start one, all equivalent, all accepting an optional `--model name`:
+1. **Slash command**: `/agent-session start --backend claude --repo team-slack-bridge --model opus fix the flaky test in core/db.js`
 2. **@mention with the configured keyword** (`agentSessions.mentionKeyword`, default `"start session"`):
    `@team-slack-bridge start session --repo team-slack-bridge fix the flaky test`
 3. **Message shortcut** — right-click any message → "Start agent session" → a modal
-   asks for backend/repo/task; the session anchors to that message's thread (requires
-   adding the `shortcuts` entry from `config/slack-app-manifest.template.json` to your
-   installed app's manifest).
+   asks for backend/repo/model/task; the session anchors to that message's thread
+   (requires adding the `shortcuts` entry from
+   `config/slack-app-manifest.template.json` to your installed app's manifest).
+
+Model selection (D28) is protocol-driven, not a hardcoded per-backend table: ACP's
+`session/new` response can advertise selectable model choices, and `--model` matches
+against whichever ones the backend actually offers (by name or raw id) — an unknown
+name fails the session start with the real list of what that backend supports, rather
+than silently picking something else.
 
 `--backend` defaults to `claude`; `--repo` defaults to whichever repo is registered as
 default. Permission requests render as Approve/Deny buttons in the thread itself (not

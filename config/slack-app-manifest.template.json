@@ -22,7 +22,7 @@
       {
         "command": "/agent-session",
         "description": "Start an ACP agent session in this thread (owner/allowlisted users only)",
-        "usage_hint": "start [--backend name] [--repo name] <task>",
+        "usage_hint": "start [--backend name] [--repo name] [--model name] <task>",
         "should_escape": false
       }
     ],

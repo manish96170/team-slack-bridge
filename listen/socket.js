@@ -57,7 +57,7 @@ export function createListener({ env, botToken, appToken, config, configPath, db
     const mentionKeyword = config.agentSessions?.mentionKeyword
     const stripped = stripMentionPrefix(event.text)
     if (dbPath && config.agentSessions?.enabled && mentionKeyword && stripped.toLowerCase().startsWith(mentionKeyword.toLowerCase())) {
-      const { backendName, repoName, task } = parseAgentSessionCommand(stripped.slice(mentionKeyword.length))
+      const { backendName, repoName, modelName, task } = parseAgentSessionCommand(stripped.slice(mentionKeyword.length))
       if (task) {
         await startAgentSession({
           env,
@@ -67,6 +67,7 @@ export function createListener({ env, botToken, appToken, config, configPath, db
           threadTs: event.thread_ts,
           backendName,
           repoName,
+          modelName,
           task,
           requestedBy: event.user,
         })
@@ -142,7 +143,7 @@ export function createListener({ env, botToken, appToken, config, configPath, db
   })
 
   // Starts an ACP agent session (PLAN: ACP thread sessions, D23/D24).
-  // `/agent-session start [--backend name] [--repo name] <task>` — the
+  // `/agent-session start [--backend name] [--repo name] [--model name] <task>` — the
   // resulting message's thread is the session; further replies in it are
   // routed by the `app.message` short-circuit above, not classify(). Gated
   // on config.agentSessions.enabled (feature toggle) AND D24's allowlist
@@ -155,10 +156,10 @@ export function createListener({ env, botToken, appToken, config, configPath, db
     }
     const [subcommand, ...rest] = (command.text || '').trim().split(/\s+/)
     if (subcommand !== 'start') {
-      await respond({ response_type: 'ephemeral', text: 'Usage: /agent-session start [--backend name] [--repo name] <task>' })
+      await respond({ response_type: 'ephemeral', text: 'Usage: /agent-session start [--backend name] [--repo name] [--model name] <task>' })
       return
     }
-    const { backendName, repoName, task } = parseAgentSessionCommand(rest.join(' '))
+    const { backendName, repoName, modelName, task } = parseAgentSessionCommand(rest.join(' '))
     if (!task) {
       await respond({ response_type: 'ephemeral', text: 'A task description is required: /agent-session start <task>' })
       return
@@ -171,6 +172,7 @@ export function createListener({ env, botToken, appToken, config, configPath, db
       threadTs: command.thread_ts,
       backendName,
       repoName,
+      modelName,
       task,
       requestedBy: command.user_id,
     })
@@ -219,6 +221,13 @@ export function createListener({ env, botToken, appToken, config, configPath, db
           },
           {
             type: 'input',
+            block_id: 'model',
+            optional: true,
+            label: { type: 'plain_text', text: 'Model (blank = backend default)' },
+            element: { type: 'plain_text_input', action_id: 'value' },
+          },
+          {
+            type: 'input',
             block_id: 'task',
             label: { type: 'plain_text', text: 'Task' },
             element: { type: 'plain_text_input', action_id: 'value', multiline: true },
@@ -234,9 +243,10 @@ export function createListener({ env, botToken, appToken, config, configPath, db
     const values = view.state.values
     const backendName = values.backend?.value?.selected_option?.value
     const repoName = values.repo?.value?.value || undefined
+    const modelName = values.model?.value?.value || undefined
     const task = values.task?.value?.value
     if (!channel || !threadTs || !task) return
-    await startAgentSession({ env, config, dbPath, channel, threadTs, backendName, repoName, task, requestedBy: body.user.id })
+    await startAgentSession({ env, config, dbPath, channel, threadTs, backendName, repoName, modelName, task, requestedBy: body.user.id })
   })
 
   // Republishes the feature-guide Home tab whenever someone opens it —

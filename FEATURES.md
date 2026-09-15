@@ -339,6 +339,14 @@ node cli/agent-session.js create --slack-channel C0123 --slack-thread-ts "123.45
 
 Remote Slackbot MCP does not expose agent-session creation.
 
+**Not the same thing as ACP agent sessions** (README's "ACP agent sessions — a Slack
+thread is a live session" section, PLAN D23–D27) — that feature reuses this same
+`agentSessions` config block and the same `agent_sessions` table (via its `metadata`
+column), but for a different purpose: a live, two-way ACP connection to a real coding
+agent, gated by `agentSessions.allowedUsers` (D24) and started via `/agent-session
+start`, an @mention with `agentSessions.mentionKeyword`, or a message shortcut — not
+this section's manual local-record-only `cli/agent-session.js create`.
+
 ### OpenACP adapter
 
 Default:

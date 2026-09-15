@@ -3,7 +3,7 @@
 // core/acp-client.js's per-backend persistent connections.
 
 import { getBackendConnection, registerSession, unregisterSession } from './acp-client.js'
-import { getBackend } from './acp-backends.js'
+import { getBackend, DEFAULT_BACKEND } from './acp-backends.js'
 import { resolveRepoPath } from './repos.js'
 import { createFsHandlers } from './acp-fs.js'
 import { createTerminalHandlers } from './acp-terminal.js'
@@ -18,6 +18,26 @@ const activeSessionsByKey = new Map()
 
 function sessionKey(channel, threadTs) {
   return `${channel}:${threadTs}`
+}
+
+// Shared by every trigger (slash command, app-mention keyword, message
+// shortcut free-text) — `--backend name` / `--repo name` flags anywhere in
+// the text, remaining words are the task.
+export function parseAgentSessionCommand(text) {
+  const tokens = (text || '').trim().split(/\s+/).filter(Boolean)
+  let backendName = DEFAULT_BACKEND
+  let repoName
+  const remaining = []
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i] === '--backend' && tokens[i + 1]) {
+      backendName = tokens[++i]
+    } else if (tokens[i] === '--repo' && tokens[i + 1]) {
+      repoName = tokens[++i]
+    } else {
+      remaining.push(tokens[i])
+    }
+  }
+  return { backendName, repoName, task: remaining.join(' ').trim() }
 }
 
 // D24 — session-start gate. Owner is always allowed; everyone else needs

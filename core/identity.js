@@ -16,7 +16,7 @@ export function loadConfig(path) {
       outputMode: 'medium',
       http: { enabled: false, port: 8917, verifySlackSignatures: true },
       slashCommands: { enabled: false, outputModeCommand: '/outputmode' },
-      agentSessions: { enabled: false, autoCreateSession: false, provider: 'none', allowedUsers: [] },
+      agentSessions: { enabled: false, autoCreateSession: false, provider: 'none', allowedUsers: [], mentionKeyword: 'start session' },
       openacp: { enabled: false, adapterPackage: '@openacp/slack-adapter', autoCreateSession: false },
       slackbotMcp: normalizeSlackbotMcp(),
       remote: { postableChannels: [], readableChannels: [] },
@@ -47,6 +47,10 @@ export function loadConfig(path) {
       // always allowed on top of this list; never gated by channel
       // membership alone, since a session can run real shell commands.
       allowedUsers: raw.agentSessions?.allowedUsers || [],
+      // Phase 2 trigger — an @mention whose text starts with this phrase
+      // (case-insensitive) starts a session instead of a normal classified
+      // proposal. Empty string disables the mention trigger entirely.
+      mentionKeyword: raw.agentSessions?.mentionKeyword ?? 'start session',
     },
     openacp: {
       enabled: !!raw.openacp?.enabled,

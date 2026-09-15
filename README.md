@@ -198,25 +198,31 @@ claude-agent-acp`, Codex via `@agentclientprotocol/codex-acp`, OpenCode via
 that becomes a prompt into the agent; the agent's streamed output, tool calls, and
 permission requests render back into the same thread.
 
-Not every message starts a session — only an explicit `/agent-session start` slash
-command does, and only for `config.owner` or someone in the new
-`agentSessions.allowedUsers` allow-list (D24). This is a materially bigger capability
-than posting messages: the agent can read/write files and run real shell commands, via
-`fs/*`/`terminal/*` requests this bridge answers on the agent's behalf, scoped to a
-named repo registry (`core/repos.js`, D23) — a session can never reach a path outside
-the repo it was started against.
+Not every message starts a session — only one of three explicit triggers does, and
+only for `config.owner` or someone in the `agentSessions.allowedUsers` allow-list
+(D24), checked inside `startAgentSession` itself regardless of which trigger reached
+it. This is a materially bigger capability than posting messages: the agent can
+read/write files and run real shell commands, via `fs/*`/`terminal/*` requests this
+bridge answers on the agent's behalf, scoped to a named repo registry
+(`core/repos.js`, D23) — a session can never reach a path outside the repo it was
+started against.
 
 ```bash
 node cli/repos.js add team-slack-bridge --path /absolute/path/to/team-slack-bridge
 ```
 
 ```json
-"agentSessions": { "enabled": true, "allowedUsers": ["U0123ABC"] }
+"agentSessions": { "enabled": true, "allowedUsers": ["U0123ABC"], "mentionKeyword": "start session" }
 ```
 
-```
-/agent-session start --backend claude --repo team-slack-bridge fix the flaky test in core/db.js
-```
+Three ways to start one, all equivalent:
+1. **Slash command**: `/agent-session start --backend claude --repo team-slack-bridge fix the flaky test in core/db.js`
+2. **@mention with the configured keyword** (`agentSessions.mentionKeyword`, default `"start session"`):
+   `@team-slack-bridge start session --repo team-slack-bridge fix the flaky test`
+3. **Message shortcut** — right-click any message → "Start agent session" → a modal
+   asks for backend/repo/task; the session anchors to that message's thread (requires
+   adding the `shortcuts` entry from `config/slack-app-manifest.template.json` to your
+   installed app's manifest).
 
 `--backend` defaults to `claude`; `--repo` defaults to whichever repo is registered as
 default. Permission requests render as Approve/Deny buttons in the thread itself (not

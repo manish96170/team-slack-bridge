@@ -25,6 +25,14 @@
         "usage_hint": "start [--backend name] [--repo name] <task>",
         "should_escape": false
       }
+    ],
+    "shortcuts": [
+      {
+        "name": "Start agent session",
+        "type": "message",
+        "callback_id": "start_agent_session",
+        "description": "Start an ACP agent session anchored to this message's thread (owner/allowlisted users only)"
+      }
     ]
   },
   "oauth_config": {

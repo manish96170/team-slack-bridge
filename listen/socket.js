@@ -21,24 +21,13 @@ import { recordAnswer, recordAnswerByThread } from '../core/ask.js'
 import { publishHome } from '../core/home.js'
 import { setOutputModeInConfig } from '../core/config-write.js'
 import { maybeCreateAgentSessionForEvent } from '../core/agent-sessions.js'
-import { startAgentSession, routeThreadReply, hasActiveSession } from '../core/acp-sessions.js'
-import { listBackendNames, DEFAULT_BACKEND } from '../core/acp-backends.js'
+import { startAgentSession, routeThreadReply, hasActiveSession, parseAgentSessionCommand } from '../core/acp-sessions.js'
+import { listBackendNames } from '../core/acp-backends.js'
 
-function parseAgentSessionCommand(text) {
-  const tokens = (text || '').trim().split(/\s+/)
-  let backendName = DEFAULT_BACKEND
-  let repoName
-  const remaining = []
-  for (let i = 0; i < tokens.length; i++) {
-    if (tokens[i] === '--backend' && tokens[i + 1]) {
-      backendName = tokens[++i]
-    } else if (tokens[i] === '--repo' && tokens[i + 1]) {
-      repoName = tokens[++i]
-    } else {
-      remaining.push(tokens[i])
-    }
-  }
-  return { backendName, repoName, task: remaining.join(' ').trim() }
+// Strips the leading "<@BOTID> " Slack always prepends to app_mention text,
+// so keyword matching below sees only what the human actually typed.
+export function stripMentionPrefix(text) {
+  return (text || '').replace(/^\s*<@[A-Z0-9]+>\s*/, '')
 }
 
 // `dbPath` is optional — pass it to capture ask/approval answers
@@ -61,6 +50,30 @@ export function createListener({ env, botToken, appToken, config, configPath, db
   }
 
   app.event('app_mention', async ({ event }) => {
+    // An @mention starting with the configured keyword is a session-start
+    // trigger (PLAN: ACP thread sessions, Phase 2), not a new inbound
+    // proposal to classify — same immediacy as the slash command, since
+    // D24's allowlist (not classify()) is the actual trust boundary here.
+    const mentionKeyword = config.agentSessions?.mentionKeyword
+    const stripped = stripMentionPrefix(event.text)
+    if (dbPath && config.agentSessions?.enabled && mentionKeyword && stripped.toLowerCase().startsWith(mentionKeyword.toLowerCase())) {
+      const { backendName, repoName, task } = parseAgentSessionCommand(stripped.slice(mentionKeyword.length))
+      if (task) {
+        await startAgentSession({
+          env,
+          config,
+          dbPath,
+          channel: event.channel,
+          threadTs: event.thread_ts,
+          backendName,
+          repoName,
+          task,
+          requestedBy: event.user,
+        })
+        return
+      }
+    }
+
     await dispatch(
       classify(
         { type: 'app_mention', channel: event.channel, user: event.user, text: event.text, ts: event.ts, thread_ts: event.thread_ts },
@@ -164,6 +177,66 @@ export function createListener({ env, botToken, appToken, config, configPath, db
     if (!result.ok) {
       await respond({ response_type: 'ephemeral', text: `Could not start agent session: ${result.error}` })
     }
+  })
+
+  // Message shortcut (PLAN: ACP thread sessions, Phase 2) — right-click a
+  // message -> "Start agent session". Opens a modal for backend/repo/task;
+  // actual session-start happens on submission (app.view below), gated the
+  // same way as every other trigger (config.agentSessions.enabled + D24 —
+  // the modal itself is not a trust boundary, startAgentSession's own
+  // allowlist check is).
+  app.shortcut('start_agent_session', async ({ shortcut, ack, client }) => {
+    await ack()
+    if (!config.agentSessions?.enabled) return
+    const threadTs = shortcut.message?.thread_ts || shortcut.message_ts || shortcut.message?.ts
+    await client.views.open({
+      trigger_id: shortcut.trigger_id,
+      view: {
+        type: 'modal',
+        callback_id: 'start_agent_session_modal',
+        private_metadata: JSON.stringify({ channel: shortcut.channel?.id, threadTs }),
+        title: { type: 'plain_text', text: 'Start agent session' },
+        submit: { type: 'plain_text', text: 'Start' },
+        close: { type: 'plain_text', text: 'Cancel' },
+        blocks: [
+          {
+            type: 'input',
+            block_id: 'backend',
+            label: { type: 'plain_text', text: 'Backend' },
+            element: {
+              type: 'static_select',
+              action_id: 'value',
+              initial_option: { text: { type: 'plain_text', text: 'claude' }, value: 'claude' },
+              options: listBackendNames().map(name => ({ text: { type: 'plain_text', text: name }, value: name })),
+            },
+          },
+          {
+            type: 'input',
+            block_id: 'repo',
+            optional: true,
+            label: { type: 'plain_text', text: 'Repo (blank = default)' },
+            element: { type: 'plain_text_input', action_id: 'value' },
+          },
+          {
+            type: 'input',
+            block_id: 'task',
+            label: { type: 'plain_text', text: 'Task' },
+            element: { type: 'plain_text_input', action_id: 'value', multiline: true },
+          },
+        ],
+      },
+    })
+  })
+
+  app.view('start_agent_session_modal', async ({ view, ack, body }) => {
+    await ack()
+    const { channel, threadTs } = JSON.parse(view.private_metadata || '{}')
+    const values = view.state.values
+    const backendName = values.backend?.value?.selected_option?.value
+    const repoName = values.repo?.value?.value || undefined
+    const task = values.task?.value?.value
+    if (!channel || !threadTs || !task) return
+    await startAgentSession({ env, config, dbPath, channel, threadTs, backendName, repoName, task, requestedBy: body.user.id })
   })
 
   // Republishes the feature-guide Home tab whenever someone opens it —

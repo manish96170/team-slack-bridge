@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { isAllowedToStartSession, startAgentSession } from '../core/acp-sessions.js'
+import { isAllowedToStartSession, startAgentSession, parseAgentSessionCommand } from '../core/acp-sessions.js'
 
 function withTempHome(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'tsb-acp-sessions-'))
@@ -84,3 +84,24 @@ test('startAgentSession rejects an unregistered repo for an allowed user with a 
     assert.equal(result.ok, false)
     assert.equal(result.error, 'repo-not-found')
   }))
+
+test('parseAgentSessionCommand defaults to the claude backend and no repo when neither flag is given', () => {
+  assert.deepEqual(parseAgentSessionCommand('fix the flaky test'), { backendName: 'claude', repoName: undefined, task: 'fix the flaky test' })
+})
+
+test('parseAgentSessionCommand extracts --backend and --repo regardless of position, leaving the rest as the task', () => {
+  assert.deepEqual(parseAgentSessionCommand('--backend codex fix --repo team-slack-bridge the flaky test'), {
+    backendName: 'codex',
+    repoName: 'team-slack-bridge',
+    task: 'fix the flaky test',
+  })
+})
+
+test('parseAgentSessionCommand with only flags and no task text returns an empty task', () => {
+  assert.deepEqual(parseAgentSessionCommand('--backend gemini --repo x'), { backendName: 'gemini', repoName: 'x', task: '' })
+})
+
+test('parseAgentSessionCommand tolerates empty/whitespace-only input', () => {
+  assert.deepEqual(parseAgentSessionCommand(''), { backendName: 'claude', repoName: undefined, task: '' })
+  assert.deepEqual(parseAgentSessionCommand('   '), { backendName: 'claude', repoName: undefined, task: '' })
+})

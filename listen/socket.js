@@ -23,6 +23,9 @@ import { setOutputModeInConfig } from '../core/config-write.js'
 import { maybeCreateAgentSessionForEvent } from '../core/agent-sessions.js'
 import { startAgentSession, routeThreadReply, closeAgentSession, parseAgentSessionCommand } from '../core/acp-sessions.js'
 import { listBackendNames } from '../core/acp-backends.js'
+import { reply } from '../core/post.js'
+
+const SESSION_STOP_WORDS = new Set(['stop', 'exit'])
 
 // Strips the leading "<@BOTID> " Slack always prepends to app_mention text,
 // so keyword matching below sees only what the human actually typed.
@@ -100,6 +103,18 @@ export function createListener({ env, botToken, appToken, config, configPath, db
       if (captured) return
     }
 
+    // Typing "stop" or "exit" in an active (or restart-lost but still
+    // persisted) session's thread ends it, instead of being forwarded to
+    // the agent as a prompt — closeAgentSession works either way (in-memory
+    // or DB-only), so this ends a session even if nobody ever resumed it.
+    if (dbPath && message.thread_ts && SESSION_STOP_WORDS.has((message.text || '').trim().toLowerCase())) {
+      const closed = closeAgentSession({ dbPath, config, channel: message.channel, threadTs: message.thread_ts, requestedBy: message.user })
+      if (closed.ok) {
+        await reply({ token: botToken, channel: message.channel, threadTs: message.thread_ts, text: 'Session closed.' })
+        return
+      }
+    }
+
     // A reply in a thread that has (or, after a listener restart, HAD) an
     // ACP agent session is a prompt into that session, not a new inbound
     // proposal — same "capture and stop" shape as the ask short-circuit
@@ -171,7 +186,7 @@ export function createListener({ env, botToken, appToken, config, configPath, db
         await respond({ response_type: 'ephemeral', text: 'Run /agent-session close from within the session\'s thread.' })
         return
       }
-      const result = closeAgentSession({ dbPath, channel: command.channel_id, threadTs: command.thread_ts })
+      const result = closeAgentSession({ dbPath, config, channel: command.channel_id, threadTs: command.thread_ts, requestedBy: command.user_id })
       await respond({ response_type: 'ephemeral', text: result.ok ? 'Session closed.' : `Could not close: ${result.error}` })
       return
     }

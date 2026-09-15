@@ -233,7 +233,11 @@ than silently picking something else.
 `--backend` defaults to `claude`; `--repo` defaults to whichever repo is registered as
 default. Permission requests render as Approve/Deny buttons in the thread itself (not
 a DM) using the same primitive as `core/ask.js`'s existing human-in-the-loop flow.
-`/agent-session close` (run from within the session's thread) ends it explicitly.
+`/agent-session close` (run from within the session's thread) ends it explicitly —
+or just reply `stop` or `exit` in the thread itself, no slash command needed. Both
+paths persist `status:'closed'` even if the session was never resumed after a
+listener restart, and both are gated by the same D24 allowlist as starting one —
+someone else in the channel can't end a session they didn't start.
 Local-profile-only (D26) — this never touches `mcp/tools.remote.js`/`mcp/http.js`.
 
 **Surviving a listener restart (D29)**: a reply in a thread whose session was lost to a

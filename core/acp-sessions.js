@@ -351,13 +351,31 @@ export async function routeThreadReply({ env, config, dbPath, channel, threadTs,
   return { ok: true, stopReason: response.stopReason }
 }
 
-export function closeAgentSession({ dbPath, channel, threadTs }) {
+// Closing doesn't need to reconnect to the backend at all — it's pure local
+// bookkeeping (drop the in-memory entry if any, mark the DB row closed) —
+// so this also works for a session lost to a restart and never resumed,
+// not just a currently-live one. Without the DB fallback, "close" on a
+// not-yet-resumed session would fail even though the whole point is to
+// make sure it never gets resumed later.
+// Gated the same way as starting one (D24) — anyone in the channel could
+// otherwise stop or close a session they didn't start.
+export function closeAgentSession({ dbPath, config, channel, threadTs, requestedBy }) {
+  if (!isAllowedToStartSession(config, requestedBy)) {
+    return { ok: false, error: 'not-allowed-to-close-agent-session', retryable: false }
+  }
   const key = sessionKey(channel, threadTs)
   const entry = activeSessionsByKey.get(key)
-  if (!entry) return { ok: false, error: 'no-active-session-for-thread', retryable: false }
-  entry.activeSession.dispose()
-  unregisterSession(entry.sessions, entry.activeSession.sessionId)
-  activeSessionsByKey.delete(key)
-  if (entry.agentSessionRowId) updateAgentSession({ dbPath, id: entry.agentSessionRowId, status: 'closed' })
+  if (entry) {
+    entry.activeSession.dispose()
+    unregisterSession(entry.sessions, entry.activeSession.sessionId)
+    activeSessionsByKey.delete(key)
+    if (entry.agentSessionRowId) updateAgentSession({ dbPath, id: entry.agentSessionRowId, status: 'closed' })
+    return { ok: true }
+  }
+  const persisted = findAgentSessionBySlackThread({ dbPath, slackChannel: channel, slackThreadTs: threadTs })
+  if (!persisted || persisted.kind !== 'acp-session' || persisted.status === 'closed') {
+    return { ok: false, error: 'no-active-session-for-thread', retryable: false }
+  }
+  updateAgentSession({ dbPath, id: persisted.id, status: 'closed' })
   return { ok: true }
 }

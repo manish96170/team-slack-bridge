@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { isAllowedToStartSession, startAgentSession, routeThreadReply, closeAgentSession, parseAgentSessionCommand, applyModelSelection } from '../core/acp-sessions.js'
-import { createAgentSession, updateAgentSession } from '../core/agent-sessions.js'
+import { createAgentSession, updateAgentSession, getAgentSession } from '../core/agent-sessions.js'
 
 function withTempHome(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'tsb-acp-sessions-'))
@@ -220,7 +220,37 @@ test('routeThreadReply will not resume a session with an unknown backend or miss
 })
 
 test('closeAgentSession with no in-memory session for the thread fails clearly instead of pretending to succeed', () => {
-  const result = closeAgentSession({ dbPath: tempDbPath(), channel: 'C-never-had-one', threadTs: '9.9' })
+  const result = closeAgentSession({ dbPath: tempDbPath(), config: baseConfig, channel: 'C-never-had-one', threadTs: '9.9', requestedBy: 'U_OWNER' })
+  assert.equal(result.ok, false)
+  assert.equal(result.error, 'no-active-session-for-thread')
+})
+
+test('closeAgentSession refuses a non-allowed user, same D24 gate as starting a session (anyone in the channel should not be able to end someone else\'s session)', () => {
+  const result = closeAgentSession({ dbPath: tempDbPath(), config: baseConfig, channel: 'C1', threadTs: '1.1', requestedBy: 'U_RANDOM' })
+  assert.equal(result.ok, false)
+  assert.equal(result.error, 'not-allowed-to-close-agent-session')
+})
+
+test('closeAgentSession closes a session that was never resumed after a restart (DB-only, no in-memory entry) — this is what makes "stop"/"exit" work even before anyone replies to trigger a resume', () => {
+  const dbPath = tempDbPath()
+  const created = createAgentSession({
+    dbPath,
+    config: baseConfig,
+    slackChannel: 'C1',
+    slackThreadTs: '1.1',
+    kind: 'acp-session',
+    metadata: { backend: 'claude', repoPath: '/tmp', acpSessionId: 'sess-1' },
+  })
+  const result = closeAgentSession({ dbPath, config: baseConfig, channel: 'C1', threadTs: '1.1', requestedBy: 'U_OWNER' })
+  assert.equal(result.ok, true)
+  assert.equal(getAgentSession({ dbPath, id: created.session.id }).status, 'closed')
+})
+
+test('closeAgentSession on an already-closed session fails rather than reporting a false success', () => {
+  const dbPath = tempDbPath()
+  const created = createAgentSession({ dbPath, config: baseConfig, slackChannel: 'C1', slackThreadTs: '1.1', kind: 'acp-session', metadata: {} })
+  updateAgentSession({ dbPath, id: created.session.id, status: 'closed' })
+  const result = closeAgentSession({ dbPath, config: baseConfig, channel: 'C1', threadTs: '1.1', requestedBy: 'U_OWNER' })
   assert.equal(result.ok, false)
   assert.equal(result.error, 'no-active-session-for-thread')
 })

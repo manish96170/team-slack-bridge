@@ -1,9 +1,12 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { homedir } from 'node:os'
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const ENV_PATH = join(__dirname, '.env')
+const HOME_DIR = process.env.TSB_HOME || join(homedir(), '.team-slack-bridge')
+const ENV_PATH = existsSync(join(HOME_DIR, '.env'))
+  ? join(HOME_DIR, '.env')
+  : join(dirname(fileURLToPath(import.meta.url)), '.env')
 
 export function loadEnv() {
   const env = {}

@@ -17,6 +17,7 @@
     "verify-dm": "node verify-dm.js",
     "doctor": "node cli/doctor.js",
     "mcp": "node mcp/server.js",
+    "build:sea": "node scripts/build-sea.mjs",
     "listen": "node cli/listen.js",
     "daemon": "node cli/daemon.js",
     "http": "node cli/http.js",
@@ -46,5 +47,9 @@
   "dependencies": {
     "@slack/bolt": "^5.1.0",
     "@slack/web-api": "^8.1.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "postject": "^1.0.0-alpha.6"
   }
 }

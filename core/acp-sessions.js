@@ -85,6 +85,20 @@ export function isAllowedToStartSession(config, userId) {
   return (config.agentSessions?.allowedUsers || []).includes(userId)
 }
 
+// D31 — being allowed to START a session does NOT make you allowed to STOP
+// someone else's. Only three people may close a given session: the owner
+// (it's their machine), whoever actually started it, or someone the owner
+// separately, explicitly listed in `agentSessions.allowedControllers` —
+// a distinct grant from `allowedUsers`, since "can start their own
+// sessions" and "can stop/manage other people's on the owner's behalf" are
+// different levels of trust.
+export function isAllowedToCloseSession(config, userId, startedBy) {
+  if (!userId) return false
+  if (config.owner?.slackUserId === userId) return true
+  if (startedBy && userId === startedBy) return true
+  return (config.agentSessions?.allowedControllers || []).includes(userId)
+}
+
 async function handlePermissionRequest({ env, dbPath, channel, threadTs, requestedBy, params }) {
   const optionLabels = params.options.map(option => option.name)
   const result = await ask({
@@ -178,7 +192,20 @@ async function tryResumeSession({ env, config, dbPath, channel, threadTs, reques
     return progressPost
   }
 
-  const entry = { activeSession, backend, sessions, repoName, model, agentSessionRowId: persisted.id, progressTs: progressPost.ts, channel, env, config, accumulatedText: '' }
+  const entry = {
+    activeSession,
+    backend,
+    sessions,
+    repoName,
+    model,
+    agentSessionRowId: persisted.id,
+    startedBy: persisted.metadata?.requestedBy,
+    progressTs: progressPost.ts,
+    channel,
+    env,
+    config,
+    accumulatedText: '',
+  }
   activeSessionsByKey.set(sessionKey(channel, threadTs), entry)
   updateAgentSession({ dbPath, id: persisted.id, status: 'active' })
   return { ok: true, entry }
@@ -323,6 +350,7 @@ export async function startAgentSession({ env, config, dbPath, channel, threadTs
     repoName: repo.name,
     model: appliedModel,
     agentSessionRowId: created.session.id,
+    startedBy: requestedBy,
     progressTs: progressPost.ts,
     channel,
     env,
@@ -360,12 +388,12 @@ export async function routeThreadReply({ env, config, dbPath, channel, threadTs,
 // Gated the same way as starting one (D24) — anyone in the channel could
 // otherwise stop or close a session they didn't start.
 export function closeAgentSession({ dbPath, config, channel, threadTs, requestedBy }) {
-  if (!isAllowedToStartSession(config, requestedBy)) {
-    return { ok: false, error: 'not-allowed-to-close-agent-session', retryable: false }
-  }
   const key = sessionKey(channel, threadTs)
   const entry = activeSessionsByKey.get(key)
   if (entry) {
+    if (!isAllowedToCloseSession(config, requestedBy, entry.startedBy)) {
+      return { ok: false, error: 'not-allowed-to-close-agent-session', retryable: false }
+    }
     entry.activeSession.dispose()
     unregisterSession(entry.sessions, entry.activeSession.sessionId)
     activeSessionsByKey.delete(key)
@@ -375,6 +403,9 @@ export function closeAgentSession({ dbPath, config, channel, threadTs, requested
   const persisted = findAgentSessionBySlackThread({ dbPath, slackChannel: channel, slackThreadTs: threadTs })
   if (!persisted || persisted.kind !== 'acp-session' || persisted.status === 'closed') {
     return { ok: false, error: 'no-active-session-for-thread', retryable: false }
+  }
+  if (!isAllowedToCloseSession(config, requestedBy, persisted.metadata?.requestedBy)) {
+    return { ok: false, error: 'not-allowed-to-close-agent-session', retryable: false }
   }
   updateAgentSession({ dbPath, id: persisted.id, status: 'closed' })
   return { ok: true }

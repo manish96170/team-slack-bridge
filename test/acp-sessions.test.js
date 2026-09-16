@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { isAllowedToStartSession, startAgentSession, routeThreadReply, closeAgentSession, parseAgentSessionCommand, applyModelSelection } from '../core/acp-sessions.js'
+import { isAllowedToStartSession, isAllowedToCloseSession, startAgentSession, routeThreadReply, closeAgentSession, parseAgentSessionCommand, applyModelSelection } from '../core/acp-sessions.js'
 import { createAgentSession, updateAgentSession, getAgentSession } from '../core/agent-sessions.js'
 
 function withTempHome(fn) {
@@ -35,6 +35,27 @@ test('isAllowedToStartSession: anyone else is rejected regardless of channel (PL
 
 test('isAllowedToStartSession: with no allowedUsers configured, only the owner is allowed', () => {
   assert.equal(isAllowedToStartSession({ owner: { slackUserId: 'U_OWNER' }, agentSessions: {} }, 'U_RANDOM'), false)
+})
+
+test('isAllowedToCloseSession: the owner may close anyone\'s session', () => {
+  assert.equal(isAllowedToCloseSession(baseConfig, 'U_OWNER', 'U_ALLOWED'), true)
+})
+
+test('isAllowedToCloseSession: the session\'s own starter may close it, even if they are not in allowedUsers/allowedControllers at all', () => {
+  assert.equal(isAllowedToCloseSession({ owner: { slackUserId: 'U_OWNER' }, agentSessions: {} }, 'U_STARTER', 'U_STARTER'), true)
+})
+
+test('isAllowedToCloseSession: being in allowedUsers (start rights) does NOT grant close rights over someone else\'s session (D31)', () => {
+  assert.equal(isAllowedToCloseSession(baseConfig, 'U_ALLOWED', 'U_SOMEONE_ELSE'), false)
+})
+
+test('isAllowedToCloseSession: an explicitly listed controller may close a session they did not start', () => {
+  const config = { owner: { slackUserId: 'U_OWNER' }, agentSessions: { allowedControllers: ['U_CONTROLLER'] } }
+  assert.equal(isAllowedToCloseSession(config, 'U_CONTROLLER', 'U_SOMEONE_ELSE'), true)
+})
+
+test('isAllowedToCloseSession: anyone else is refused', () => {
+  assert.equal(isAllowedToCloseSession(baseConfig, 'U_RANDOM', 'U_SOMEONE_ELSE'), false)
 })
 
 test('startAgentSession rejects a non-allowed user before resolving a backend or repo, or spawning anything', async () => {
@@ -225,10 +246,48 @@ test('closeAgentSession with no in-memory session for the thread fails clearly i
   assert.equal(result.error, 'no-active-session-for-thread')
 })
 
-test('closeAgentSession refuses a non-allowed user, same D24 gate as starting a session (anyone in the channel should not be able to end someone else\'s session)', () => {
-  const result = closeAgentSession({ dbPath: tempDbPath(), config: baseConfig, channel: 'C1', threadTs: '1.1', requestedBy: 'U_RANDOM' })
+test('closeAgentSession refuses someone who neither started the session, nor is the owner, nor is an explicitly listed controller (D31 — start rights alone are not stop rights)', () => {
+  const dbPath = tempDbPath()
+  createAgentSession({
+    dbPath,
+    config: baseConfig,
+    slackChannel: 'C1',
+    slackThreadTs: '1.1',
+    kind: 'acp-session',
+    metadata: { backend: 'claude', repoPath: '/tmp', acpSessionId: 'sess-1', requestedBy: 'U_ALLOWED' },
+  })
+  const result = closeAgentSession({ dbPath, config: baseConfig, channel: 'C1', threadTs: '1.1', requestedBy: 'U_RANDOM' })
   assert.equal(result.ok, false)
   assert.equal(result.error, 'not-allowed-to-close-agent-session')
+})
+
+test('closeAgentSession allows the session\'s own starter, even though they are not the owner', () => {
+  const dbPath = tempDbPath()
+  createAgentSession({
+    dbPath,
+    config: baseConfig,
+    slackChannel: 'C1',
+    slackThreadTs: '1.1',
+    kind: 'acp-session',
+    metadata: { backend: 'claude', repoPath: '/tmp', acpSessionId: 'sess-1', requestedBy: 'U_ALLOWED' },
+  })
+  const result = closeAgentSession({ dbPath, config: baseConfig, channel: 'C1', threadTs: '1.1', requestedBy: 'U_ALLOWED' })
+  assert.equal(result.ok, true)
+})
+
+test('closeAgentSession allows someone explicitly listed in agentSessions.allowedControllers, even though they did not start the session and are not the owner', () => {
+  const dbPath = tempDbPath()
+  const config = { ...baseConfig, agentSessions: { ...baseConfig.agentSessions, allowedControllers: ['U_CONTROLLER'] } }
+  createAgentSession({
+    dbPath,
+    config,
+    slackChannel: 'C1',
+    slackThreadTs: '1.1',
+    kind: 'acp-session',
+    metadata: { backend: 'claude', repoPath: '/tmp', acpSessionId: 'sess-1', requestedBy: 'U_ALLOWED' },
+  })
+  const result = closeAgentSession({ dbPath, config, channel: 'C1', threadTs: '1.1', requestedBy: 'U_CONTROLLER' })
+  assert.equal(result.ok, true)
 })
 
 test('closeAgentSession closes a session that was never resumed after a restart (DB-only, no in-memory entry) — this is what makes "stop"/"exit" work even before anyone replies to trigger a resume', () => {

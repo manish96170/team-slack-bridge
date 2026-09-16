@@ -212,7 +212,7 @@ node cli/repos.js add team-slack-bridge --path /absolute/path/to/team-slack-brid
 ```
 
 ```json
-"agentSessions": { "enabled": true, "allowedUsers": ["U0123ABC"], "mentionKeyword": "start session" }
+"agentSessions": { "enabled": true, "allowedUsers": ["U0123ABC"], "mentionKeyword": "start session", "allowedControllers": [] }
 ```
 
 Three ways to start one, all equivalent, all accepting an optional `--model name`:
@@ -236,8 +236,14 @@ a DM) using the same primitive as `core/ask.js`'s existing human-in-the-loop flo
 `/agent-session close` (run from within the session's thread) ends it explicitly —
 or just reply `stop` or `exit` in the thread itself, no slash command needed. Both
 paths persist `status:'closed'` even if the session was never resumed after a
-listener restart, and both are gated by the same D24 allowlist as starting one —
-someone else in the channel can't end a session they didn't start.
+listener restart.
+
+**Starting your own session doesn't let you stop someone else's (D31).** Being in
+`agentSessions.allowedUsers` only grants the right to start sessions of your own.
+Closing one is a separate, narrower check: only the owner, the person who actually
+started that specific session, or someone explicitly listed in the new
+`agentSessions.allowedControllers` (a distinct grant — delegating "start/stop on my
+behalf" is a bigger trust decision than "can start their own") may close it.
 Local-profile-only (D26) — this never touches `mcp/tools.remote.js`/`mcp/http.js`.
 
 **Surviving a listener restart (D29)**: a reply in a thread whose session was lost to a

@@ -16,7 +16,7 @@ export function loadConfig(path) {
       outputMode: 'medium',
       http: { enabled: false, port: 8917, verifySlackSignatures: true },
       slashCommands: { enabled: false, outputModeCommand: '/outputmode' },
-      agentSessions: { enabled: false, autoCreateSession: false, provider: 'none', allowedUsers: [], mentionKeyword: 'start session' },
+      agentSessions: { enabled: false, autoCreateSession: false, provider: 'none', allowedUsers: [], mentionKeyword: 'start session', allowedControllers: [] },
       openacp: { enabled: false, adapterPackage: '@openacp/slack-adapter', autoCreateSession: false },
       slackbotMcp: normalizeSlackbotMcp(),
       remote: { postableChannels: [], readableChannels: [] },
@@ -51,6 +51,11 @@ export function loadConfig(path) {
       // (case-insensitive) starts a session instead of a normal classified
       // proposal. Empty string disables the mention trigger entirely.
       mentionKeyword: raw.agentSessions?.mentionKeyword ?? 'start session',
+      // D31 — a SEPARATE grant from allowedUsers: being allowed to start
+      // your own sessions doesn't make you allowed to stop someone else's.
+      // Only the owner, a session's own starter, or someone explicitly
+      // listed here may close/stop a session that isn't their own.
+      allowedControllers: raw.agentSessions?.allowedControllers || [],
     },
     openacp: {
       enabled: !!raw.openacp?.enabled,

@@ -14,7 +14,9 @@ this repo's own source/tests, which aren't part of the published package.
 
 ## Four surfaces, one core
 
-See `PLAN.md` for the full architecture and decisions log. In short: every capability is
+See `PLAN.md` for the full architecture and decisions log, `TODO.md` for the current
+done/pending status, and `ROADMAP.md` for longer-horizon ideas that aren't decided or
+scheduled yet. In short: every capability is
 a plain function in `core/` (tokens as parameters, no ambient state, no logging), and
 each way of reaching it is a thin adapter that adds no behaviour of its own:
 

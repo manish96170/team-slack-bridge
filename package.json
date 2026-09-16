@@ -46,6 +46,8 @@
     "README.md",
     "FEATURES.md",
     "PLAN.md",
+    "TODO.md",
+    "ROADMAP.md",
     "LICENSE"
   ],
   "dependencies": {

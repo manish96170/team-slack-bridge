@@ -6,9 +6,14 @@ import { loadEnv } from '../env.js'
 import { loadConfig } from '../core/identity.js'
 
 const HOME_DIR = process.env.TSB_HOME || join(homedir(), '.team-slack-bridge')
-export const REPO_ROOT = existsSync(join(HOME_DIR, 'slack-config.json'))
-  ? HOME_DIR
-  : join(dirname(fileURLToPath(import.meta.url)), '..')
+const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+// Default to TSB_HOME for any new setup — an npm-installed copy must never
+// need to write inside its own install directory, since `npm update` wipes
+// it. The package-relative path is only a legacy fallback for existing
+// git-clone installs that already have a slack-config.json there from
+// before TSB_HOME existed.
+export const REPO_ROOT =
+  !existsSync(join(HOME_DIR, 'slack-config.json')) && existsSync(join(PACKAGE_ROOT, 'slack-config.json')) ? PACKAGE_ROOT : HOME_DIR
 export const CONFIG_PATH = join(REPO_ROOT, 'slack-config.json')
 export const LEDGER_PATH = join(HOME_DIR, '.ledger.sqlite')
 

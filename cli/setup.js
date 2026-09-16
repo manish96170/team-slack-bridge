@@ -11,7 +11,8 @@
 // node cli/setup.js features                       (revisit the default-false toggles later)
 // node cli/setup.js features --enable-http true     (skip a specific prompt non-interactively)
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
+import { dirname } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import { parseFlags } from './lib/args.js'
 import { CONFIG_PATH } from './context.js'
@@ -19,6 +20,7 @@ import { loadConfig } from '../core/identity.js'
 import { ENV_FILE_PATH } from '../env.js'
 
 function writeConfig(config) {
+  mkdirSync(dirname(CONFIG_PATH), { recursive: true })
   writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n')
 }
 
@@ -34,6 +36,7 @@ function writeEnvValue(contents, key, value) {
 function writeEnv(updates) {
   let contents = existsSync(ENV_FILE_PATH) ? readFileSync(ENV_FILE_PATH, 'utf8') : ''
   for (const [key, value] of Object.entries(updates)) contents = writeEnvValue(contents, key, value)
+  mkdirSync(dirname(ENV_FILE_PATH), { recursive: true })
   writeFileSync(ENV_FILE_PATH, contents, { mode: 0o600 })
 }
 

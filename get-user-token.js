@@ -8,7 +8,8 @@
 // registered in your app's OAuth config.
 
 import http from 'node:http'
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
+import { dirname } from 'node:path'
 import { loadEnv, ENV_FILE_PATH } from './env.js'
 
 const PORT = 8917
@@ -39,6 +40,7 @@ function writeUserToken(token) {
   } else {
     contents += `\nSLACK_USER_TOKEN=${token}\n`
   }
+  mkdirSync(dirname(ENV_FILE_PATH), { recursive: true })
   writeFileSync(ENV_FILE_PATH, contents, { mode: 0o600 })
 }
 

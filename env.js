@@ -4,9 +4,13 @@ import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 
 const HOME_DIR = process.env.TSB_HOME || join(homedir(), '.team-slack-bridge')
-const ENV_PATH = existsSync(join(HOME_DIR, '.env'))
-  ? join(HOME_DIR, '.env')
-  : join(dirname(fileURLToPath(import.meta.url)), '.env')
+const PACKAGE_ENV_PATH = join(dirname(fileURLToPath(import.meta.url)), '.env')
+// Default to TSB_HOME for any new setup (npm-installed copies must never
+// need to write inside their own install directory — `npm update` wipes
+// it). The package-relative path is only used as a legacy fallback for
+// existing git-clone installs that already have a .env there from before
+// TSB_HOME existed.
+const ENV_PATH = !existsSync(join(HOME_DIR, '.env')) && existsSync(PACKAGE_ENV_PATH) ? PACKAGE_ENV_PATH : join(HOME_DIR, '.env')
 
 function readEnvFile(path) {
   const env = {}

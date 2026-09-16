@@ -7,6 +7,11 @@ orchestration system, AI agent framework, or dashboard.
 Runtime: **Node >=26** (`package.json`'s `engines`). `.nvmrc` pins `26` for local dev on
 this machine so the bridge stays on the current Node line rather than LTS.
 
+**Install**: `npm install team-slack-bridge` (or `-g` for the `team-slack-bridge` CLI
+binary) for normal use. `npm run build:sea` (standalone-binary packaging) and
+`npm test` only work from a git clone with `devDependencies` installed — they bundle
+this repo's own source/tests, which aren't part of the published package.
+
 ## Four surfaces, one core
 
 See `PLAN.md` for the full architecture and decisions log. In short: every capability is

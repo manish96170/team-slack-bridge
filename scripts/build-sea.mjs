@@ -2,12 +2,23 @@
 // dist/team-slack-bridge. Superseded once the repo runs as a live ACP/MCP
 // server instead of a standalone binary (see PLAN.md D20 / OpenACP notes) —
 // at that point this script and dist/ can go away.
+//
+// Repo-clone-only tool, not part of the published npm package: it bundles
+// this repo's own source, and its deps (esbuild, postject) are
+// devDependencies, never installed for anyone who `npm install
+// team-slack-bridge`s this as a dependency rather than cloning it.
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, chmodSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import * as esbuild from 'esbuild'
-import { inject } from 'postject'
+
+let esbuild, inject
+try {
+  ;[esbuild, { inject }] = await Promise.all([import('esbuild'), import('postject')])
+} catch {
+  console.error('[build:sea] esbuild/postject not found — this script only works from a git clone with devDependencies installed (npm install), not from an npm-installed copy of this package.')
+  process.exit(1)
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = join(__dirname, '..')

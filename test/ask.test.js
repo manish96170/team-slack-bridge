@@ -78,6 +78,28 @@ test('recordAnswerByThread on an unrelated thread finds nothing', () => {
   assert.equal(recordAnswerByThread(dbPath, 'D9', '0.0', { kind: 'question', text: 'yes' }), false)
 })
 
+// Regression test for a real bug found live: a plain message arriving
+// while an approval (button-only) is pending in the SAME thread used to
+// get captured as a free-text {kind:'question'} answer anyway — which the
+// caller then finds no matching button label for and treats as a
+// cancellation, silently denying the pending approval instead of leaving
+// it alone for the actual button click.
+test('recordAnswerByThread ignores a pending approval-kind ask — those can only be answered by button click', () => {
+  const dbPath = tempDbPath()
+  insertPendingAsk(dbPath, { id: 'ask-approval', channel: 'C1', threadTs: '1.1', kind: 'approval' })
+  const captured = recordAnswerByThread(dbPath, 'C1', '1.1', { kind: 'question', text: 'some unrelated message' })
+  assert.equal(captured, false)
+  assert.equal(getAsk(dbPath, 'ask-approval').status, 'pending')
+})
+
+test('recordAnswerByThread still captures a pending question-kind ask normally', () => {
+  const dbPath = tempDbPath()
+  insertPendingAsk(dbPath, { id: 'ask-question', channel: 'C1', threadTs: '1.1', kind: 'question' })
+  const captured = recordAnswerByThread(dbPath, 'C1', '1.1', { kind: 'question', text: 'yes, go ahead' })
+  assert.equal(captured, true)
+  assert.equal(getAsk(dbPath, 'ask-question').status, 'answered')
+})
+
 test('waitForAnswer resolves once the answer lands, without the caller needing to know how it got there', async () => {
   const dbPath = tempDbPath()
   insertPendingAsk(dbPath, { id: 'ask-5' })

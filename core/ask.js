@@ -146,9 +146,16 @@ export function recordAnswer(dbPath, askId, answer) {
 // Free-text replies don't carry the askId the way a button's `value` does
 // — they're just a message in the DM thread — so this looks the pending
 // ask up by (channel, thread_ts) instead.
+// `kind = 'question'` only — this is the free-text capture path, and this
+// header's own design says approval buttons can ONLY be captured by the
+// block_actions handler. Found in review: without this filter, a plain
+// message arriving while an approval is pending got packaged as a
+// {kind:'question'} answer anyway, which core/ask.js's caller then finds no
+// matching button label for and treats as a cancellation — silently
+// denying the pending approval instead of doing nothing.
 export function recordAnswerByThread(dbPath, channel, threadTs, answer) {
   const db = getDb(dbPath)
-  const row = db.prepare("SELECT id FROM asks WHERE channel = ? AND thread_ts = ? AND status = 'pending'").get(channel, threadTs)
+  const row = db.prepare("SELECT id FROM asks WHERE channel = ? AND thread_ts = ? AND status = 'pending' AND kind = 'question'").get(channel, threadTs)
   if (!row) return false
   return recordAnswer(dbPath, row.id, answer)
 }

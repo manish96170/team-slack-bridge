@@ -356,6 +356,17 @@ export async function startAgentSession({ env, config, dbPath, channel, threadTs
   if (!progressPost.ok) return progressPost
   const anchorThreadTs = threadTs || progressPost.ts
 
+  // Same lock routeThreadReply uses, keyed the same way — without this, a
+  // reply arriving while THIS initial prompt is still in flight (e.g. the
+  // task needs a permission approval, so the first runPromptTurn call below
+  // is still awaiting it) would find the entry already in
+  // activeSessionsByKey and call runPromptTurn on it a second time
+  // concurrently, both mutating entry.accumulatedText and racing on the
+  // same Slack message. Found in review before publishing.
+  return withKeyLock(sessionKey(channel, anchorThreadTs), () => startAgentSessionBody({ env, config, dbPath, channel, threadTs, backend, repo, modelName, task, requestedBy, progressPost, anchorThreadTs }))
+}
+
+async function startAgentSessionBody({ env, config, dbPath, channel, backend, repo, modelName, task, requestedBy, progressPost, anchorThreadTs }) {
   // Everything from here through runPromptTurn's own setup can throw
   // (spawn failure, initialize/session-new rejection, a DB error) — found
   // in review before publishing that NONE of it was caught. The consequence

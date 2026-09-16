@@ -3,7 +3,16 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { isAllowedToStartSession, isAllowedToCloseSession, startAgentSession, routeThreadReply, closeAgentSession, parseAgentSessionCommand, applyModelSelection } from '../core/acp-sessions.js'
+import {
+  isAllowedToStartSession,
+  isAllowedToCloseSession,
+  startAgentSession,
+  routeThreadReply,
+  closeAgentSession,
+  parseAgentSessionCommand,
+  applyModelSelection,
+  runPromptTurn,
+} from '../core/acp-sessions.js'
 import { createAgentSession, updateAgentSession, getAgentSession } from '../core/agent-sessions.js'
 
 function withTempHome(fn) {
@@ -312,4 +321,40 @@ test('closeAgentSession on an already-closed session fails rather than reporting
   const result = closeAgentSession({ dbPath, config: baseConfig, channel: 'C1', threadTs: '1.1', requestedBy: 'U_OWNER' })
   assert.equal(result.ok, false)
   assert.equal(result.error, 'no-active-session-for-thread')
+})
+
+// Regression test for a real bug found live: a rejected prompt() (Bedrock
+// auth failure, connection drop, crashed backend) used to vanish silently
+// — nextUpdate() waited forever for a 'stop' message that would never
+// arrive, so the Slack progress message stayed on "starting…" forever.
+test('runPromptTurn finishes (does not hang) when prompt() rejects, and reports the failure instead of swallowing it', async () => {
+  const posted = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    const body = Object.fromEntries(new URLSearchParams(init.body))
+    posted.push(body)
+    return { status: 200, headers: new Headers(), url: url.toString(), text: async () => JSON.stringify({ ok: true, channel: body.channel, ts: '100.001' }) }
+  }
+  try {
+    const fakeActiveSession = {
+      prompt: () => Promise.reject(new Error('OAuth session expired and could not be refreshed')),
+      nextUpdate: () => new Promise(() => {}), // never resolves — this is exactly what used to hang forever
+    }
+    const entry = {
+      activeSession: fakeActiveSession,
+      backend: { name: 'claude' },
+      repoName: 'dashboard',
+      progressTs: '100.001',
+      channel: 'C1',
+      env: { SLACK_BOT_TOKEN: 'xoxb-runprompt-test' },
+      config: {},
+      accumulatedText: '',
+    }
+    const response = await runPromptTurn(entry, 'do something')
+    assert.equal(response.stopReason, 'error')
+    const finish = posted.find(p => p.text?.includes('OAuth session expired'))
+    assert.ok(finish, 'expected the error to be posted into the finishProgress call, not swallowed')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })

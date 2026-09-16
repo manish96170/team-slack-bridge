@@ -30,10 +30,17 @@ function forSession(sessions, sessionId, what) {
   return entry
 }
 
-function connectBackend(backend) {
+function connectBackend(backend, env) {
   const command = backend.command()
   const args = backend.args()
-  const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'inherit'] })
+  // Without this, the spawned backend only sees the LISTENER process's own
+  // process.env — never whatever's in .env (ANTHROPIC_API_KEY,
+  // CLAUDE_CODE_USE_BEDROCK, AWS_REGION, etc.), since loadEnv() reads .env
+  // into a plain JS object and never injects it into process.env anywhere.
+  // Confirmed the hard way: without this, claude-agent-acp silently fell
+  // back to its own OAuth flow and failed with a stale/expired session
+  // instead of using the configured Bedrock credentials.
+  const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'inherit'], env: { ...process.env, ...env } })
   const stream = ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout))
   const sessions = new Map()
 
@@ -60,8 +67,8 @@ function connectBackend(backend) {
     .then(initializeResponse => ({ connection, child, sessions, initializeResponse }))
 }
 
-export function getBackendConnection(backend) {
-  if (!backendConnections.has(backend.name)) backendConnections.set(backend.name, connectBackend(backend))
+export function getBackendConnection(backend, env) {
+  if (!backendConnections.has(backend.name)) backendConnections.set(backend.name, connectBackend(backend, env))
   return backendConnections.get(backend.name)
 }
 

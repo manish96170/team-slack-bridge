@@ -159,7 +159,7 @@ async function tryResumeSession({ env, config, dbPath, channel, threadTs, reques
   const backend = getBackend(backendName)
   if (!backend || !acpSessionId || !repoPath) return { ok: false, error: 'no-active-session-for-thread', retryable: false }
 
-  const { connection, sessions, initializeResponse } = await getBackendConnection(backend)
+  const { connection, sessions, initializeResponse } = await getBackendConnection(backend, env)
   const caps = initializeResponse?.agentCapabilities
   let response
   if (caps?.sessionCapabilities?.resume) {
@@ -229,7 +229,7 @@ function sessionLabel(entry) {
 // a single debounced progress-message edit rather than one edit per chunk
 // (no rate-limit-aware coalescing exists in core/progress.js itself — this
 // is that missing piece, kept here rather than in progress.js).
-async function runPromptTurn(entry, promptText) {
+export async function runPromptTurn(entry, promptText) {
   entry.accumulatedText = ''
   let flushTimer = null
 
@@ -248,10 +248,36 @@ async function runPromptTurn(entry, promptText) {
     }, DEBOUNCE_MS)
   }
 
-  entry.activeSession.prompt(promptText).catch(() => {})
+  // A rejected prompt() (connection error, auth failure, crashed backend)
+  // must not just vanish — without this, nextUpdate() below waits forever
+  // for a 'stop' message that will never arrive, and the Slack message
+  // stays on "starting…" indefinitely. Confirmed this actually happens:
+  // a Bedrock auth failure surfaced only as a listener-level console.error,
+  // never reaching the user at all. failureSignal only ever resolves on
+  // the error path — on success, the real 'stop' message still comes
+  // through nextUpdate() as usual and this stays pending harmlessly.
+  const failureSignal = new Promise(resolve => {
+    entry.activeSession.prompt(promptText).then(
+      () => {},
+      err => resolve({ kind: 'error', error: err })
+    )
+  })
 
   for (;;) {
-    const message = await entry.activeSession.nextUpdate()
+    const message = await Promise.race([entry.activeSession.nextUpdate(), failureSignal])
+    if (message.kind === 'error') {
+      if (flushTimer) clearTimeout(flushTimer)
+      await finishProgress({
+        token: entry.env.SLACK_BOT_TOKEN,
+        channel: entry.channel,
+        ts: entry.progressTs,
+        label: sessionLabel(entry),
+        detail: `${entry.accumulatedText.slice(-MAX_RENDERED_CHARS)}\n\n⚠️ ${message.error.message || message.error}`.trim(),
+        ok: false,
+        config: entry.config,
+      })
+      return { stopReason: 'error' }
+    }
     if (message.kind === 'stop') {
       if (flushTimer) clearTimeout(flushTimer)
       await finishProgress({
@@ -298,7 +324,7 @@ export async function startAgentSession({ env, config, dbPath, channel, threadTs
   if (!progressPost.ok) return progressPost
   const anchorThreadTs = threadTs || progressPost.ts
 
-  const { connection, sessions } = await getBackendConnection(backend)
+  const { connection, sessions } = await getBackendConnection(backend, env)
   const activeSession = await connection.agent.buildSession(repo.path).start()
 
   let appliedModel

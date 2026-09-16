@@ -52,6 +52,28 @@ export function getAgentSession({ dbPath, id }) {
   return rowToSession(getDb(dbPath).prepare('SELECT * FROM agent_sessions WHERE id = ?').get(id))
 }
 
+// `status`/`kind` narrow the listing (e.g. status:'active' for currently
+// running ACP sessions); omit either to see everything. Most recent first.
+export function listAgentSessions({ dbPath, status, kind, limit = 20 } = {}) {
+  if (!dbPath) return []
+  const conditions = []
+  const params = []
+  if (status) {
+    conditions.push('status = ?')
+    params.push(status)
+  }
+  if (kind) {
+    conditions.push('kind = ?')
+    params.push(kind)
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+  params.push(limit)
+  return getDb(dbPath)
+    .prepare(`SELECT * FROM agent_sessions ${where} ORDER BY created_at DESC LIMIT ?`)
+    .all(...params)
+    .map(rowToSession)
+}
+
 export function findAgentSessionBySlackThread({ dbPath, slackChannel, slackThreadTs }) {
   if (!dbPath || !slackChannel || !slackThreadTs) return null
   return rowToSession(

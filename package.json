@@ -1,6 +1,6 @@
 {
   "name": "team-slack-bridge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Post to Slack (as a bot, or explicitly as a specific authorized user) and DM, from any script, agent, or CI job. Standalone — no dependency on any particular orchestration system.",
   "license": "MIT",
   "type": "module",
@@ -20,6 +20,7 @@
     "mcp-daemon": "node cli/mcp-daemon.js",
     "accounts": "node cli/accounts.js",
     "repos": "node cli/repos.js",
+    "agent-sessions": "node cli/agent-session.js",
     "build:sea": "node scripts/build-sea.mjs",
     "listen": "node cli/listen.js",
     "daemon": "node cli/daemon.js",

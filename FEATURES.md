@@ -334,10 +334,17 @@ Enable only when an agent/session orchestrator is ready:
 Manual local record:
 
 ```bash
-node cli/agent-session.js create --slack-channel C0123 --slack-thread-ts "123.456" --kind review-request --json
+node cli/agent-session.js create --channel C0123 --thread-ts "123.456" --kind review-request --json
 ```
 
-Remote Slackbot MCP does not expose agent-session creation.
+List recorded sessions (any kind — both this section's manual records and live ACP
+sessions below share the same table):
+
+```bash
+node cli/agent-session.js list [--status active|closed|created] [--kind acp-session] [--limit 20] [--json]
+```
+
+Remote Slackbot MCP does not expose agent-session creation or listing.
 
 **Not the same thing as ACP agent sessions** (README's "ACP agent sessions — a Slack
 thread is a live session" section, PLAN D23–D27) — that feature reuses this same

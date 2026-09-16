@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createAgentSession, getAgentSession, updateAgentSession } from '../core/agent-sessions.js'
+import { createAgentSession, getAgentSession, updateAgentSession, listAgentSessions } from '../core/agent-sessions.js'
 
 function tempDbPath() {
   return join(mkdtempSync(join(tmpdir(), 'agent-session-test-')), 'db.sqlite')
@@ -55,4 +55,45 @@ test('updateAgentSession requires dbPath and id rather than silently no-oping', 
   const result = updateAgentSession({ status: 'closed' })
   assert.equal(result.ok, false)
   assert.equal(result.error, 'db-path-and-id-required')
+})
+
+test('listAgentSessions with no dbPath returns an empty list rather than throwing', () => {
+  assert.deepEqual(listAgentSessions({}), [])
+})
+
+test('listAgentSessions returns everything, most recent first, with no filter', () => {
+  const dbPath = tempDbPath()
+  const first = createAgentSession({ dbPath, config: { agentSessions: { enabled: true } }, slackChannel: 'C1', slackThreadTs: '1.1', kind: 'acp-session' })
+  const second = createAgentSession({ dbPath, config: { agentSessions: { enabled: true } }, slackChannel: 'C2', slackThreadTs: '2.2', kind: 'review-request' })
+  const sessions = listAgentSessions({ dbPath })
+  assert.equal(sessions.length, 2)
+  assert.equal(sessions[0].id, second.session.id)
+  assert.equal(sessions[1].id, first.session.id)
+})
+
+test('listAgentSessions filters by status', () => {
+  const dbPath = tempDbPath()
+  const closed = createAgentSession({ dbPath, config: { agentSessions: { enabled: true } }, slackChannel: 'C1', slackThreadTs: '1.1', kind: 'acp-session' })
+  createAgentSession({ dbPath, config: { agentSessions: { enabled: true } }, slackChannel: 'C2', slackThreadTs: '2.2', kind: 'acp-session' })
+  updateAgentSession({ dbPath, id: closed.session.id, status: 'closed' })
+  const activeOnly = listAgentSessions({ dbPath, status: 'closed' })
+  assert.equal(activeOnly.length, 1)
+  assert.equal(activeOnly[0].id, closed.session.id)
+})
+
+test('listAgentSessions filters by kind', () => {
+  const dbPath = tempDbPath()
+  createAgentSession({ dbPath, config: { agentSessions: { enabled: true } }, slackChannel: 'C1', slackThreadTs: '1.1', kind: 'acp-session' })
+  createAgentSession({ dbPath, config: { agentSessions: { enabled: true } }, slackChannel: 'C2', slackThreadTs: '2.2', kind: 'review-request' })
+  const acpOnly = listAgentSessions({ dbPath, kind: 'acp-session' })
+  assert.equal(acpOnly.length, 1)
+  assert.equal(acpOnly[0].kind, 'acp-session')
+})
+
+test('listAgentSessions respects limit', () => {
+  const dbPath = tempDbPath()
+  for (let i = 0; i < 5; i++) {
+    createAgentSession({ dbPath, config: { agentSessions: { enabled: true } }, slackChannel: 'C1', slackThreadTs: `1.${i}`, kind: 'acp-session' })
+  }
+  assert.equal(listAgentSessions({ dbPath, limit: 2 }).length, 2)
 })

@@ -115,6 +115,34 @@ export function createListener({ env, botToken, appToken, config, configPath, db
       }
     }
 
+    // A DM to the bot starting with the configured keyword is a session
+    // trigger too — @mention doesn't apply in a DM (there's nothing to
+    // @mention when you're already talking directly to the app), so this
+    // is the DM equivalent of the app_mention keyword trigger above. No
+    // channel needed at all: the session lives entirely in this DM thread.
+    if (dbPath && message.channel_type === 'im' && config.agentSessions?.enabled) {
+      const mentionKeyword = config.agentSessions?.mentionKeyword
+      const text = message.text || ''
+      if (mentionKeyword && text.toLowerCase().startsWith(mentionKeyword.toLowerCase())) {
+        const { backendName, repoName, modelName, task } = parseAgentSessionCommand(text.slice(mentionKeyword.length))
+        if (task) {
+          await startAgentSession({
+            env,
+            config,
+            dbPath,
+            channel: message.channel,
+            threadTs: message.thread_ts,
+            backendName,
+            repoName,
+            modelName,
+            task,
+            requestedBy: message.user,
+          })
+          return
+        }
+      }
+    }
+
     // A reply in a thread that has (or, after a listener restart, HAD) an
     // ACP agent session is a prompt into that session, not a new inbound
     // proposal — same "capture and stop" shape as the ask short-circuit

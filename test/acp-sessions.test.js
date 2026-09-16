@@ -12,6 +12,7 @@ import {
   parseAgentSessionCommand,
   applyModelSelection,
   runPromptTurn,
+  withKeyLock,
 } from '../core/acp-sessions.js'
 import { createAgentSession, updateAgentSession, getAgentSession } from '../core/agent-sessions.js'
 
@@ -357,4 +358,44 @@ test('runPromptTurn finishes (does not hang) when prompt() rejects, and reports 
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+// Regression test for a race found live: two rapid messages in the same
+// thread could both find no in-memory session and race into resuming it
+// simultaneously, each clobbering the other's registered handlers.
+test('withKeyLock serializes calls for the same key, one at a time in order', async () => {
+  const order = []
+  const key = 'C1:1.1'
+  const first = withKeyLock(key, async () => {
+    order.push('first-start')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    order.push('first-end')
+  })
+  const second = withKeyLock(key, async () => {
+    order.push('second-start')
+  })
+  await Promise.all([first, second])
+  assert.deepEqual(order, ['first-start', 'first-end', 'second-start'])
+})
+
+test('withKeyLock does not serialize calls for different keys', async () => {
+  const order = []
+  const a = withKeyLock('C1:1.1', async () => {
+    await new Promise(resolve => setTimeout(resolve, 20))
+    order.push('a')
+  })
+  const b = withKeyLock('C2:2.2', async () => {
+    order.push('b')
+  })
+  await Promise.all([a, b])
+  // b (no delay) finishes before a (20ms delay) since they run concurrently,
+  // not queued behind each other.
+  assert.deepEqual(order, ['b', 'a'])
+})
+
+test('withKeyLock lets the next caller proceed even if the previous one threw', async () => {
+  const key = 'C1:1.1'
+  await assert.rejects(() => withKeyLock(key, async () => { throw new Error('boom') }))
+  const result = await withKeyLock(key, async () => 'ok')
+  assert.equal(result, 'ok')
 })

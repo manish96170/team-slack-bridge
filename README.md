@@ -220,11 +220,16 @@ node cli/repos.js add team-slack-bridge --path /absolute/path/to/team-slack-brid
 "agentSessions": { "enabled": true, "allowedUsers": ["U0123ABC"], "mentionKeyword": "start session", "allowedControllers": [] }
 ```
 
-Three ways to start one, all equivalent, all accepting an optional `--model name`:
+Four ways to start one, all equivalent, all accepting an optional `--model name`:
 1. **Slash command**: `/agent-session start --backend claude --repo team-slack-bridge --model opus fix the flaky test in core/db.js`
+   (works in a channel or in a DM to the app — Slack slash commands aren't channel-restricted).
 2. **@mention with the configured keyword** (`agentSessions.mentionKeyword`, default `"start session"`):
    `@team-slack-bridge start session --repo team-slack-bridge fix the flaky test`
-3. **Message shortcut** — right-click any message → "Start agent session" → a modal
+3. **A DM directly to the app** with the same keyword (D33) — no channel or @mention needed
+   at all, since there's nothing to @-mention when you're already talking to the app
+   directly: just DM `start session --repo team-slack-bridge fix the flaky test`, and the
+   session lives entirely in that DM thread.
+4. **Message shortcut** — right-click any message → "Start agent session" → a modal
    asks for backend/repo/model/task; the session anchors to that message's thread
    (requires adding the `shortcuts` entry from
    `config/slack-app-manifest.template.json` to your installed app's manifest).

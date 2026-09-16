@@ -21,6 +21,25 @@ function sessionKey(channel, threadTs) {
   return `${channel}:${threadTs}`
 }
 
+// Two rapid-fire messages in the same thread (e.g. right after a listener
+// restart, before the first reply finishes resuming) could both find no
+// in-memory entry and race into tryResumeSession simultaneously — each
+// registering its own updateQueue under the SAME acpSessionId and
+// clobbering the other's. Found in review before publishing. This
+// serializes anything keyed by the same {channel, threadTs} without
+// blocking unrelated threads.
+const keyLocks = new Map()
+
+export function withKeyLock(key, fn) {
+  const previous = keyLocks.get(key) || Promise.resolve()
+  const next = previous.then(fn, fn)
+  keyLocks.set(
+    key,
+    next.catch(() => {})
+  )
+  return next
+}
+
 // Shared by every trigger (slash command, app-mention keyword, message
 // shortcut free-text) — `--backend name` / `--repo name` / `--model name`
 // flags anywhere in the text, remaining words are the task.
@@ -159,25 +178,38 @@ async function tryResumeSession({ env, config, dbPath, channel, threadTs, reques
   const backend = getBackend(backendName)
   if (!backend || !acpSessionId || !repoPath) return { ok: false, error: 'no-active-session-for-thread', retryable: false }
 
-  const { connection, sessions, initializeResponse } = await getBackendConnection(backend, env)
-  const caps = initializeResponse?.agentCapabilities
-  let response
-  if (caps?.sessionCapabilities?.resume) {
-    response = await connection.agent.request(methods.agent.session.resume, { sessionId: acpSessionId, cwd: repoPath })
-  } else if (caps?.loadSession) {
-    response = await connection.agent.request(methods.agent.session.load, { sessionId: acpSessionId, cwd: repoPath, mcpServers: [] })
-  } else {
+  // Anything here (spawn failure, resume/load rejection, a DB error) used
+  // to propagate uncaught, all the way to Bolt's app.error handler — the
+  // triggering thread reply would just vanish with zero feedback, never
+  // even falling through to normal message handling. Same class of bug
+  // found in startAgentSession; catch it and degrade the same way every
+  // other resume failure already does.
+  let connection, sessions, activeSession
+  try {
+    const backendConnection = await getBackendConnection(backend, env)
+    connection = backendConnection.connection
+    sessions = backendConnection.sessions
+    const caps = backendConnection.initializeResponse?.agentCapabilities
+    let response
+    if (caps?.sessionCapabilities?.resume) {
+      response = await connection.agent.request(methods.agent.session.resume, { sessionId: acpSessionId, cwd: repoPath })
+    } else if (caps?.loadSession) {
+      response = await connection.agent.request(methods.agent.session.load, { sessionId: acpSessionId, cwd: repoPath, mcpServers: [] })
+    } else {
+      return { ok: false, error: 'no-active-session-for-thread', retryable: false }
+    }
+
+    const updateQueue = createUpdateQueue()
+    registerSession(sessions, acpSessionId, {
+      fsHandlers: createFsHandlers(repoPath),
+      terminalHandlers: createTerminalHandlers(repoPath),
+      onPermissionRequest: params => handlePermissionRequest({ env, dbPath, channel, threadTs, requestedBy, params }),
+      updateQueue,
+    })
+    activeSession = createResumedSessionHandle({ connection, sessionId: acpSessionId, response, updateQueue })
+  } catch {
     return { ok: false, error: 'no-active-session-for-thread', retryable: false }
   }
-
-  const updateQueue = createUpdateQueue()
-  registerSession(sessions, acpSessionId, {
-    fsHandlers: createFsHandlers(repoPath),
-    terminalHandlers: createTerminalHandlers(repoPath),
-    onPermissionRequest: params => handlePermissionRequest({ env, dbPath, channel, threadTs, requestedBy, params }),
-    updateQueue,
-  })
-  const activeSession = createResumedSessionHandle({ connection, sessionId: acpSessionId, response, updateQueue })
 
   const progressPost = await startProgress({
     token: env.SLACK_BOT_TOKEN,
@@ -324,69 +356,89 @@ export async function startAgentSession({ env, config, dbPath, channel, threadTs
   if (!progressPost.ok) return progressPost
   const anchorThreadTs = threadTs || progressPost.ts
 
-  const { connection, sessions } = await getBackendConnection(backend, env)
-  const activeSession = await connection.agent.buildSession(repo.path).start()
+  // Everything from here through runPromptTurn's own setup can throw
+  // (spawn failure, initialize/session-new rejection, a DB error) — found
+  // in review before publishing that NONE of it was caught. The consequence
+  // is exactly what happened live: the "starting…" message stays stuck
+  // forever, and the only trace is a console.error nobody using Slack ever
+  // sees. Anything past this point that fails now updates the Slack
+  // message with the real error instead of hanging silently.
+  try {
+    const { connection, sessions } = await getBackendConnection(backend, env)
+    const activeSession = await connection.agent.buildSession(repo.path).start()
 
-  let appliedModel
-  if (modelName) {
-    const applied = await applyModelSelection({ connection, activeSession, modelName })
-    if (!applied.ok) {
-      activeSession.dispose()
-      await finishProgress({
-        token: env.SLACK_BOT_TOKEN,
-        channel,
-        ts: progressPost.ts,
-        label: `Agent session (${backend.name} · ${repo.name})`,
-        detail: `Could not start: ${applied.error}${applied.available ? ` (available: ${applied.available.join(', ')})` : ''}`,
-        ok: false,
-        config,
-      })
-      return applied
+    let appliedModel
+    if (modelName) {
+      const applied = await applyModelSelection({ connection, activeSession, modelName })
+      if (!applied.ok) {
+        activeSession.dispose()
+        await finishProgress({
+          token: env.SLACK_BOT_TOKEN,
+          channel,
+          ts: progressPost.ts,
+          label: `Agent session (${backend.name} · ${repo.name})`,
+          detail: `Could not start: ${applied.error}${applied.available ? ` (available: ${applied.available.join(', ')})` : ''}`,
+          ok: false,
+          config,
+        })
+        return applied
+      }
+      appliedModel = applied.model
     }
-    appliedModel = applied.model
+
+    const created = createAgentSession({
+      dbPath,
+      config,
+      source: 'slack',
+      slackChannel: channel,
+      slackThreadTs: anchorThreadTs,
+      kind: 'acp-session',
+      // acpSessionId is what makes resume-after-restart (Phase 4) possible
+      // — without it, a restarted listener has no way to reconnect this
+      // thread to the agent's own persisted conversation state.
+      metadata: { backend: backend.name, repoName: repo.name, repoPath: repo.path, requestedBy, model: appliedModel, acpSessionId: activeSession.sessionId },
+    })
+    if (!created.ok) {
+      activeSession.dispose()
+      return created
+    }
+
+    registerSession(sessions, activeSession.sessionId, {
+      fsHandlers: createFsHandlers(repo.path),
+      terminalHandlers: createTerminalHandlers(repo.path),
+      onPermissionRequest: params => handlePermissionRequest({ env, dbPath, channel, threadTs: anchorThreadTs, requestedBy, params }),
+    })
+
+    const entry = {
+      activeSession,
+      backend,
+      sessions,
+      repoName: repo.name,
+      model: appliedModel,
+      agentSessionRowId: created.session.id,
+      startedBy: requestedBy,
+      progressTs: progressPost.ts,
+      channel,
+      env,
+      config,
+      accumulatedText: '',
+    }
+    activeSessionsByKey.set(sessionKey(channel, anchorThreadTs), entry)
+
+    const response = await runPromptTurn(entry, task)
+    return { ok: true, sessionId: activeSession.sessionId, channel, threadTs: anchorThreadTs, stopReason: response.stopReason }
+  } catch (err) {
+    await finishProgress({
+      token: env.SLACK_BOT_TOKEN,
+      channel,
+      ts: progressPost.ts,
+      label: `Agent session (${backend.name} · ${repo.name})`,
+      detail: `⚠️ ${err.message || err}`,
+      ok: false,
+      config,
+    })
+    return { ok: false, error: 'agent-session-start-failed', message: err.message, retryable: false }
   }
-
-  const created = createAgentSession({
-    dbPath,
-    config,
-    source: 'slack',
-    slackChannel: channel,
-    slackThreadTs: anchorThreadTs,
-    kind: 'acp-session',
-    // acpSessionId is what makes resume-after-restart (Phase 4) possible —
-    // without it, a restarted listener has no way to reconnect this thread
-    // to the agent's own persisted conversation state.
-    metadata: { backend: backend.name, repoName: repo.name, repoPath: repo.path, requestedBy, model: appliedModel, acpSessionId: activeSession.sessionId },
-  })
-  if (!created.ok) {
-    activeSession.dispose()
-    return created
-  }
-
-  registerSession(sessions, activeSession.sessionId, {
-    fsHandlers: createFsHandlers(repo.path),
-    terminalHandlers: createTerminalHandlers(repo.path),
-    onPermissionRequest: params => handlePermissionRequest({ env, dbPath, channel, threadTs: anchorThreadTs, requestedBy, params }),
-  })
-
-  const entry = {
-    activeSession,
-    backend,
-    sessions,
-    repoName: repo.name,
-    model: appliedModel,
-    agentSessionRowId: created.session.id,
-    startedBy: requestedBy,
-    progressTs: progressPost.ts,
-    channel,
-    env,
-    config,
-    accumulatedText: '',
-  }
-  activeSessionsByKey.set(sessionKey(channel, anchorThreadTs), entry)
-
-  const response = await runPromptTurn(entry, task)
-  return { ok: true, sessionId: activeSession.sessionId, channel, threadTs: anchorThreadTs, stopReason: response.stopReason }
 }
 
 // Callers (listen/socket.js) call this unconditionally for every thread
@@ -395,14 +447,17 @@ export async function startAgentSession({ env, config, dbPath, channel, threadTs
 // exactly as before whenever it returns ok:false, whether that's "never had
 // a session" or "had one but it's unresumable now".
 export async function routeThreadReply({ env, config, dbPath, channel, threadTs, text, requestedBy }) {
-  let entry = activeSessionsByKey.get(sessionKey(channel, threadTs))
-  if (!entry) {
-    const resumed = await tryResumeSession({ env, config, dbPath, channel, threadTs, requestedBy })
-    if (!resumed.ok) return resumed
-    entry = resumed.entry
-  }
-  const response = await runPromptTurn(entry, text)
-  return { ok: true, stopReason: response.stopReason }
+  const key = sessionKey(channel, threadTs)
+  return withKeyLock(key, async () => {
+    let entry = activeSessionsByKey.get(key)
+    if (!entry) {
+      const resumed = await tryResumeSession({ env, config, dbPath, channel, threadTs, requestedBy })
+      if (!resumed.ok) return resumed
+      entry = resumed.entry
+    }
+    const response = await runPromptTurn(entry, text)
+    return { ok: true, stopReason: response.stopReason }
+  })
 }
 
 // Closing doesn't need to reconnect to the backend at all — it's pure local

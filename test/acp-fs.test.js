@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createFsHandlers, assertInsideRepo } from '../core/acp-fs.js'
@@ -64,5 +64,42 @@ test('readTextFile outside the repo is rejected', async () => {
   await withTempRepo(async repoRoot => {
     const handlers = createFsHandlers(repoRoot)
     await assert.rejects(() => handlers.readTextFile({ path: '/etc/hosts' }))
+  })
+})
+
+// A textually-inside-the-repo path can still escape via a symlink that
+// resolve() (string normalization only, never touches the filesystem)
+// cannot see. Found in review before publishing — resolve()-only checks
+// pass this even though the real target is outside the repo entirely.
+test('assertInsideRepo rejects a path that is textually inside the repo but escapes via a symlink', () => {
+  withTempRepo(outsideRepoRoot => {
+    withTempRepo(repoRoot => {
+      const outsideTarget = join(outsideRepoRoot, 'secret.txt')
+      writeFileSync(outsideTarget, 'not meant to be reachable')
+      const symlinkPath = join(repoRoot, 'escape-link')
+      symlinkSync(outsideRepoRoot, symlinkPath)
+      assert.throws(() => assertInsideRepo(repoRoot, join(symlinkPath, 'secret.txt')))
+    })
+  })
+})
+
+test('readTextFile rejects reading through a symlink that escapes the repo', async () => {
+  await withTempRepo(async outsideRepoRoot => {
+    await withTempRepo(async repoRoot => {
+      writeFileSync(join(outsideRepoRoot, 'secret.txt'), 'not meant to be reachable')
+      symlinkSync(outsideRepoRoot, join(repoRoot, 'escape-link'))
+      const handlers = createFsHandlers(repoRoot)
+      await assert.rejects(() => handlers.readTextFile({ path: join(repoRoot, 'escape-link', 'secret.txt') }))
+    })
+  })
+})
+
+test('writeTextFile rejects writing through a symlink that escapes the repo', async () => {
+  await withTempRepo(async outsideRepoRoot => {
+    await withTempRepo(async repoRoot => {
+      symlinkSync(outsideRepoRoot, join(repoRoot, 'escape-link'))
+      const handlers = createFsHandlers(repoRoot)
+      await assert.rejects(() => handlers.writeTextFile({ path: join(repoRoot, 'escape-link', 'pwned.txt'), content: 'nope' }))
+    })
   })
 })

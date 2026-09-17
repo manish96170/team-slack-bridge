@@ -226,7 +226,11 @@ Four ways to start one, all equivalent, all accepting an optional `--model name`
 1. **Slash command**: `/agent-session start --backend claude --repo team-slack-bridge --model opus fix the flaky test in core/db.js`
    (works in a channel or in a DM to the app — Slack slash commands aren't channel-restricted).
 2. **@mention with the configured keyword** (`agentSessions.mentionKeyword`, default `"start session"`):
-   `@team-slack-bridge start session --repo team-slack-bridge fix the flaky test`
+   `@team-slack-bridge start session --repo team-slack-bridge fix the flaky test`.
+   Multiple aliases can trigger the same way via `agentSessions.mentionKeywords`
+   (a list, checked longest-first so a longer alias is never shadowed by a shorter
+   one that happens to prefix it) — e.g. `["start session", "@etd start session"]`
+   lets people type either phrase, in a channel @mention or a DM alike.
 3. **A DM directly to the app** with the same keyword (D33) — no channel or @mention needed
    at all, since there's nothing to @-mention when you're already talking to the app
    directly: just DM `start session --repo team-slack-bridge fix the flaky test`, and the
@@ -287,6 +291,35 @@ actually advertised support for at connect time. If neither is supported, the re
 falls through to normal message handling exactly as if there had never been a session,
 rather than erroring. This is lazy (only on the next reply, never an eager
 resume-everything-at-startup pass) and gated by the same D24 allowlist as starting one.
+
+**Context-limit handoff.** ACP's `usage_update` session notification (`used`/`size`
+tokens, stable — not an estimate) is tracked per turn. Once a session crosses
+`agentSessions.contextWarningThreshold` (default `0.8`), the bridge asks the agent
+to self-summarize its progress and next steps, writes that to a handoff file under
+`~/.team-slack-bridge/handoffs/`, and posts a warning in the thread with three
+options — reply:
+- **`here`** (or `new session`) — closes the current session and starts a fresh one
+  in the same thread, seeded from the handoff.
+- **`new thread`** — ends this session; the reply names the handoff file's path so
+  you can start a new one yourself and reference it.
+- **`compact`** — asks the agent to trim its own context and keep going. This is a
+  best-effort nudge only: ACP has no protocol-level "compact now" request (only an
+  agent-initiated `compaction_update` notification, which this bridge does listen
+  for and treats as "no longer full" if it ever arrives), so there's no guarantee
+  it actually reduces token usage.
+
+Any other reply while a session is in this state gets the same warning resent once
+(in case it was missed), then a short "I'm full on context" refusal — it will not
+silently keep spending an over-budget context on ordinary replies. `stop`/`exit`
+still end the session outright regardless of this state.
+
+**Rewind (approximated).** ACP has no real checkpoint/rewind primitive — no
+`session/rewind`, no turn history, nothing (confirmed against the SDK's schema).
+Replying `rewind` in an active session's thread instead asks how many exchanges
+back (1-10) and whether you want the raw prompt/response text or just a plain-
+prose summary, then starts a **new** session in the same thread seeded from that
+excerpt of the bridge's own saved transcript — not a true rewind of the original
+session's live state, just a workaround built from what the bridge already logged.
 
 ## Connecting multiple AI coding harnesses / multiple Slack accounts (PLAN D21/D22)
 

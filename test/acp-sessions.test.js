@@ -1,12 +1,17 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   isAllowedToStartSession,
   isAllowedToCloseSession,
   isAllowedToUseRepo,
+  matchesMentionKeyword,
+  contextUsageRatio,
+  parseContextFullCommand,
+  parseRewindCount,
+  parseRewindDetail,
   startAgentSession,
   routeThreadReply,
   closeAgentSession,
@@ -17,12 +22,12 @@ import {
 } from '../core/acp-sessions.js'
 import { createAgentSession, updateAgentSession, getAgentSession } from '../core/agent-sessions.js'
 
-function withTempHome(fn) {
+async function withTempHome(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'tsb-acp-sessions-'))
   const original = process.env.TSB_HOME
   process.env.TSB_HOME = dir
   try {
-    return fn(dir)
+    return await fn(dir)
   } finally {
     if (original === undefined) delete process.env.TSB_HOME
     else process.env.TSB_HOME = original
@@ -78,6 +83,56 @@ test('isAllowedToUseRepo: a user with a repoAccess entry is limited to the repos
   const config = { owner: { slackUserId: 'U_OWNER' }, agentSessions: { repoAccess: { U_ALLOWED: ['repo-a'] } } }
   assert.equal(isAllowedToUseRepo(config, 'U_ALLOWED', 'repo-a'), true)
   assert.equal(isAllowedToUseRepo(config, 'U_ALLOWED', 'repo-b'), false)
+})
+
+test('matchesMentionKeyword: falls back to the single mentionKeyword when no aliases are configured', () => {
+  const config = { agentSessions: { mentionKeyword: 'start session' } }
+  assert.equal(matchesMentionKeyword('start session fix the bug', config), ' fix the bug')
+  assert.equal(matchesMentionKeyword('hello there', config), null)
+})
+
+test('matchesMentionKeyword: defaults to "start session" when nothing is configured at all', () => {
+  assert.equal(matchesMentionKeyword('start session fix it', {}), ' fix it')
+})
+
+test('matchesMentionKeyword: matches any configured alias, case-insensitively', () => {
+  const config = { agentSessions: { mentionKeywords: ['start session', '@etd start session', '@Eng Team Dashboard start session'] } }
+  assert.equal(matchesMentionKeyword('@ETD START SESSION fix it', config), ' fix it')
+  assert.equal(matchesMentionKeyword('@Eng Team Dashboard start session fix it', config), ' fix it')
+  assert.equal(matchesMentionKeyword('start session fix it', config), ' fix it')
+  assert.equal(matchesMentionKeyword('just chatting', config), null)
+})
+
+test('matchesMentionKeyword: a longer alias is not shadowed by a shorter one that prefixes it', () => {
+  const config = { agentSessions: { mentionKeywords: ['start', 'start session please'] } }
+  assert.equal(matchesMentionKeyword('start session please fix it', config), ' fix it')
+})
+
+test('contextUsageRatio: computes used/size, and is 0 for missing or zero-size usage', () => {
+  assert.equal(contextUsageRatio({ used: 80, size: 100 }), 0.8)
+  assert.equal(contextUsageRatio(undefined), 0)
+  assert.equal(contextUsageRatio({ used: 5, size: 0 }), 0)
+})
+
+test('parseContextFullCommand: recognizes compact/here/new-thread, case-insensitively, nothing else', () => {
+  assert.equal(parseContextFullCommand('compact please'), 'compact')
+  assert.equal(parseContextFullCommand('Here'), 'here')
+  assert.equal(parseContextFullCommand('new session, let\'s go'), 'here')
+  assert.equal(parseContextFullCommand('New Thread'), 'new-thread')
+  assert.equal(parseContextFullCommand('what is going on'), null)
+})
+
+test('parseRewindCount: accepts only integers 1-10', () => {
+  assert.equal(parseRewindCount('5'), 5)
+  assert.equal(parseRewindCount('0'), null)
+  assert.equal(parseRewindCount('11'), null)
+  assert.equal(parseRewindCount('abc'), null)
+})
+
+test('parseRewindDetail: recognizes the two detail-level replies', () => {
+  assert.equal(parseRewindDetail('summary and code please'), 'code')
+  assert.equal(parseRewindDetail('just summary'), 'summary')
+  assert.equal(parseRewindDetail('huh'), null)
 })
 
 test('isAllowedToCloseSession: anyone else is refused', () => {
@@ -374,6 +429,62 @@ test('runPromptTurn finishes (does not hang) when prompt() rejects, and reports 
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+// A fake ActiveSession whose nextUpdate() drains one scripted batch of
+// session_update notifications per prompt() call, then reports 'stop' —
+// enough to exercise maybeWarnContextFull's own internal prompt() call
+// (for the handoff self-summary) as a second, independent "turn".
+function makeFakeSession(script) {
+  let call = -1
+  let queue = []
+  return {
+    prompt() {
+      call++
+      queue = [...(script[call] || [])]
+      return Promise.resolve({ stopReason: 'end_turn' })
+    },
+    nextUpdate() {
+      if (queue.length) return Promise.resolve(queue.shift())
+      return Promise.resolve({ kind: 'stop', response: { stopReason: 'end_turn' } })
+    },
+  }
+}
+
+test('runPromptTurn writes a handoff file and gates the thread once usage crosses the configured threshold', async () => {
+  await withTempHome(async () => {
+    const posted = []
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = async (url, init) => {
+      const body = Object.fromEntries(new URLSearchParams(init.body))
+      posted.push(body)
+      return { status: 200, headers: new Headers(), url: url.toString(), text: async () => JSON.stringify({ ok: true, channel: body.channel, ts: '100.002' }) }
+    }
+    try {
+      const fakeActiveSession = makeFakeSession([
+        [{ kind: 'session_update', notification: { update: { sessionUpdate: 'usage_update', used: 90, size: 100 } } }],
+        [], // the handoff self-summary prompt: no notifications, just stop
+      ])
+      const entry = {
+        activeSession: fakeActiveSession,
+        backend: { name: 'claude' },
+        repoName: 'dashboard',
+        progressTs: '100.001',
+        channel: 'C1',
+        threadTs: '100.001',
+        env: { SLACK_BOT_TOKEN: 'xoxb-context-test' },
+        config: { agentSessions: { contextWarningThreshold: 0.8 } },
+        accumulatedText: '',
+      }
+      await runPromptTurn(entry, 'do the thing')
+      assert.equal(entry.contextState, 'full')
+      assert.ok(entry.handoffPath && existsSync(entry.handoffPath), 'expected a handoff file to be written')
+      assert.match(entry.lastWarningText, /Context is at 90%/)
+      assert.ok(posted.some(p => p.text?.includes('Context is at 90%')), 'expected the warning to actually be posted to Slack')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
 })
 
 // Regression test for a race found live: two rapid messages in the same

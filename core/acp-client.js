@@ -62,7 +62,11 @@ function connectBackend(backend, env) {
   return connection.agent
     .request(methods.agent.initialize, {
       protocolVersion: PROTOCOL_VERSION,
-      clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: true },
+      // session.compaction just admits compaction_update notifications if
+      // the backend ever decides to compact on its own (PLAN: context-limit
+      // handoff) — there is no protocol-level way for the client to REQUEST
+      // compaction, only to be told about one that already happened.
+      clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: true, session: { compaction: {} } },
     })
     .then(initializeResponse => ({ connection, child, sessions, initializeResponse }))
 }

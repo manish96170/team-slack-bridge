@@ -21,7 +21,7 @@ import { recordAnswer, recordAnswerByThread } from '../core/ask.js'
 import { publishHome } from '../core/home.js'
 import { setOutputModeInConfig } from '../core/config-write.js'
 import { maybeCreateAgentSessionForEvent } from '../core/agent-sessions.js'
-import { startAgentSession, routeThreadReply, closeAgentSession, parseAgentSessionCommand } from '../core/acp-sessions.js'
+import { startAgentSession, routeThreadReply, closeAgentSession, parseAgentSessionCommand, matchesMentionKeyword } from '../core/acp-sessions.js'
 import { listBackendNames } from '../core/acp-backends.js'
 import { reply } from '../core/post.js'
 
@@ -57,10 +57,10 @@ export function createListener({ env, botToken, appToken, config, configPath, db
     // trigger (PLAN: ACP thread sessions, Phase 2), not a new inbound
     // proposal to classify — same immediacy as the slash command, since
     // D24's allowlist (not classify()) is the actual trust boundary here.
-    const mentionKeyword = config.agentSessions?.mentionKeyword
     const stripped = stripMentionPrefix(event.text)
-    if (dbPath && config.agentSessions?.enabled && mentionKeyword && stripped.toLowerCase().startsWith(mentionKeyword.toLowerCase())) {
-      const { backendName, repoName, modelName, task } = parseAgentSessionCommand(stripped.slice(mentionKeyword.length))
+    const afterKeyword = dbPath && config.agentSessions?.enabled ? matchesMentionKeyword(stripped, config) : null
+    if (afterKeyword !== null) {
+      const { backendName, repoName, modelName, task } = parseAgentSessionCommand(afterKeyword)
       if (task) {
         await startAgentSession({
           env,
@@ -131,10 +131,10 @@ export function createListener({ env, botToken, appToken, config, configPath, db
     // is the DM equivalent of the app_mention keyword trigger above. No
     // channel needed at all: the session lives entirely in this DM thread.
     if (dbPath && message.channel_type === 'im' && config.agentSessions?.enabled) {
-      const mentionKeyword = config.agentSessions?.mentionKeyword
       const text = message.text || ''
-      if (mentionKeyword && text.toLowerCase().startsWith(mentionKeyword.toLowerCase())) {
-        const { backendName, repoName, modelName, task } = parseAgentSessionCommand(text.slice(mentionKeyword.length))
+      const afterKeyword = matchesMentionKeyword(text, config)
+      if (afterKeyword !== null) {
+        const { backendName, repoName, modelName, task } = parseAgentSessionCommand(afterKeyword)
         if (task) {
           await startAgentSession({
             env,

@@ -11,11 +11,64 @@ import { createTerminalHandlers } from './acp-terminal.js'
 import { createAgentSession, findAgentSessionBySlackThread, updateAgentSession } from './agent-sessions.js'
 import { startProgress, updateProgress, finishProgress } from './progress.js'
 import { ask } from './ask.js'
+import { writeHandoffFile } from './handoff.js'
 
 const DEBOUNCE_MS = 1500
 const MAX_RENDERED_CHARS = 2800
+const DEFAULT_CONTEXT_WARNING_THRESHOLD = 0.8
+const HANDOFF_SUMMARY_PROMPT =
+  'Your context window is almost full. Summarize your progress so far and the concrete next steps as a concise handoff TODO for a fresh session to continue from, in plain markdown.'
+const COMPACT_NUDGE_PROMPT =
+  'Please summarize and trim down your working context now if possible, then continue. (Best-effort request — there is no protocol-level guarantee this reduces actual token usage.)'
+const CONTEXT_FULL_SORRY_TEXT =
+  "Sorry — I can't continue right now, I'm full on context. Reply *compact* to try trimming and continuing, *here* to start a fresh session in this thread seeded from the handoff, or *new thread* to start a separate one yourself."
 
 const activeSessionsByKey = new Map()
+
+// Matches the configured DM/mention trigger keyword(s) case-insensitively
+// at the start of the text, returning the remainder (backend/repo/model
+// flags + task) — or null if nothing matched. `mentionKeywords` (an array
+// of aliases, e.g. "@etd start session") takes priority over the older
+// single `mentionKeyword` string, sorted longest-first so a longer alias
+// isn't shadowed by a shorter one that happens to be a prefix of it.
+export function matchesMentionKeyword(text, config) {
+  const lower = (text || '').toLowerCase()
+  const configured = config.agentSessions?.mentionKeywords?.length
+    ? config.agentSessions.mentionKeywords
+    : [config.agentSessions?.mentionKeyword || 'start session']
+  const keywords = configured.filter(Boolean).sort((a, b) => b.length - a.length)
+  for (const keyword of keywords) {
+    if (lower.startsWith(keyword.toLowerCase())) return (text || '').slice(keyword.length)
+  }
+  return null
+}
+
+export function contextUsageRatio(usage) {
+  if (!usage || !usage.size) return 0
+  return usage.used / usage.size
+}
+
+// Recognized only while a session is in the contextState:'full' gate below
+// — outside that gate these are just ordinary words in a normal prompt.
+export function parseContextFullCommand(text) {
+  const t = (text || '').trim().toLowerCase()
+  if (/^compact\b/.test(t)) return 'compact'
+  if (/^here\b/.test(t) || /^new session\b/.test(t)) return 'here'
+  if (/^new thread\b/.test(t)) return 'new-thread'
+  return null
+}
+
+export function parseRewindCount(text) {
+  const n = Number((text || '').trim())
+  return Number.isInteger(n) && n >= 1 && n <= 10 ? n : null
+}
+
+export function parseRewindDetail(text) {
+  const t = (text || '').trim().toLowerCase()
+  if (t.startsWith('summary and code') || t === 'code') return 'code'
+  if (t.startsWith('just summary') || t === 'summary') return 'summary'
+  return null
+}
 
 function sessionKey(channel, threadTs) {
   return `${channel}:${threadTs}`
@@ -249,9 +302,11 @@ async function tryResumeSession({ env, config, dbPath, channel, threadTs, reques
     startedBy: persisted.metadata?.requestedBy,
     progressTs: progressPost.ts,
     channel,
+    threadTs,
     env,
     config,
     accumulatedText: '',
+    transcript: [],
   }
   activeSessionsByKey.set(sessionKey(channel, threadTs), entry)
   updateAgentSession({ dbPath, id: persisted.id, status: 'active' })
@@ -264,6 +319,18 @@ function describeUpdate(update) {
   }
   if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
     return { text: `\n[tool: ${update.title || update.toolCallId}${update.status ? ` — ${update.status}` : ''}]` }
+  }
+  // usage_update (used/size, stable) is the real signal behind the
+  // 80%-context warning below — no heuristic needed. compaction_update
+  // only ever arrives if the client advertises ClientSessionCapabilities
+  // .compaction (see core/acp-client.js's initialize call); when the agent
+  // reports it finished one on its own, treat the context as no longer
+  // full rather than waiting for the next usage_update to catch up.
+  if (update.sessionUpdate === 'usage_update') {
+    return { usage: { used: update.used, size: update.size } }
+  }
+  if (update.sessionUpdate === 'compaction_update' && update.status === 'completed') {
+    return { text: '\n[context compacted]', compacted: true }
   }
   return null
 }
@@ -336,14 +403,230 @@ export async function runPromptTurn(entry, promptText) {
         ok: message.response.stopReason === 'end_turn',
         config: entry.config,
       })
+      entry.transcript = entry.transcript || []
+      entry.transcript.push({ prompt: promptText, response: entry.accumulatedText, ts: Date.now() })
+      if (entry.transcript.length > 20) entry.transcript = entry.transcript.slice(-20)
+      await maybeWarnContextFull(entry)
       return message.response
     }
     const described = describeUpdate(message.notification.update)
     if (described) {
-      entry.accumulatedText += described.text
-      scheduleFlush()
+      if (described.text) {
+        entry.accumulatedText += described.text
+        scheduleFlush()
+      }
+      if (described.usage) entry.contextUsage = described.usage
+      if (described.compacted) entry.contextState = 'normal'
     }
   }
+}
+
+// A no-frills sibling of the main streaming loop above, for prompts the
+// bridge itself sends (the handoff self-summary, the rewind summary, the
+// compact nudge's own re-check) rather than ones a Slack user typed —
+// these must not recurse into maybeWarnContextFull or pollute the
+// user-facing transcript/progress message, just return the plain text.
+async function runInternalPrompt(entry, promptText) {
+  let text = ''
+  const failureSignal = new Promise(resolve => {
+    entry.activeSession.prompt(promptText).then(
+      () => {},
+      err => resolve({ kind: 'error', error: err })
+    )
+  })
+  for (;;) {
+    const message = await Promise.race([entry.activeSession.nextUpdate(), failureSignal])
+    if (message.kind === 'error' || message.kind === 'stop') return text
+    const described = describeUpdate(message.notification.update)
+    if (described?.text) text += described.text
+    if (described?.usage) entry.contextUsage = described.usage
+  }
+}
+
+// Fires once per crossing (never while already 'full') right after a turn
+// finishes — never mid-stream, so it can't interleave with the turn's own
+// finishProgress. Writes a self-summarized handoff file and gates further
+// replies in this thread until the user picks compact/here/new-thread
+// (routeThreadReply's contextState:'full' branch below).
+async function maybeWarnContextFull(entry) {
+  if (entry.contextState === 'full') return
+  const threshold = entry.config?.agentSessions?.contextWarningThreshold ?? DEFAULT_CONTEXT_WARNING_THRESHOLD
+  const ratio = contextUsageRatio(entry.contextUsage)
+  if (ratio < threshold) return
+
+  const summary = await runInternalPrompt(entry, HANDOFF_SUMMARY_PROMPT)
+  const path = writeHandoffFile({ repoName: entry.repoName, summary })
+  entry.contextState = 'full'
+  entry.remindersSent = 0
+  entry.handoffPath = path
+  entry.handoffText = summary
+  entry.lastWarningText = `⚠️ *Context is at ${Math.round(ratio * 100)}%* — this session is near its limit.\n\nHandoff summary written to \`${path}\`.\n\nReply *here* to continue in this thread with a fresh session seeded from this handoff, *new thread* to start a separate one yourself using that file, or *compact* to ask me to trim context and try continuing.`
+  await startProgress({
+    token: entry.env.SLACK_BOT_TOKEN,
+    channel: entry.channel,
+    label: sessionLabel(entry),
+    detail: entry.lastWarningText,
+    threadTs: entry.threadTs,
+    config: entry.config,
+  })
+}
+
+// Disposes the current ACP session and starts a brand-new one anchored to
+// the SAME Slack thread, seeded with `seedTask` — the shared mechanism
+// behind both "continue here" (handoff) and rewind-to-a-new-session.
+// Deliberately calls startAgentSessionBody directly rather than the
+// exported startAgentSession: the latter takes its own withKeyLock on this
+// exact {channel, threadTs} key, and every caller of this function is
+// already running inside that same lock (routeThreadReply's callback) —
+// re-acquiring it here would deadlock forever waiting on itself.
+async function startFreshSessionInPlace(entry, { env, config, dbPath, seedTask }) {
+  const key = sessionKey(entry.channel, entry.threadTs)
+  entry.activeSession.dispose()
+  unregisterSession(entry.sessions, entry.activeSession.sessionId)
+  activeSessionsByKey.delete(key)
+  if (entry.agentSessionRowId) updateAgentSession({ dbPath, id: entry.agentSessionRowId, status: 'closed' })
+
+  const backend = entry.backend
+  const repo = resolveRepoPath(entry.repoName)
+  if (!repo.ok) return repo
+  const progressPost = await startProgress({
+    token: env.SLACK_BOT_TOKEN,
+    channel: entry.channel,
+    label: `Agent session (${backend.name} · ${repo.name})`,
+    detail: 'starting a fresh session…',
+    threadTs: entry.threadTs,
+    config,
+  })
+  if (!progressPost.ok) return progressPost
+  return startAgentSessionBody({
+    env,
+    config,
+    dbPath,
+    channel: entry.channel,
+    backend,
+    repo,
+    modelName: entry.model,
+    task: seedTask,
+    requestedBy: entry.startedBy,
+    progressPost,
+    anchorThreadTs: entry.threadTs,
+  })
+}
+
+function buildHandoffSeedTask(handoffText) {
+  return `Continuing from a previous session that reached its context limit. Handoff summary:\n\n${handoffText}\n\nPlease continue from here.`
+}
+
+function buildRewindSeedTask(seedText) {
+  return `Continuing in a fresh session, rewound to an earlier point. Prior context:\n\n${seedText}\n\nPlease continue from here.`
+}
+
+// The contextState:'full' gate (see maybeWarnContextFull above): every
+// reply in the thread lands here instead of running a normal turn, until
+// the user picks one of the three options the warning offered.
+async function handleContextFullReply({ entry, text, env, config, dbPath }) {
+  const command = parseContextFullCommand(text)
+  if (command === 'compact') {
+    entry.contextState = 'normal'
+    const progressPost = await startProgress({
+      token: entry.env.SLACK_BOT_TOKEN,
+      channel: entry.channel,
+      label: sessionLabel(entry),
+      detail: 'starting…',
+      threadTs: entry.threadTs,
+      config: entry.config,
+    })
+    if (!progressPost.ok) return progressPost
+    entry.progressTs = progressPost.ts
+    const response = await runPromptTurn(entry, COMPACT_NUDGE_PROMPT)
+    return { ok: true, stopReason: response.stopReason }
+  }
+  if (command === 'here') {
+    const started = await startFreshSessionInPlace(entry, { env, config, dbPath, seedTask: buildHandoffSeedTask(entry.handoffText) })
+    return { ok: started.ok, stopReason: started.stopReason, error: started.error }
+  }
+  if (command === 'new-thread') {
+    await startProgress({
+      token: entry.env.SLACK_BOT_TOKEN,
+      channel: entry.channel,
+      label: sessionLabel(entry),
+      detail: `This session has ended due to context limits. Start a new session in a new thread — the handoff summary is at \`${entry.handoffPath}\` if you want to reference it.`,
+      threadTs: entry.threadTs,
+      config: entry.config,
+    })
+    return { ok: true }
+  }
+  // Not one of the three recognized commands — an organic reply. Resend
+  // the warning exactly once (in case it was missed), then just refuse,
+  // rather than silently spawning a real agent turn against a session
+  // that's already over its context budget.
+  const detail = entry.remindersSent ? CONTEXT_FULL_SORRY_TEXT : entry.lastWarningText
+  entry.remindersSent = (entry.remindersSent || 0) + 1
+  await startProgress({
+    token: entry.env.SLACK_BOT_TOKEN,
+    channel: entry.channel,
+    label: sessionLabel(entry),
+    detail,
+    threadTs: entry.threadTs,
+    config: entry.config,
+  })
+  return { ok: true }
+}
+
+// Rewind is a two-step free-text Q&A (how far back, then how much detail)
+// tracked on entry.pendingRewind across separate Slack replies — approximated
+// via a fresh new session seeded from OUR saved transcript, since ACP has no
+// real rewind/checkpoint primitive to roll the live agent back to (confirmed:
+// no session/rewind method, no checkpoint concept anywhere in the spec).
+async function handleRewindStep({ entry, text, env, config, dbPath }) {
+  const pending = entry.pendingRewind
+  if (pending.step === 'count') {
+    const count = parseRewindCount(text)
+    if (!count) {
+      await startProgress({
+        token: entry.env.SLACK_BOT_TOKEN,
+        channel: entry.channel,
+        label: sessionLabel(entry),
+        detail: 'Please reply with a number from 1 to 10.',
+        threadTs: entry.threadTs,
+        config: entry.config,
+      })
+      return { ok: true }
+    }
+    entry.pendingRewind = { step: 'detail', count }
+    await startProgress({
+      token: entry.env.SLACK_BOT_TOKEN,
+      channel: entry.channel,
+      label: sessionLabel(entry),
+      detail: 'Summary and code, or just summary?',
+      threadTs: entry.threadTs,
+      config: entry.config,
+    })
+    return { ok: true }
+  }
+
+  const detail = parseRewindDetail(text)
+  if (!detail) {
+    await startProgress({
+      token: entry.env.SLACK_BOT_TOKEN,
+      channel: entry.channel,
+      label: sessionLabel(entry),
+      detail: 'Please reply "summary and code" or "just summary".',
+      threadTs: entry.threadTs,
+      config: entry.config,
+    })
+    return { ok: true }
+  }
+
+  const count = pending.count
+  entry.pendingRewind = null
+  const excerptTurns = (entry.transcript || []).slice(-count)
+  const seedText =
+    detail === 'code'
+      ? excerptTurns.map(t => `> ${t.prompt}\n\n${t.response}`).join('\n\n---\n\n')
+      : await runInternalPrompt(entry, `In plain prose with no code, summarize the last ${count} exchanges of this session.`)
+  const started = await startFreshSessionInPlace(entry, { env, config, dbPath, seedTask: buildRewindSeedTask(seedText) })
+  return { ok: started.ok, stopReason: started.stopReason, error: started.error }
 }
 
 export async function startAgentSession({ env, config, dbPath, channel, threadTs, backendName, repoName, modelName, task, requestedBy }) {
@@ -448,9 +731,11 @@ async function startAgentSessionBody({ env, config, dbPath, channel, backend, re
       startedBy: requestedBy,
       progressTs: progressPost.ts,
       channel,
+      threadTs: anchorThreadTs,
       env,
       config,
       accumulatedText: '',
+      transcript: [],
     }
     activeSessionsByKey.set(sessionKey(channel, anchorThreadTs), entry)
 
@@ -483,22 +768,39 @@ export async function routeThreadReply({ env, config, dbPath, channel, threadTs,
       const resumed = await tryResumeSession({ env, config, dbPath, channel, threadTs, requestedBy })
       if (!resumed.ok) return resumed
       entry = resumed.entry
-    } else {
-      // Post a fresh message for this turn instead of reusing the
-      // progressTs captured at session creation — without this, every
-      // reply in the thread just edits that first "starting…" message
-      // in place rather than appearing as its own reply.
-      const progressPost = await startProgress({
+      const response = await runPromptTurn(entry, text)
+      return { ok: true, stopReason: response.stopReason }
+    }
+
+    if (entry.pendingRewind) return handleRewindStep({ entry, text, env, config, dbPath })
+    if (/^rewind\b/i.test((text || '').trim())) {
+      entry.pendingRewind = { step: 'count' }
+      await startProgress({
         token: entry.env.SLACK_BOT_TOKEN,
         channel: entry.channel,
         label: sessionLabel(entry),
-        detail: 'starting…',
-        threadTs,
+        detail: 'How many exchanges back do you want to rewind to? Reply with a number from 1 to 10.',
+        threadTs: entry.threadTs,
         config: entry.config,
       })
-      if (!progressPost.ok) return progressPost
-      entry.progressTs = progressPost.ts
+      return { ok: true }
     }
+    if (entry.contextState === 'full') return handleContextFullReply({ entry, text, env, config, dbPath })
+
+    // Post a fresh message for this turn instead of reusing the
+    // progressTs captured at session creation — without this, every
+    // reply in the thread just edits that first "starting…" message
+    // in place rather than appearing as its own reply.
+    const progressPost = await startProgress({
+      token: entry.env.SLACK_BOT_TOKEN,
+      channel: entry.channel,
+      label: sessionLabel(entry),
+      detail: 'starting…',
+      threadTs,
+      config: entry.config,
+    })
+    if (!progressPost.ok) return progressPost
+    entry.progressTs = progressPost.ts
     const response = await runPromptTurn(entry, text)
     return { ok: true, stopReason: response.stopReason }
   })

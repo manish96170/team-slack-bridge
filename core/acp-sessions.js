@@ -608,8 +608,27 @@ async function handleContextFullReply({ entry, text, env, config, dbPath, reques
 // via a fresh new session seeded from OUR saved transcript, since ACP has no
 // real rewind/checkpoint primitive to roll the live agent back to (confirmed:
 // no session/rewind method, no checkpoint concept anywhere in the spec).
-async function handleRewindStep({ entry, text, env, config, dbPath }) {
+async function handleRewindStep({ entry, text, env, config, dbPath, requestedBy }) {
   const pending = entry.pendingRewind
+  // The initial "rewind" trigger already checked this, but that only
+  // proves whoever TYPED "rewind" had close rights — without re-checking
+  // here, any other thread participant could answer these follow-up
+  // questions and drive the same disposal/replacement the initial gate
+  // was meant to block. Ends the flow rather than leaving it pending
+  // indefinitely for the original (rights-holding) asker to stumble back
+  // into.
+  if (!requireCloseRights(entry, config, requestedBy)) {
+    entry.pendingRewind = null
+    await startProgress({
+      token: entry.env.SLACK_BOT_TOKEN,
+      channel: entry.channel,
+      label: sessionLabel(entry),
+      detail: 'Only the owner, whoever started this session, or an explicitly listed controller can rewind it.',
+      threadTs: entry.threadTs,
+      config: entry.config,
+    })
+    return { ok: true }
+  }
   if (pending.step === 'count') {
     const count = parseRewindCount(text)
     if (!count) {
@@ -817,7 +836,7 @@ export async function routeThreadReply({ env, config, dbPath, channel, threadTs,
       return { ok: true, stopReason: response.stopReason }
     }
 
-    if (entry.pendingRewind) return handleRewindStep({ entry, text, env, config, dbPath })
+    if (entry.pendingRewind) return handleRewindStep({ entry, text, env, config, dbPath, requestedBy })
     if (/^rewind\b/i.test((text || '').trim())) {
       // Rewind always ends in disposing/replacing the session, same as
       // 'here'/'new-thread' below — gate it up front rather than walking

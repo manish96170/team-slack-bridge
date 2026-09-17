@@ -89,7 +89,17 @@ export function createListener({ env, botToken, appToken, config, configPath, db
   // message.im / message.channels / message.groups all land here; classify()
   // itself decides relevance from channel_type — see core/classify.js.
   app.message(async ({ message }) => {
-    if (message.subtype) return // edits, joins, etc. — not a proposal
+    // A bot_message normally means an edit/join/other-app noise, not a
+    // proposal — unless it's from an app explicitly trusted to act on a
+    // named human's behalf via agentSessions.trustedApps ({ botOrAppId:
+    // slackUserId }), in which case it's treated exactly like a DM from
+    // that human (same allowlist/repo checks apply downstream, since
+    // requestedBy below resolves to their real user id, not the app's).
+    const trustedActingAs = message.subtype === 'bot_message'
+      ? config.agentSessions?.trustedApps?.[message.bot_id] || config.agentSessions?.trustedApps?.[message.app_id]
+      : undefined
+    if (message.subtype && !trustedActingAs) return
+    const requestedBy = message.user || trustedActingAs
 
     // A free-text reply in a pending ask's thread is an answer, not a new
     // inbound proposal — capture it and stop, so it never also shows up as
@@ -98,7 +108,7 @@ export function createListener({ env, botToken, appToken, config, configPath, db
       const captured = recordAnswerByThread(dbPath, message.channel, message.thread_ts, {
         kind: 'question',
         text: message.text,
-        user: message.user,
+        user: requestedBy,
       })
       if (captured) return
     }
@@ -108,7 +118,7 @@ export function createListener({ env, botToken, appToken, config, configPath, db
     // the agent as a prompt — closeAgentSession works either way (in-memory
     // or DB-only), so this ends a session even if nobody ever resumed it.
     if (dbPath && message.thread_ts && SESSION_STOP_WORDS.has((message.text || '').trim().toLowerCase())) {
-      const closed = closeAgentSession({ dbPath, config, channel: message.channel, threadTs: message.thread_ts, requestedBy: message.user })
+      const closed = closeAgentSession({ dbPath, config, channel: message.channel, threadTs: message.thread_ts, requestedBy })
       if (closed.ok) {
         await reply({ token: botToken, channel: message.channel, threadTs: message.thread_ts, text: 'Session closed.' })
         return
@@ -136,7 +146,7 @@ export function createListener({ env, botToken, appToken, config, configPath, db
             repoName,
             modelName,
             task,
-            requestedBy: message.user,
+            requestedBy,
           })
           return
         }
@@ -159,7 +169,7 @@ export function createListener({ env, botToken, appToken, config, configPath, db
         channel: message.channel,
         threadTs: message.thread_ts,
         text: message.text,
-        requestedBy: message.user,
+        requestedBy,
       })
       if (routed.ok) return
     }

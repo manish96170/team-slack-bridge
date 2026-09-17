@@ -230,7 +230,16 @@ Four ways to start one, all equivalent, all accepting an optional `--model name`
 3. **A DM directly to the app** with the same keyword (D33) — no channel or @mention needed
    at all, since there's nothing to @-mention when you're already talking to the app
    directly: just DM `start session --repo team-slack-bridge fix the flaky test`, and the
-   session lives entirely in that DM thread.
+   session lives entirely in that DM thread. This only fires for a DM from a real human by
+   default — a message.im event from another Slack app/bot carries no `user` id at all (it
+   has `bot_id`/`app_id` instead), so it's dropped before ever reaching the allowlist check.
+   To let a specific trusted app DM-trigger sessions on a named human's behalf, add its
+   `bot_id` or `app_id` to `agentSessions.trustedApps`:
+   ```json
+   "agentSessions": { "trustedApps": { "A0123ENGDASH": "U0123ABC" } }
+   ```
+   The DM is then treated exactly as if `U0123ABC` sent it — same `allowedUsers`/
+   `repoAccess` checks apply, so this is scoping *who the app acts as*, not a bypass.
 4. **Message shortcut** — right-click any message → "Start agent session" → a modal
    asks for backend/repo/model/task; the session anchors to that message's thread
    (requires adding the `shortcuts` entry from

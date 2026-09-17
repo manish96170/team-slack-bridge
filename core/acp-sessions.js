@@ -689,6 +689,23 @@ async function handleRewindStep({ entry, text, env, config, dbPath, requestedBy 
     detail === 'code'
       ? excerptTurns.map(t => `> ${t.prompt}\n\n${t.response}`).join('\n\n---\n\n')
       : await runInternalPrompt(entry, `In plain prose with no code, summarize the last ${count} exchanges of this session.`)
+  // runInternalPrompt returns whatever partial text it got even on a
+  // failed/rejected internal prompt() (a crashed backend, an auth error) —
+  // silently disposing the live session and replacing it with one seeded
+  // from nothing would be strictly worse than just refusing and leaving
+  // the original session intact.
+  if (!seedText.trim()) {
+    entry.pendingRewind = null
+    await startProgress({
+      token: entry.env.SLACK_BOT_TOKEN,
+      channel: entry.channel,
+      label: sessionLabel(entry),
+      detail: "Couldn't produce a summary to rewind to — the session was left as-is. Try again, or reply \"summary and code\" instead.",
+      threadTs: entry.threadTs,
+      config: entry.config,
+    })
+    return { ok: true }
+  }
   const started = await startFreshSessionInPlace(entry, { env, config, dbPath, seedTask: buildRewindSeedTask(seedText) })
   return { ok: started.ok, stopReason: started.stopReason, error: started.error }
 }

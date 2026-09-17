@@ -90,12 +90,17 @@ export function createListener({ env, botToken, appToken, config, configPath, db
   // itself decides relevance from channel_type — see core/classify.js.
   app.message(async ({ message }) => {
     // A bot_message normally means an edit/join/other-app noise, not a
-    // proposal — unless it's from an app explicitly trusted to act on a
-    // named human's behalf via agentSessions.trustedApps ({ botOrAppId:
+    // proposal — unless it's a DM from an app explicitly trusted to act on
+    // a named human's behalf via agentSessions.trustedApps ({ botOrAppId:
     // slackUserId }), in which case it's treated exactly like a DM from
     // that human (same allowlist/repo checks apply downstream, since
     // requestedBy below resolves to their real user id, not the app's).
-    const trustedActingAs = message.subtype === 'bot_message'
+    // Scoped to channel_type === 'im' deliberately — without this, the
+    // same trusted app posting a bot_message into any CHANNEL thread
+    // would resolve to the mapped human there too, letting it stop/reply
+    // to/rewind sessions across every channel it can post into, not just
+    // DM-trigger one as documented (found in review before publishing).
+    const trustedActingAs = message.subtype === 'bot_message' && message.channel_type === 'im'
       ? config.agentSessions?.trustedApps?.[message.bot_id] || config.agentSessions?.trustedApps?.[message.app_id]
       : undefined
     if (message.subtype && !trustedActingAs) return

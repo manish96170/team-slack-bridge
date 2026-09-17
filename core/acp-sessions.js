@@ -524,8 +524,28 @@ function buildRewindSeedTask(seedText) {
 // The contextState:'full' gate (see maybeWarnContextFull above): every
 // reply in the thread lands here instead of running a normal turn, until
 // the user picks one of the three options the warning offered.
-async function handleContextFullReply({ entry, text, env, config, dbPath }) {
+// D31 gate for the two branches below that dispose/replace the underlying
+// session ('here', 'new-thread') — same close-rights check closeAgentSession
+// and stop/exit already enforce elsewhere. 'compact' doesn't dispose
+// anything (it's just another turn), so it's ungated like any ordinary
+// reply in an active thread.
+function requireCloseRights(entry, config, requestedBy) {
+  return isAllowedToCloseSession(config, requestedBy, entry.startedBy)
+}
+
+async function handleContextFullReply({ entry, text, env, config, dbPath, requestedBy }) {
   const command = parseContextFullCommand(text)
+  if ((command === 'here' || command === 'new-thread') && !requireCloseRights(entry, config, requestedBy)) {
+    await startProgress({
+      token: entry.env.SLACK_BOT_TOKEN,
+      channel: entry.channel,
+      label: sessionLabel(entry),
+      detail: "Only the owner, whoever started this session, or an explicitly listed controller can end or replace it. Reply *compact* to try continuing instead.",
+      threadTs: entry.threadTs,
+      config: entry.config,
+    })
+    return { ok: true }
+  }
   if (command === 'compact') {
     entry.contextState = 'normal'
     const progressPost = await startProgress({
@@ -799,6 +819,20 @@ export async function routeThreadReply({ env, config, dbPath, channel, threadTs,
 
     if (entry.pendingRewind) return handleRewindStep({ entry, text, env, config, dbPath })
     if (/^rewind\b/i.test((text || '').trim())) {
+      // Rewind always ends in disposing/replacing the session, same as
+      // 'here'/'new-thread' below — gate it up front rather than walking
+      // the user through two questions only to refuse at the end.
+      if (!requireCloseRights(entry, config, requestedBy)) {
+        await startProgress({
+          token: entry.env.SLACK_BOT_TOKEN,
+          channel: entry.channel,
+          label: sessionLabel(entry),
+          detail: 'Only the owner, whoever started this session, or an explicitly listed controller can rewind it.',
+          threadTs: entry.threadTs,
+          config: entry.config,
+        })
+        return { ok: true }
+      }
       entry.pendingRewind = { step: 'count' }
       await startProgress({
         token: entry.env.SLACK_BOT_TOKEN,
@@ -810,7 +844,7 @@ export async function routeThreadReply({ env, config, dbPath, channel, threadTs,
       })
       return { ok: true }
     }
-    if (entry.contextState === 'full') return handleContextFullReply({ entry, text, env, config, dbPath })
+    if (entry.contextState === 'full') return handleContextFullReply({ entry, text, env, config, dbPath, requestedBy })
 
     // Post a fresh message for this turn instead of reusing the
     // progressTs captured at session creation — without this, every

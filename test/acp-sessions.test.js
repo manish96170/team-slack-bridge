@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import {
   isAllowedToStartSession,
   isAllowedToCloseSession,
+  isAllowedToUseRepo,
   startAgentSession,
   routeThreadReply,
   closeAgentSession,
@@ -62,6 +63,21 @@ test('isAllowedToCloseSession: being in allowedUsers (start rights) does NOT gra
 test('isAllowedToCloseSession: an explicitly listed controller may close a session they did not start', () => {
   const config = { owner: { slackUserId: 'U_OWNER' }, agentSessions: { allowedControllers: ['U_CONTROLLER'] } }
   assert.equal(isAllowedToCloseSession(config, 'U_CONTROLLER', 'U_SOMEONE_ELSE'), true)
+})
+
+test('isAllowedToUseRepo: the owner may use any repo regardless of repoAccess', () => {
+  const config = { owner: { slackUserId: 'U_OWNER' }, agentSessions: { repoAccess: { U_OWNER: [] } } }
+  assert.equal(isAllowedToUseRepo(config, 'U_OWNER', 'some-repo'), true)
+})
+
+test('isAllowedToUseRepo: a user with no repoAccess entry configured stays unrestricted (backward compatible)', () => {
+  assert.equal(isAllowedToUseRepo(baseConfig, 'U_ALLOWED', 'any-repo-at-all'), true)
+})
+
+test('isAllowedToUseRepo: a user with a repoAccess entry is limited to the repos listed in it', () => {
+  const config = { owner: { slackUserId: 'U_OWNER' }, agentSessions: { repoAccess: { U_ALLOWED: ['repo-a'] } } }
+  assert.equal(isAllowedToUseRepo(config, 'U_ALLOWED', 'repo-a'), true)
+  assert.equal(isAllowedToUseRepo(config, 'U_ALLOWED', 'repo-b'), false)
 })
 
 test('isAllowedToCloseSession: anyone else is refused', () => {

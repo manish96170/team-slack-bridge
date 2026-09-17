@@ -118,6 +118,18 @@ export function isAllowedToCloseSession(config, userId, startedBy) {
   return (config.agentSessions?.allowedControllers || []).includes(userId)
 }
 
+// `allowedUsers` only grants "may start/resume a session at all" — which
+// registered repos they may point it at is a separate, optional grant via
+// `agentSessions.repoAccess` ({ userId: [repoName, ...] }). A user with no
+// repoAccess entry configured stays unrestricted, so installs that never
+// set this up keep today's behavior; the owner is always unrestricted.
+export function isAllowedToUseRepo(config, userId, repoName) {
+  if (config.owner?.slackUserId === userId) return true
+  const repoAccess = config.agentSessions?.repoAccess
+  if (!repoAccess || !Object.prototype.hasOwnProperty.call(repoAccess, userId)) return true
+  return (repoAccess[userId] || []).includes(repoName)
+}
+
 async function handlePermissionRequest({ env, dbPath, channel, threadTs, requestedBy, params }) {
   const optionLabels = params.options.map(option => option.name)
   const result = await ask({
@@ -177,6 +189,9 @@ async function tryResumeSession({ env, config, dbPath, channel, threadTs, reques
   const { backend: backendName, repoName, repoPath, acpSessionId, model } = persisted.metadata || {}
   const backend = getBackend(backendName)
   if (!backend || !acpSessionId || !repoPath) return { ok: false, error: 'no-active-session-for-thread', retryable: false }
+  if (!isAllowedToUseRepo(config, requestedBy, repoName)) {
+    return { ok: false, error: 'no-active-session-for-thread', retryable: false }
+  }
 
   // Anything here (spawn failure, resume/load rejection, a DB error) used
   // to propagate uncaught, all the way to Bolt's app.error handler — the
@@ -340,6 +355,9 @@ export async function startAgentSession({ env, config, dbPath, channel, threadTs
 
   const repo = resolveRepoPath(repoName)
   if (!repo.ok) return repo
+  if (!isAllowedToUseRepo(config, requestedBy, repo.name)) {
+    return { ok: false, error: 'not-allowed-to-use-repo', retryable: false }
+  }
 
   // Post first, then anchor everything (the DB row, the in-memory session
   // key, future thread-reply routing) on the RESULTING message's ts when no
@@ -465,6 +483,21 @@ export async function routeThreadReply({ env, config, dbPath, channel, threadTs,
       const resumed = await tryResumeSession({ env, config, dbPath, channel, threadTs, requestedBy })
       if (!resumed.ok) return resumed
       entry = resumed.entry
+    } else {
+      // Post a fresh message for this turn instead of reusing the
+      // progressTs captured at session creation — without this, every
+      // reply in the thread just edits that first "starting…" message
+      // in place rather than appearing as its own reply.
+      const progressPost = await startProgress({
+        token: entry.env.SLACK_BOT_TOKEN,
+        channel: entry.channel,
+        label: sessionLabel(entry),
+        detail: 'starting…',
+        threadTs,
+        config: entry.config,
+      })
+      if (!progressPost.ok) return progressPost
+      entry.progressTs = progressPost.ts
     }
     const response = await runPromptTurn(entry, text)
     return { ok: true, stopReason: response.stopReason }

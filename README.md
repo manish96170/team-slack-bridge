@@ -258,6 +258,19 @@ started that specific session, or someone explicitly listed in the new
 behalf" is a bigger trust decision than "can start their own") may close it.
 Local-profile-only (D26) — this never touches `mcp/tools.remote.js`/`mcp/http.js`.
 
+**`allowedUsers` doesn't grant access to every registered repo.** Being on the
+allowlist only means you may start/resume sessions at all; which named repos
+(`core/repos.js`) you may point one at is a separate, optional grant via
+`agentSessions.repoAccess`:
+
+```json
+"agentSessions": { "allowedUsers": ["U0123ABC", "U0456DEF"], "repoAccess": { "U0456DEF": ["team-slack-bridge"] } }
+```
+
+A user with no entry in `repoAccess` (like `U0123ABC` above) stays unrestricted
+— this keeps existing installs working unchanged until you opt in per user. The
+owner is always unrestricted regardless of this setting.
+
 **Surviving a listener restart (D29)**: a reply in a thread whose session was lost to a
 restart (the in-memory state is gone, but `agent_sessions` still has the row) triggers
 a resume attempt — `session/resume` first, `session/load` second, whichever the backend

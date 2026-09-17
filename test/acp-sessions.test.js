@@ -321,13 +321,13 @@ test('routeThreadReply will not resume a session with an unknown backend or miss
   assert.equal(result.error, 'no-active-session-for-thread')
 })
 
-test('closeAgentSession with no in-memory session for the thread fails clearly instead of pretending to succeed', () => {
-  const result = closeAgentSession({ dbPath: tempDbPath(), config: baseConfig, channel: 'C-never-had-one', threadTs: '9.9', requestedBy: 'U_OWNER' })
+test('closeAgentSession with no in-memory session for the thread fails clearly instead of pretending to succeed', async () => {
+  const result = await closeAgentSession({ dbPath: tempDbPath(), config: baseConfig, channel: 'C-never-had-one', threadTs: '9.9', requestedBy: 'U_OWNER' })
   assert.equal(result.ok, false)
   assert.equal(result.error, 'no-active-session-for-thread')
 })
 
-test('closeAgentSession refuses someone who neither started the session, nor is the owner, nor is an explicitly listed controller (D31 — start rights alone are not stop rights)', () => {
+test('closeAgentSession refuses someone who neither started the session, nor is the owner, nor is an explicitly listed controller (D31 — start rights alone are not stop rights)', async () => {
   const dbPath = tempDbPath()
   createAgentSession({
     dbPath,
@@ -337,12 +337,12 @@ test('closeAgentSession refuses someone who neither started the session, nor is 
     kind: 'acp-session',
     metadata: { backend: 'claude', repoPath: '/tmp', acpSessionId: 'sess-1', requestedBy: 'U_ALLOWED' },
   })
-  const result = closeAgentSession({ dbPath, config: baseConfig, channel: 'C1', threadTs: '1.1', requestedBy: 'U_RANDOM' })
+  const result = await closeAgentSession({ dbPath, config: baseConfig, channel: 'C1', threadTs: '1.1', requestedBy: 'U_RANDOM' })
   assert.equal(result.ok, false)
   assert.equal(result.error, 'not-allowed-to-close-agent-session')
 })
 
-test('closeAgentSession allows the session\'s own starter, even though they are not the owner', () => {
+test('closeAgentSession allows the session\'s own starter, even though they are not the owner', async () => {
   const dbPath = tempDbPath()
   createAgentSession({
     dbPath,
@@ -352,11 +352,11 @@ test('closeAgentSession allows the session\'s own starter, even though they are 
     kind: 'acp-session',
     metadata: { backend: 'claude', repoPath: '/tmp', acpSessionId: 'sess-1', requestedBy: 'U_ALLOWED' },
   })
-  const result = closeAgentSession({ dbPath, config: baseConfig, channel: 'C1', threadTs: '1.1', requestedBy: 'U_ALLOWED' })
+  const result = await closeAgentSession({ dbPath, config: baseConfig, channel: 'C1', threadTs: '1.1', requestedBy: 'U_ALLOWED' })
   assert.equal(result.ok, true)
 })
 
-test('closeAgentSession allows someone explicitly listed in agentSessions.allowedControllers, even though they did not start the session and are not the owner', () => {
+test('closeAgentSession allows someone explicitly listed in agentSessions.allowedControllers, even though they did not start the session and are not the owner', async () => {
   const dbPath = tempDbPath()
   const config = { ...baseConfig, agentSessions: { ...baseConfig.agentSessions, allowedControllers: ['U_CONTROLLER'] } }
   createAgentSession({
@@ -367,11 +367,11 @@ test('closeAgentSession allows someone explicitly listed in agentSessions.allowe
     kind: 'acp-session',
     metadata: { backend: 'claude', repoPath: '/tmp', acpSessionId: 'sess-1', requestedBy: 'U_ALLOWED' },
   })
-  const result = closeAgentSession({ dbPath, config, channel: 'C1', threadTs: '1.1', requestedBy: 'U_CONTROLLER' })
+  const result = await closeAgentSession({ dbPath, config, channel: 'C1', threadTs: '1.1', requestedBy: 'U_CONTROLLER' })
   assert.equal(result.ok, true)
 })
 
-test('closeAgentSession closes a session that was never resumed after a restart (DB-only, no in-memory entry) — this is what makes "stop"/"exit" work even before anyone replies to trigger a resume', () => {
+test('closeAgentSession closes a session that was never resumed after a restart (DB-only, no in-memory entry) — this is what makes "stop"/"exit" work even before anyone replies to trigger a resume', async () => {
   const dbPath = tempDbPath()
   const created = createAgentSession({
     dbPath,
@@ -381,16 +381,16 @@ test('closeAgentSession closes a session that was never resumed after a restart 
     kind: 'acp-session',
     metadata: { backend: 'claude', repoPath: '/tmp', acpSessionId: 'sess-1' },
   })
-  const result = closeAgentSession({ dbPath, config: baseConfig, channel: 'C1', threadTs: '1.1', requestedBy: 'U_OWNER' })
+  const result = await closeAgentSession({ dbPath, config: baseConfig, channel: 'C1', threadTs: '1.1', requestedBy: 'U_OWNER' })
   assert.equal(result.ok, true)
   assert.equal(getAgentSession({ dbPath, id: created.session.id }).status, 'closed')
 })
 
-test('closeAgentSession on an already-closed session fails rather than reporting a false success', () => {
+test('closeAgentSession on an already-closed session fails rather than reporting a false success', async () => {
   const dbPath = tempDbPath()
   const created = createAgentSession({ dbPath, config: baseConfig, slackChannel: 'C1', slackThreadTs: '1.1', kind: 'acp-session', metadata: {} })
   updateAgentSession({ dbPath, id: created.session.id, status: 'closed' })
-  const result = closeAgentSession({ dbPath, config: baseConfig, channel: 'C1', threadTs: '1.1', requestedBy: 'U_OWNER' })
+  const result = await closeAgentSession({ dbPath, config: baseConfig, channel: 'C1', threadTs: '1.1', requestedBy: 'U_OWNER' })
   assert.equal(result.ok, false)
   assert.equal(result.error, 'no-active-session-for-thread')
 })

@@ -546,6 +546,16 @@ async function handleContextFullReply({ entry, text, env, config, dbPath }) {
     return { ok: started.ok, stopReason: started.stopReason, error: started.error }
   }
   if (command === 'new-thread') {
+    // Actually end it — the message below tells the user it's over, so the
+    // DB row and in-memory entry need to agree, otherwise a listener
+    // restart would happily resume it with the "full" gate forgotten
+    // (contextState only ever lives in memory), contradicting what this
+    // thread was just told.
+    const key = sessionKey(entry.channel, entry.threadTs)
+    entry.activeSession.dispose()
+    unregisterSession(entry.sessions, entry.activeSession.sessionId)
+    activeSessionsByKey.delete(key)
+    if (entry.agentSessionRowId) updateAgentSession({ dbPath, id: entry.agentSessionRowId, status: 'closed' })
     await startProgress({
       token: entry.env.SLACK_BOT_TOKEN,
       channel: entry.channel,
@@ -621,6 +631,21 @@ async function handleRewindStep({ entry, text, env, config, dbPath }) {
   const count = pending.count
   entry.pendingRewind = null
   const excerptTurns = (entry.transcript || []).slice(-count)
+  // The transcript only ever lives in memory (never persisted across a
+  // restart) — a just-resumed entry has none, so rewinding it would
+  // silently start a brand-new, context-free session while claiming to
+  // continue from "an earlier point." Refuse instead of faking it.
+  if (excerptTurns.length === 0) {
+    await startProgress({
+      token: entry.env.SLACK_BOT_TOKEN,
+      channel: entry.channel,
+      label: sessionLabel(entry),
+      detail: "This session has no saved transcript to rewind (e.g. it was just resumed after a restart) — nothing to rewind to.",
+      threadTs: entry.threadTs,
+      config: entry.config,
+    })
+    return { ok: true }
+  }
   const seedText =
     detail === 'code'
       ? excerptTurns.map(t => `> ${t.prompt}\n\n${t.response}`).join('\n\n---\n\n')
@@ -814,26 +839,36 @@ export async function routeThreadReply({ env, config, dbPath, channel, threadTs,
 // make sure it never gets resumed later.
 // Gated the same way as starting one (D24) — anyone in the channel could
 // otherwise stop or close a session they didn't start.
-export function closeAgentSession({ dbPath, config, channel, threadTs, requestedBy }) {
+// Locked on the same {channel, threadTs} key as routeThreadReply/
+// startAgentSession — without this, "stop" typed at the same moment as a
+// context-full "here"/rewind fresh-session replacement (both of which hold
+// this lock while they dispose the old session and register a new one)
+// could interleave: this function's own body has no awaits so it can't be
+// interrupted mid-way, but the ORDERING between it and those multi-await
+// flows was otherwise unguarded, letting a "stop" get silently undone by a
+// fresh session that started concurrently and re-registered the key.
+export async function closeAgentSession({ dbPath, config, channel, threadTs, requestedBy }) {
   const key = sessionKey(channel, threadTs)
-  const entry = activeSessionsByKey.get(key)
-  if (entry) {
-    if (!isAllowedToCloseSession(config, requestedBy, entry.startedBy)) {
+  return withKeyLock(key, async () => {
+    const entry = activeSessionsByKey.get(key)
+    if (entry) {
+      if (!isAllowedToCloseSession(config, requestedBy, entry.startedBy)) {
+        return { ok: false, error: 'not-allowed-to-close-agent-session', retryable: false }
+      }
+      entry.activeSession.dispose()
+      unregisterSession(entry.sessions, entry.activeSession.sessionId)
+      activeSessionsByKey.delete(key)
+      if (entry.agentSessionRowId) updateAgentSession({ dbPath, id: entry.agentSessionRowId, status: 'closed' })
+      return { ok: true }
+    }
+    const persisted = findAgentSessionBySlackThread({ dbPath, slackChannel: channel, slackThreadTs: threadTs })
+    if (!persisted || persisted.kind !== 'acp-session' || persisted.status === 'closed') {
+      return { ok: false, error: 'no-active-session-for-thread', retryable: false }
+    }
+    if (!isAllowedToCloseSession(config, requestedBy, persisted.metadata?.requestedBy)) {
       return { ok: false, error: 'not-allowed-to-close-agent-session', retryable: false }
     }
-    entry.activeSession.dispose()
-    unregisterSession(entry.sessions, entry.activeSession.sessionId)
-    activeSessionsByKey.delete(key)
-    if (entry.agentSessionRowId) updateAgentSession({ dbPath, id: entry.agentSessionRowId, status: 'closed' })
+    updateAgentSession({ dbPath, id: persisted.id, status: 'closed' })
     return { ok: true }
-  }
-  const persisted = findAgentSessionBySlackThread({ dbPath, slackChannel: channel, slackThreadTs: threadTs })
-  if (!persisted || persisted.kind !== 'acp-session' || persisted.status === 'closed') {
-    return { ok: false, error: 'no-active-session-for-thread', retryable: false }
-  }
-  if (!isAllowedToCloseSession(config, requestedBy, persisted.metadata?.requestedBy)) {
-    return { ok: false, error: 'not-allowed-to-close-agent-session', retryable: false }
-  }
-  updateAgentSession({ dbPath, id: persisted.id, status: 'closed' })
-  return { ok: true }
+  })
 }

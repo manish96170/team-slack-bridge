@@ -118,7 +118,7 @@ export function createListener({ env, botToken, appToken, config, configPath, db
     // the agent as a prompt — closeAgentSession works either way (in-memory
     // or DB-only), so this ends a session even if nobody ever resumed it.
     if (dbPath && message.thread_ts && SESSION_STOP_WORDS.has((message.text || '').trim().toLowerCase())) {
-      const closed = closeAgentSession({ dbPath, config, channel: message.channel, threadTs: message.thread_ts, requestedBy })
+      const closed = await closeAgentSession({ dbPath, config, channel: message.channel, threadTs: message.thread_ts, requestedBy })
       if (closed.ok) {
         await reply({ token: botToken, channel: message.channel, threadTs: message.thread_ts, text: 'Session closed.' })
         return
@@ -224,7 +224,7 @@ export function createListener({ env, botToken, appToken, config, configPath, db
         await respond({ response_type: 'ephemeral', text: 'Run /agent-session close from within the session\'s thread.' })
         return
       }
-      const result = closeAgentSession({ dbPath, config, channel: command.channel_id, threadTs: command.thread_ts, requestedBy: command.user_id })
+      const result = await closeAgentSession({ dbPath, config, channel: command.channel_id, threadTs: command.thread_ts, requestedBy: command.user_id })
       await respond({ response_type: 'ephemeral', text: result.ok ? 'Session closed.' : `Could not close: ${result.error}` })
       return
     }

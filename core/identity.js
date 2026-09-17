@@ -16,7 +16,18 @@ export function loadConfig(path) {
       outputMode: 'medium',
       http: { enabled: false, port: 8917, verifySlackSignatures: true },
       slashCommands: { enabled: false, outputModeCommand: '/outputmode' },
-      agentSessions: { enabled: false, autoCreateSession: false, provider: 'none', allowedUsers: [], mentionKeyword: 'start session', allowedControllers: [] },
+      agentSessions: {
+        enabled: false,
+        autoCreateSession: false,
+        provider: 'none',
+        allowedUsers: [],
+        mentionKeyword: 'start session',
+        mentionKeywords: [],
+        allowedControllers: [],
+        repoAccess: {},
+        trustedApps: {},
+        contextWarningThreshold: 0.8,
+      },
       openacp: { enabled: false, adapterPackage: '@openacp/slack-adapter', autoCreateSession: false },
       slackbotMcp: normalizeSlackbotMcp(),
       remote: { postableChannels: [], readableChannels: [] },
@@ -51,11 +62,28 @@ export function loadConfig(path) {
       // (case-insensitive) starts a session instead of a normal classified
       // proposal. Empty string disables the mention trigger entirely.
       mentionKeyword: raw.agentSessions?.mentionKeyword ?? 'start session',
+      // Alternate trigger phrases (e.g. "@etd start session") that work
+      // the same as mentionKeyword, in both @mentions and DMs — checked by
+      // matchesMentionKeyword (core/acp-sessions.js), longest-first.
+      mentionKeywords: raw.agentSessions?.mentionKeywords || [],
       // D31 — a SEPARATE grant from allowedUsers: being allowed to start
       // your own sessions doesn't make you allowed to stop someone else's.
       // Only the owner, a session's own starter, or someone explicitly
       // listed here may close/stop a session that isn't their own.
       allowedControllers: raw.agentSessions?.allowedControllers || [],
+      // A SEPARATE, optional grant from allowedUsers: which named repos
+      // (core/repos.js) a given user may point a session at. Omitted for a
+      // user (or entirely) means unrestricted — see isAllowedToUseRepo.
+      repoAccess: raw.agentSessions?.repoAccess || {},
+      // Lets a specific Slack app (bot_id or app_id) DM-trigger sessions on
+      // a named human's behalf — see matchesMentionKeyword's caller in
+      // listen/socket.js and isAllowedToStartSession's normal checks, which
+      // still apply to whichever human the app is mapped to act as.
+      trustedApps: raw.agentSessions?.trustedApps || {},
+      // Fraction of the ACP-reported context window (usage_update's
+      // used/size) at which the bridge triggers the handoff-file warning —
+      // see maybeWarnContextFull in core/acp-sessions.js.
+      contextWarningThreshold: raw.agentSessions?.contextWarningThreshold ?? 0.8,
     },
     openacp: {
       enabled: !!raw.openacp?.enabled,

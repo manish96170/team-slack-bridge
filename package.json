@@ -1,6 +1,6 @@
 {
   "name": "team-slack-bridge",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Post to Slack (as a bot, or explicitly as a specific authorized user) and DM, from any script, agent, or CI job. Standalone — no dependency on any particular orchestration system.",
   "license": "MIT",
   "type": "module",

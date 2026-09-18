@@ -12,9 +12,9 @@ log (D1–D33) and architecture; this file is the scannable done/pending list.
 - [x] Locked-down remote/hosted Slackbot MCP profile (D5/D5a/D5b/D20) — built, not
       currently deployed (`slackbotMcp.enabled: false`)
 - [x] Local multi-account support (D21) + shared local MCP HTTP daemon (D22)
-- [x] Published to npm as `team-slack-bridge` (currently `0.1.2`), security-audited
-      (no secrets, no lifecycle scripts, `npm audit` clean), installed globally and
-      verified working on this machine
+- [x] Security-audited (no secrets, no lifecycle scripts, `npm audit` clean),
+      installed globally and verified working on this machine. Not yet published to
+      npm — `0.1.4` will be the first real `npm publish` of `team-slack-bridge`.
 - [x] Fixed npm-distribution-specific bugs: config cold-start path defaulting inside
       the install dir (would get wiped by `npm update`), `bin` path convention,
       `build:sea` correctly scoped to repo-clone-only
@@ -49,6 +49,39 @@ log (D1–D33) and architecture; this file is the scannable done/pending list.
       working follow-up replies, Claude via Bedrock (`CLAUDE_CODE_USE_BEDROCK=1`) and
       OpenCode (native `AWS_REGION` detection, OpenCode Zen credentials) both
       confirmed reachable as backends
+- [x] **Thread replies post as a new message per turn** instead of editing the first
+      "starting…" message in place (was the default for every reply after the first)
+- [x] **Per-user repo scoping** (`agentSessions.repoAccess`) — `allowedUsers` grants
+      the right to start/resume sessions at all; which named repos a given user may
+      point one at is now a separate, optional, backward-compatible grant
+- [x] **Trusted-app DM triggers** (`agentSessions.trustedApps`) — a specific Slack
+      app (`bot_id`/`app_id`) can DM-trigger a session on a named human's behalf,
+      scoped to DMs only (a review pass caught and fixed a first version that
+      accidentally granted channel-wide session control instead)
+- [x] **Multiple DM/mention trigger aliases** (`agentSessions.mentionKeywords`) —
+      e.g. both `"start session"` and `"@etd start session"` can trigger the same way
+- [x] **Context-limit handoff**: ACP's `usage_update` (real `used`/`size` token
+      counts, not a heuristic) is tracked per turn; crossing
+      `agentSessions.contextWarningThreshold` (default `0.8`) has the agent
+      self-summarize, writes a handoff file under `~/.team-slack-bridge/handoffs/`,
+      and gates further replies until the user picks `here` (fresh session in-thread,
+      seeded from the handoff), `new thread` (manual), or `compact` (best-effort
+      nudge — ACP has no real on-demand compaction request, confirmed against the
+      SDK schema; only an agent-initiated `compaction_update` notification exists,
+      which is also now wired up)
+- [x] **`rewind`** — approximates a rewind/checkpoint ACP does not actually have
+      (confirmed: no such method or concept anywhere in the protocol) by asking how
+      far back and how much detail, then starting a fresh session seeded from the
+      bridge's own saved transcript of the last N exchanges
+- [x] All of the above went through several rounds of `opencode --agent sol` review,
+      which caught and fixed: `core/identity.js`'s config loader silently dropping
+      every one of the new `agentSessions.*` fields above (so none of them would have
+      worked at all without this catch); `new thread` not actually closing the
+      session; rewind seeding a fresh session from an empty transcript or a failed
+      internal summary; a race between `closeAgentSession` and the new
+      here/rewind session-replacement flow (now share the same per-thread lock);
+      `here`/`new-thread`/`rewind` bypassing the D31 close-rights check
+      (`closeAgentSession` already enforced this; the new flows initially didn't)
 
 ## Pending / known gaps
 
@@ -82,3 +115,13 @@ log (D1–D33) and architecture; this file is the scannable done/pending list.
       deployed Slack app's manifest — no automated "push this update to my live app"
       tooling exists (by design — this repo doesn't hold Slack API app-management
       credentials).
+- [ ] **No live testing of the context-limit handoff / rewind / trusted-app DM
+      paths** — all covered by unit tests against fake ACP sessions, none run against
+      a real Slack workspace or a real backend process. Highest-risk untested
+      surface right now: whether a real backend actually emits `usage_update` in
+      practice, and the `here`/`new thread`/`compact`/`rewind` Slack message flows.
+- [ ] **`contextState`/`handoffPath`/`transcript`/`pendingRewind` are in-memory only**
+      — a listener restart mid-context-limit-gate (or mid-rewind Q&A) loses that
+      state entirely; the session just resumes normally, ungated, no follow-up
+      questions pending. Same lazy-resume tradeoff as D29, just not called out
+      separately before now.

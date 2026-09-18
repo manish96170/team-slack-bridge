@@ -44,10 +44,16 @@ why; this file is deliberately *not* a decisions log.
   metadata; there's no way yet to pull a full transcript of what an ACP session
   actually did (tool calls, file edits, terminal output) after the fact. Could live
   in `agent_sessions.metadata` or a separate table.
-- **Per-session cost/usage tracking** — ACP's `usage_update` session notifications
-  are already visible to `describeUpdate()` in `core/acp-sessions.js` but currently
-  discarded; could be persisted and surfaced (e.g. via `slack_doctor` or a new
-  `/agent-session usage` subcommand).
+- **Per-session cost/usage surfacing** — `usage_update` is now tracked and acted on
+  (the 80%-context handoff warning), but only in memory and only as a threshold
+  trigger. Persisting it (e.g. in `agent_sessions.metadata`) and surfacing it
+  on demand — a `/agent-session usage` subcommand, or in `slack_doctor` — is still
+  open. `usage_update.cost` (present on the type, optional) isn't read at all yet.
+- **Persist context-limit-handoff state across a restart** — `contextState`,
+  `handoffPath`, `transcript`, and `pendingRewind` (core/acp-sessions.js) are
+  in-memory only today; a restart mid-gate or mid-rewind-Q&A silently drops them.
+  Persisting to `agent_sessions.metadata` would close this, symmetric with how
+  `acpSessionId` already survives a restart for resume.
 - **Cross-workspace ACP sessions** — today an ACP session is scoped to one Slack
   workspace via the single-account-by-default model (D21's opt-in multi-account
   support exists for the *bridge* side, but ACP sessions themselves don't yet pick an

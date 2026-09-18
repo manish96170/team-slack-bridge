@@ -8,7 +8,7 @@ import { getBackend, DEFAULT_BACKEND } from './acp-backends.js'
 import { resolveRepoPath } from './repos.js'
 import { createFsHandlers } from './acp-fs.js'
 import { createTerminalHandlers } from './acp-terminal.js'
-import { createAgentSession, findAgentSessionBySlackThread, updateAgentSession, getAgentSession } from './agent-sessions.js'
+import { createAgentSession, findAgentSessionBySlackThread, updateAgentSession, getAgentSession, listAgentSessions } from './agent-sessions.js'
 import { startProgress, updateProgress, finishProgress } from './progress.js'
 import { ask } from './ask.js'
 import { writeHandoffFile } from './handoff.js'
@@ -994,6 +994,41 @@ export async function closeAgentSession({ dbPath, config, channel, threadTs, req
     updateAgentSession({ dbPath, id: persisted.id, status: 'closed' })
     return { ok: true, id: persisted.id }
   })
+}
+
+// A slash command's payload NEVER carries thread_ts, no matter where you
+// type it — confirmed against Slack's own docs: "Slash commands created
+// by developers cannot... be invoked in message threads." So the
+// {channel, threadTs}-keyed closeAgentSession above is unreachable from
+// `/agent-session close` — it needs the session's id instead, the same
+// reference reopenAgentSession already uses. Looks up the row, then
+// delegates to closeAgentSession for the actual disposal/locking so there
+// is exactly one place that logic lives.
+export async function closeAgentSessionById({ dbPath, config, id, requestedBy }) {
+  const persisted = getAgentSession({ dbPath, id })
+  if (!persisted || persisted.kind !== 'acp-session') {
+    return { ok: false, error: 'session-not-found', retryable: false }
+  }
+  return closeAgentSession({ dbPath, config, channel: persisted.slackChannel, threadTs: persisted.slackThreadTs, requestedBy })
+}
+
+// `/agent-session close all` — every currently-open (not yet closed)
+// session in the given channel. Per-session D31 rights are enforced by
+// closeAgentSession itself; sessions the requester isn't allowed to close
+// are reported as skipped rather than silently left out with no
+// explanation.
+export async function closeAllAgentSessions({ dbPath, config, channel, requestedBy }) {
+  const candidates = listAgentSessions({ dbPath, kind: 'acp-session', limit: 1000 }).filter(
+    row => row.status !== 'closed' && row.slackChannel === channel
+  )
+  const closed = []
+  const skipped = []
+  for (const row of candidates) {
+    const result = await closeAgentSession({ dbPath, config, channel, threadTs: row.slackThreadTs, requestedBy })
+    if (result.ok) closed.push(result.id)
+    else skipped.push({ id: row.id, error: result.error })
+  }
+  return { ok: true, closed, skipped }
 }
 
 // Deliberately reopening a session you (or someone with close rights over

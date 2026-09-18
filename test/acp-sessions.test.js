@@ -15,6 +15,8 @@ import {
   startAgentSession,
   routeThreadReply,
   closeAgentSession,
+  closeAgentSessionById,
+  closeAllAgentSessions,
   reopenAgentSession,
   parseAgentSessionCommand,
   applyModelSelection,
@@ -444,6 +446,68 @@ test('reopenAgentSession is gated by the same D31 close rights as closeAgentSess
   assert.equal(result.ok, false)
   assert.equal(result.error, 'not-allowed-to-reopen-agent-session')
   assert.equal(getAgentSession({ dbPath, id: created.session.id }).status, 'closed')
+})
+
+// Regression coverage for a real platform gap found live: Slack slash
+// commands never carry thread_ts, no matter where they're typed (confirmed
+// against Slack's own docs), so `/agent-session close` can't identify "the
+// session in the thread I'm replying from" the way it originally assumed —
+// it needs the session's id instead.
+test('closeAgentSessionById closes the right session by id, without needing its thread_ts at all', async () => {
+  const dbPath = tempDbPath()
+  const created = createAgentSession({
+    dbPath,
+    config: baseConfig,
+    slackChannel: 'C1',
+    slackThreadTs: '1.1',
+    kind: 'acp-session',
+    metadata: { requestedBy: 'U_ALLOWED' },
+  })
+  const result = await closeAgentSessionById({ dbPath, config: baseConfig, id: created.session.id, requestedBy: 'U_ALLOWED' })
+  assert.equal(result.ok, true)
+  assert.equal(result.id, created.session.id)
+  assert.equal(getAgentSession({ dbPath, id: created.session.id }).status, 'closed')
+})
+
+test('closeAgentSessionById fails clearly for an unknown id instead of throwing', async () => {
+  const result = await closeAgentSessionById({ dbPath: tempDbPath(), config: baseConfig, id: 'not-a-real-id', requestedBy: 'U_OWNER' })
+  assert.equal(result.ok, false)
+  assert.equal(result.error, 'session-not-found')
+})
+
+test('closeAllAgentSessions closes every open session in the given channel, respecting D31 per session', async () => {
+  const dbPath = tempDbPath()
+  const ownSession = createAgentSession({
+    dbPath,
+    config: baseConfig,
+    slackChannel: 'C1',
+    slackThreadTs: '1.1',
+    kind: 'acp-session',
+    metadata: { requestedBy: 'U_ALLOWED' },
+  })
+  const othersSession = createAgentSession({
+    dbPath,
+    config: baseConfig,
+    slackChannel: 'C1',
+    slackThreadTs: '1.2',
+    kind: 'acp-session',
+    metadata: { requestedBy: 'U_SOMEONE_ELSE' },
+  })
+  const otherChannelSession = createAgentSession({
+    dbPath,
+    config: baseConfig,
+    slackChannel: 'C2',
+    slackThreadTs: '2.1',
+    kind: 'acp-session',
+    metadata: { requestedBy: 'U_ALLOWED' },
+  })
+  const result = await closeAllAgentSessions({ dbPath, config: baseConfig, channel: 'C1', requestedBy: 'U_ALLOWED' })
+  assert.deepEqual(result.closed, [ownSession.session.id])
+  assert.equal(result.skipped.length, 1)
+  assert.equal(result.skipped[0].id, othersSession.session.id)
+  assert.equal(getAgentSession({ dbPath, id: ownSession.session.id }).status, 'closed')
+  assert.equal(getAgentSession({ dbPath, id: othersSession.session.id }).status, 'created', 'should be left alone, not closed without permission')
+  assert.equal(getAgentSession({ dbPath, id: otherChannelSession.session.id }).status, 'created', 'a different channel\'s session should not be touched at all')
 })
 
 // Regression test for a real bug found live: a rejected prompt() (Bedrock

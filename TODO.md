@@ -47,6 +47,12 @@ log (D1–D33) and architecture; this file is the scannable done/pending list.
         closed on purpose (stop/exit/close all persist `status:'closed'`, which
         tryResumeSession refuses on sight by design); just flips the DB row back
         to `active` so the next reply in its original thread resumes it normally
+  - [x] `/agent-session close <id>` / `close all` — found live that Slack slash
+        commands NEVER carry `thread_ts` (confirmed against Slack's own docs:
+        developer slash commands can't be invoked inside threads at all), so the
+        original `/agent-session close` (assumed it could read the thread it was
+        run from) could never actually work; replaced with id-based close plus a
+        close-all-in-this-channel option, D31-gated per session
 - [x] **Live-verified on this machine**: Socket Mode listener connected, DM from the
       bot to the owner, an ACP session started against the `dashboard` repo
       (`/Users/Manish.Sharma/hornblower/UI/dashboard`), one session per thread with

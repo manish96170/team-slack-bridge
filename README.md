@@ -271,13 +271,20 @@ in it; it's a rolling window onto the conversation, not a guaranteed full histor
 `--backend` defaults to `claude`; `--repo` defaults to whichever repo is registered as
 default. Permission requests render as Approve/Deny buttons in the thread itself (not
 a DM) using the same primitive as `core/ask.js`'s existing human-in-the-loop flow.
-`/agent-session close` (run from within the session's thread) ends it explicitly —
-or just reply `stop` or `exit` in the thread itself, no slash command needed. Both
-paths persist `status:'closed'` even if the session was never resumed after a
-listener restart. The reply must be **exactly** `stop` or `exit` (nothing else) —
-a full sentence like "stop this session and exit" doesn't match and gets forwarded
-to the agent as an ordinary prompt instead, which will happily reply conversationally
-without the bridge having closed anything.
+Reply `stop` or `exit` **exactly** (nothing else — a full sentence like "stop this
+session and exit" doesn't match and gets forwarded to the agent as an ordinary
+prompt instead, which will happily reply conversationally without the bridge
+having closed anything) directly in a session's thread to end it, no slash command
+needed. `/agent-session close <id>` does the same thing by id instead — a slash
+command's payload never carries `thread_ts`, regardless of where it's typed
+(confirmed against Slack's own docs: developer slash commands can't be invoked
+inside threads at all), so `close` can't identify "the session in the thread I'm
+replying from" the way a plain message reply can. Find the id in a close/"Session
+closed" confirmation, a thread's own messages, or `cli/agent-session.js list`.
+`/agent-session close all` closes every still-open session in the current channel
+in one shot, skipping (and reporting) any you don't have D31 close rights over.
+All three paths persist `status:'closed'` even if the session was never resumed
+after a listener restart.
 
 **Reopening one you closed on purpose**: a closed session can never be picked back
 up by just replying in its thread — `tryResumeSession` refuses on sight once

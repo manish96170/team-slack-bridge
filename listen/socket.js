@@ -21,7 +21,16 @@ import { recordAnswer, recordAnswerByThread } from '../core/ask.js'
 import { publishHome } from '../core/home.js'
 import { setOutputModeInConfig } from '../core/config-write.js'
 import { maybeCreateAgentSessionForEvent } from '../core/agent-sessions.js'
-import { startAgentSession, routeThreadReply, closeAgentSession, reopenAgentSession, parseAgentSessionCommand, matchesMentionKeyword } from '../core/acp-sessions.js'
+import {
+  startAgentSession,
+  routeThreadReply,
+  closeAgentSession,
+  closeAgentSessionById,
+  closeAllAgentSessions,
+  reopenAgentSession,
+  parseAgentSessionCommand,
+  matchesMentionKeyword,
+} from '../core/acp-sessions.js'
 import { listBackendNames } from '../core/acp-backends.js'
 import { reply } from '../core/post.js'
 
@@ -244,11 +253,33 @@ export function createListener({ env, botToken, appToken, config, configPath, db
     }
     const [subcommand, ...rest] = (command.text || '').trim().split(/\s+/)
     if (subcommand === 'close') {
-      if (!command.thread_ts) {
-        await respond({ response_type: 'ephemeral', text: 'Run /agent-session close from within the session\'s thread.' })
+      // A slash command's payload NEVER carries thread_ts, regardless of
+      // where it's typed — confirmed against Slack's own docs: developer
+      // slash commands can't be invoked inside threads at all. So this
+      // can't identify "the session in the thread I'm replying from" the
+      // way the old code assumed; it needs an explicit id (or "all") —
+      // reply `stop`/`exit` directly in a thread instead for that case,
+      // since that's a real message, not a slash command.
+      const arg = rest[0]
+      if (arg === 'all') {
+        const result = await closeAllAgentSessions({ dbPath, config, channel: command.channel_id, requestedBy: command.user_id })
+        await respond({
+          response_type: 'ephemeral',
+          text: result.closed.length
+            ? `Closed ${result.closed.length} session(s) in this channel.${result.skipped.length ? ` Skipped ${result.skipped.length} (no permission, or already closed).` : ''}`
+            : 'No open sessions to close in this channel.',
+        })
         return
       }
-      const result = await closeAgentSession({ dbPath, config, channel: command.channel_id, threadTs: command.thread_ts, requestedBy: command.user_id })
+      if (!arg) {
+        await respond({
+          response_type: 'ephemeral',
+          text:
+            'Usage: `/agent-session close <id>` or `/agent-session close all` (this channel only) — find an id from a "Session closed"/thread message or `cli/agent-session.js list`. To close just the session in a thread you\'re replying to, type `stop` or `exit` there instead — slash commands can\'t run inside threads on Slack.',
+        })
+        return
+      }
+      const result = await closeAgentSessionById({ dbPath, config, id: arg, requestedBy: command.user_id })
       await respond({
         response_type: 'ephemeral',
         text: result.ok ? `Session closed. Reopen with \`/agent-session reopen ${result.id}\`` : `Could not close: ${result.error}`,
@@ -273,7 +304,10 @@ export function createListener({ env, botToken, appToken, config, configPath, db
       return
     }
     if (subcommand !== 'start') {
-      await respond({ response_type: 'ephemeral', text: 'Usage: /agent-session start [--backend name] [--repo name] [--model name] <task> | /agent-session close | /agent-session reopen <id>' })
+      await respond({
+        response_type: 'ephemeral',
+        text: 'Usage: /agent-session start [--backend name] [--repo name] [--model name] <task> | /agent-session close <id> | /agent-session close all | /agent-session reopen <id>',
+      })
       return
     }
     const { backendName, repoName, modelName, task } = parseAgentSessionCommand(rest.join(' '))

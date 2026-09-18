@@ -13,8 +13,11 @@ log (D1–D33) and architecture; this file is the scannable done/pending list.
       currently deployed (`slackbotMcp.enabled: false`)
 - [x] Local multi-account support (D21) + shared local MCP HTTP daemon (D22)
 - [x] Security-audited (no secrets, no lifecycle scripts, `npm audit` clean),
-      installed globally and verified working on this machine. Not yet published to
-      npm — `0.1.4` will be the first real `npm publish` of `team-slack-bridge`.
+      installed globally and verified working on this machine. Published to npm as
+      `team-slack-bridge` — `0.1.0`, `0.1.1`, `0.1.2`, `0.1.4` are live on the
+      registry; `0.1.5` carries everything after the `0.1.4` publish (id-based
+      close/reopen, the codex-review lifecycle fixes, the README overhaul, the
+      App Home redesign).
 - [x] Fixed npm-distribution-specific bugs: config cold-start path defaulting inside
       the install dir (would get wiped by `npm update`), `bin` path convention,
       `build:sea` correctly scoped to repo-clone-only

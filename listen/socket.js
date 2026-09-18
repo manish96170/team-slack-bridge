@@ -139,7 +139,12 @@ export function createListener({ env, botToken, appToken, config, configPath, db
     if (dbPath && message.thread_ts && SESSION_STOP_WORDS.has((message.text || '').trim().toLowerCase())) {
       const closed = await closeAgentSession({ dbPath, config, channel: message.channel, threadTs: message.thread_ts, requestedBy })
       if (closed.ok) {
-        await reply({ token: botToken, channel: message.channel, threadTs: message.thread_ts, text: 'Session closed.' })
+        await reply({
+          token: botToken,
+          channel: message.channel,
+          threadTs: message.thread_ts,
+          text: `Session closed. Reopen with \`/agent-session reopen ${closed.id}\``,
+        })
         return
       }
     }
@@ -244,7 +249,10 @@ export function createListener({ env, botToken, appToken, config, configPath, db
         return
       }
       const result = await closeAgentSession({ dbPath, config, channel: command.channel_id, threadTs: command.thread_ts, requestedBy: command.user_id })
-      await respond({ response_type: 'ephemeral', text: result.ok ? 'Session closed.' : `Could not close: ${result.error}` })
+      await respond({
+        response_type: 'ephemeral',
+        text: result.ok ? `Session closed. Reopen with \`/agent-session reopen ${result.id}\`` : `Could not close: ${result.error}`,
+      })
       return
     }
     if (subcommand === 'reopen') {

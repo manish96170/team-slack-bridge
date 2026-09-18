@@ -282,9 +282,11 @@ without the bridge having closed anything.
 **Reopening one you closed on purpose**: a closed session can never be picked back
 up by just replying in its thread — `tryResumeSession` refuses on sight once
 `status:'closed'`, by design (that check is what makes closing permanent instead of
-just another kind of restart-recovery gap). To deliberately bring one back, run
-`/agent-session reopen <id>` (the id is shown by `cli/agent-session.js list`,
-gated by the same D31 close-rights check as closing it) — this only flips the DB
+just another kind of restart-recovery gap). Every close confirmation (`stop`/`exit`
+in the thread, or `/agent-session close`) includes the session's id right in the
+message, so you don't need to separately run `cli/agent-session.js list` to find
+it later. To deliberately bring one back, run `/agent-session reopen <id>` (gated
+by the same D31 close-rights check as closing it) — this only flips the DB
 row back to `active`; the actual reconnect (`session/resume`/`session/load`) happens
 the normal way, the next time someone replies in that session's original thread.
 

@@ -384,6 +384,7 @@ test('closeAgentSession closes a session that was never resumed after a restart 
   })
   const result = await closeAgentSession({ dbPath, config: baseConfig, channel: 'C1', threadTs: '1.1', requestedBy: 'U_OWNER' })
   assert.equal(result.ok, true)
+  assert.equal(result.id, created.session.id, 'the closed session\'s id should come back so the confirmation message can show it for reopening')
   assert.equal(getAgentSession({ dbPath, id: created.session.id }).status, 'closed')
 })
 

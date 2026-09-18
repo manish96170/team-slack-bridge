@@ -978,7 +978,11 @@ export async function closeAgentSession({ dbPath, config, channel, threadTs, req
       unregisterSession(entry.sessions, entry.activeSession.sessionId)
       activeSessionsByKey.delete(key)
       if (entry.agentSessionRowId) updateAgentSession({ dbPath, id: entry.agentSessionRowId, status: 'closed' })
-      return { ok: true }
+      // id comes back on every successful close so the "Session closed."
+      // confirmation can show it inline — without it, reopening one later
+      // (`/agent-session reopen <id>`) means separately running
+      // `cli/agent-session.js list` to find it again.
+      return { ok: true, id: entry.agentSessionRowId }
     }
     const persisted = findAgentSessionBySlackThread({ dbPath, slackChannel: channel, slackThreadTs: threadTs })
     if (!persisted || persisted.kind !== 'acp-session' || persisted.status === 'closed') {
@@ -988,7 +992,7 @@ export async function closeAgentSession({ dbPath, config, channel, threadTs, req
       return { ok: false, error: 'not-allowed-to-close-agent-session', retryable: false }
     }
     updateAgentSession({ dbPath, id: persisted.id, status: 'closed' })
-    return { ok: true }
+    return { ok: true, id: persisted.id }
   })
 }
 

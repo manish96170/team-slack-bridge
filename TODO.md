@@ -43,6 +43,10 @@ log (D1–D33) and architecture; this file is the scannable done/pending list.
         doesn't apply in a DM context)
   - [x] `cli/agent-session.js list` — see recorded sessions (ACP or manual),
         filterable by status/kind
+  - [x] `/agent-session reopen <id>` — deliberately bring back a session you
+        closed on purpose (stop/exit/close all persist `status:'closed'`, which
+        tryResumeSession refuses on sight by design); just flips the DB row back
+        to `active` so the next reply in its original thread resumes it normally
 - [x] **Live-verified on this machine**: Socket Mode listener connected, DM from the
       bot to the owner, an ACP session started against the `dashboard` repo
       (`/Users/Manish.Sharma/hornblower/UI/dashboard`), one session per thread with

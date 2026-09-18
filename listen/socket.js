@@ -21,7 +21,7 @@ import { recordAnswer, recordAnswerByThread } from '../core/ask.js'
 import { publishHome } from '../core/home.js'
 import { setOutputModeInConfig } from '../core/config-write.js'
 import { maybeCreateAgentSessionForEvent } from '../core/agent-sessions.js'
-import { startAgentSession, routeThreadReply, closeAgentSession, parseAgentSessionCommand, matchesMentionKeyword } from '../core/acp-sessions.js'
+import { startAgentSession, routeThreadReply, closeAgentSession, reopenAgentSession, parseAgentSessionCommand, matchesMentionKeyword } from '../core/acp-sessions.js'
 import { listBackendNames } from '../core/acp-backends.js'
 import { reply } from '../core/post.js'
 
@@ -247,8 +247,25 @@ export function createListener({ env, botToken, appToken, config, configPath, db
       await respond({ response_type: 'ephemeral', text: result.ok ? 'Session closed.' : `Could not close: ${result.error}` })
       return
     }
+    if (subcommand === 'reopen') {
+      const id = rest[0]
+      if (!id) {
+        await respond({ response_type: 'ephemeral', text: 'Usage: /agent-session reopen <id> — find the id with `cli/agent-session.js list`.' })
+        return
+      }
+      const result = reopenAgentSession({ dbPath, config, id, requestedBy: command.user_id })
+      if (!result.ok) {
+        await respond({ response_type: 'ephemeral', text: `Could not reopen: ${result.error}` })
+        return
+      }
+      await respond({
+        response_type: 'ephemeral',
+        text: `Reopened — reply in its original thread (<#${result.channel}>, thread ${result.threadTs}) to continue.`,
+      })
+      return
+    }
     if (subcommand !== 'start') {
-      await respond({ response_type: 'ephemeral', text: 'Usage: /agent-session start [--backend name] [--repo name] [--model name] <task> | /agent-session close' })
+      await respond({ response_type: 'ephemeral', text: 'Usage: /agent-session start [--backend name] [--repo name] [--model name] <task> | /agent-session close | /agent-session reopen <id>' })
       return
     }
     const { backendName, repoName, modelName, task } = parseAgentSessionCommand(rest.join(' '))

@@ -8,7 +8,7 @@ import { getBackend, DEFAULT_BACKEND } from './acp-backends.js'
 import { resolveRepoPath } from './repos.js'
 import { createFsHandlers } from './acp-fs.js'
 import { createTerminalHandlers } from './acp-terminal.js'
-import { createAgentSession, findAgentSessionBySlackThread, updateAgentSession } from './agent-sessions.js'
+import { createAgentSession, findAgentSessionBySlackThread, updateAgentSession, getAgentSession } from './agent-sessions.js'
 import { startProgress, updateProgress, finishProgress } from './progress.js'
 import { ask } from './ask.js'
 import { writeHandoffFile } from './handoff.js'
@@ -990,4 +990,30 @@ export async function closeAgentSession({ dbPath, config, channel, threadTs, req
     updateAgentSession({ dbPath, id: persisted.id, status: 'closed' })
     return { ok: true }
   })
+}
+
+// Deliberately reopening a session you (or someone with close rights over
+// it) closed on purpose is a DIFFERENT thing from D29's automatic
+// restart-recovery resume — tryResumeSession refuses on sight if
+// status:'closed', by design, so a stop/exit/close is permanent from a
+// thread reply's point of view. This is the explicit escape hatch: flip
+// the DB row back to 'active' so the NEXT reply in its original thread
+// naturally goes through tryResumeSession's normal session/resume or
+// session/load path — no separate reconnect logic needed here, this only
+// ever touches the DB row, never the backend/ACP session directly.
+export function reopenAgentSession({ dbPath, config, id, requestedBy }) {
+  const persisted = getAgentSession({ dbPath, id })
+  if (!persisted || persisted.kind !== 'acp-session') {
+    return { ok: false, error: 'session-not-found', retryable: false }
+  }
+  if (persisted.status !== 'closed') {
+    return { ok: false, error: 'session-not-closed', retryable: false }
+  }
+  // Same D31 gate as closing it — being allowed to reopen a session is the
+  // same trust level as being allowed to close it, not a separate grant.
+  if (!isAllowedToCloseSession(config, requestedBy, persisted.metadata?.requestedBy)) {
+    return { ok: false, error: 'not-allowed-to-reopen-agent-session', retryable: false }
+  }
+  updateAgentSession({ dbPath, id, status: 'active' })
+  return { ok: true, channel: persisted.slackChannel, threadTs: persisted.slackThreadTs }
 }

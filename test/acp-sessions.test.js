@@ -15,6 +15,7 @@ import {
   startAgentSession,
   routeThreadReply,
   closeAgentSession,
+  reopenAgentSession,
   parseAgentSessionCommand,
   applyModelSelection,
   runPromptTurn,
@@ -393,6 +394,55 @@ test('closeAgentSession on an already-closed session fails rather than reporting
   const result = await closeAgentSession({ dbPath, config: baseConfig, channel: 'C1', threadTs: '1.1', requestedBy: 'U_OWNER' })
   assert.equal(result.ok, false)
   assert.equal(result.error, 'no-active-session-for-thread')
+})
+
+test('reopenAgentSession flips a closed session back to active and returns its original thread', () => {
+  const dbPath = tempDbPath()
+  const created = createAgentSession({
+    dbPath,
+    config: baseConfig,
+    slackChannel: 'C1',
+    slackThreadTs: '1.1',
+    kind: 'acp-session',
+    metadata: { backend: 'claude', repoPath: '/tmp', acpSessionId: 'sess-1', requestedBy: 'U_ALLOWED' },
+  })
+  updateAgentSession({ dbPath, id: created.session.id, status: 'closed' })
+  const result = reopenAgentSession({ dbPath, config: baseConfig, id: created.session.id, requestedBy: 'U_ALLOWED' })
+  assert.equal(result.ok, true)
+  assert.equal(result.channel, 'C1')
+  assert.equal(result.threadTs, '1.1')
+  assert.equal(getAgentSession({ dbPath, id: created.session.id }).status, 'active')
+})
+
+test('reopenAgentSession refuses a session that is not actually closed', () => {
+  const dbPath = tempDbPath()
+  const created = createAgentSession({ dbPath, config: baseConfig, slackChannel: 'C1', slackThreadTs: '1.1', kind: 'acp-session', metadata: {} })
+  const result = reopenAgentSession({ dbPath, config: baseConfig, id: created.session.id, requestedBy: 'U_OWNER' })
+  assert.equal(result.ok, false)
+  assert.equal(result.error, 'session-not-closed')
+})
+
+test('reopenAgentSession fails clearly for an unknown id instead of throwing', () => {
+  const result = reopenAgentSession({ dbPath: tempDbPath(), config: baseConfig, id: 'not-a-real-id', requestedBy: 'U_OWNER' })
+  assert.equal(result.ok, false)
+  assert.equal(result.error, 'session-not-found')
+})
+
+test('reopenAgentSession is gated by the same D31 close rights as closeAgentSession — start rights alone are not enough', () => {
+  const dbPath = tempDbPath()
+  const created = createAgentSession({
+    dbPath,
+    config: baseConfig,
+    slackChannel: 'C1',
+    slackThreadTs: '1.1',
+    kind: 'acp-session',
+    metadata: { requestedBy: 'U_ALLOWED' },
+  })
+  updateAgentSession({ dbPath, id: created.session.id, status: 'closed' })
+  const result = reopenAgentSession({ dbPath, config: baseConfig, id: created.session.id, requestedBy: 'U_RANDOM' })
+  assert.equal(result.ok, false)
+  assert.equal(result.error, 'not-allowed-to-reopen-agent-session')
+  assert.equal(getAgentSession({ dbPath, id: created.session.id }).status, 'closed')
 })
 
 // Regression test for a real bug found live: a rejected prompt() (Bedrock

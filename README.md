@@ -274,7 +274,19 @@ a DM) using the same primitive as `core/ask.js`'s existing human-in-the-loop flo
 `/agent-session close` (run from within the session's thread) ends it explicitly —
 or just reply `stop` or `exit` in the thread itself, no slash command needed. Both
 paths persist `status:'closed'` even if the session was never resumed after a
-listener restart.
+listener restart. The reply must be **exactly** `stop` or `exit` (nothing else) —
+a full sentence like "stop this session and exit" doesn't match and gets forwarded
+to the agent as an ordinary prompt instead, which will happily reply conversationally
+without the bridge having closed anything.
+
+**Reopening one you closed on purpose**: a closed session can never be picked back
+up by just replying in its thread — `tryResumeSession` refuses on sight once
+`status:'closed'`, by design (that check is what makes closing permanent instead of
+just another kind of restart-recovery gap). To deliberately bring one back, run
+`/agent-session reopen <id>` (the id is shown by `cli/agent-session.js list`,
+gated by the same D31 close-rights check as closing it) — this only flips the DB
+row back to `active`; the actual reconnect (`session/resume`/`session/load`) happens
+the normal way, the next time someone replies in that session's original thread.
 
 **Starting your own session doesn't let you stop someone else's (D31).** Being in
 `agentSessions.allowedUsers` only grants the right to start sessions of your own.

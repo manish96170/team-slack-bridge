@@ -113,34 +113,104 @@ For the feature matrix and exact on/off switches, see `FEATURES.md`.
 
 ## Usage
 
+Every command below accepts `--json` (structured `{ ok, ... }` output, non-zero exit
+on failure) and, for anything that actually sends to Slack, `--dry-run` (resolve and
+format the call, send nothing). All of them are plain `node cli/<name>.js` invocations
+from a git clone; `npm install -g` only installs the `team-slack-bridge` binary as an
+alias for `post.js` specifically (`package.json`'s `bin`), not a dispatcher for every
+subcommand below — for anything else on a global install, run `node
+$(npm root -g)/team-slack-bridge/cli/<name>.js` (or just work from a git clone instead,
+which is what most of this README assumes).
+
+**Post, reply, edit, react, delete:**
 ```bash
-# default: post as the bot
-node post.js --text "build finished" --channel "#deploys"
+node post.js --channel '#x' --text 'hi' [--thread-ts …] [--as-user] [--idempotency-key …] [--dry-run] [--json]
+node cli/reply.js --channel '#x' --thread-ts '169…' --text 'hi' [--idempotency-key …] [--dry-run] [--json]
+node cli/update.js --channel '#x' --ts '169…' --text 'new text' [--as-user] [--dry-run] [--json]  # --as-user required if the original was posted as-user
+node cli/delete.js --channel '#x' --ts '169…' [--dry-run] [--json]
+node cli/react.js --channel '#x' --ts '169…' --emoji eyes [--dry-run] [--json]
+```
 
-# explicit: post as your own authorized Slack identity
-node post.js --text "reviewing this now" --channel "#deploys" --as-user
+**DM someone** (find their Slack member ID via their profile → "Copy member ID"):
+```bash
+node cli/dm.js --user U0123ABC --text 'hi' [--as-user] [--dry-run] [--json]
+```
 
-# DM someone (bot identity) — find their Slack member ID via their profile > "Copy member ID"
-node post.js --text "can you take a look at this?" --dm U0123ABC
+**Read channels/threads/search** (search requires a user token — Slack's own
+per-person construction):
+```bash
+node cli/query.js --channel '#x' [--since-minutes 60] [--limit 20] [--json]
+node cli/thread.js --channel '#x' --thread-ts '169…' [--json]
+node cli/search.js --query 'from:@bob deploy' [--json]
+node cli/resolve-user.js --handle @jane [--json]
+```
 
-# setup and health
-node cli/setup.js init
-node cli/doctor.js --json
+**Scheduling** (`--at` accepts ISO-8601 or raw Unix seconds):
+```bash
+node cli/schedule.js --channel '#x' --text 'hi' --at '2026-09-10T09:00:00-07:00' [--thread-ts …] [--as-user] [--dry-run] [--json]
+node cli/scheduled.js [--channel '#x'] [--limit 20] [--as-user] [--json]
+node cli/unschedule.js --channel '#x' --scheduled-id Q1234567890 [--as-user] [--dry-run] [--json]
+```
 
-# run the Socket Mode listener as a daemon
-node cli/daemon.js start --json
+**Human-in-the-loop** (`approval` requires the Socket Mode listener running — a
+button click is never visible to a direct poll):
+```bash
+node cli/ask.js --user U0123ABC --question 'Deploy to prod?' --kind approval [--options 'Approve,Deny'] [--timeout 300] [--capture-mode listener|poll] [--json]
+```
+
+**Setup and health:**
+```bash
+node cli/setup.js init                 # interactive: writes .env and slack-config.json
+npm run get-user-token                 # one-time OAuth flow for the --as-user capability
+node cli/doctor.js --json              # install health, never prints a token value
+node cli/home.js --user U0123ABC [--dry-run] [--json]   # manually (re)publish the App Home tab
+```
+
+**Progress messages** (one message, edited in place across `start`/`update`/`finish`):
+```bash
+node cli/progress.js start --channel "#deploys" --label "Deploy" --detail "starting" [--thread-ts ts] --json
+node cli/progress.js update --channel "#deploys" --ts "1699999999.000100" --label "Deploy" --status "running" --detail "tests passed" --json
+node cli/progress.js finish --channel "#deploys" --ts "1699999999.000100" --label "Deploy" [--ok false] --detail "released" --json
+```
+
+**Output mode** (local control; can also be exposed as Slack `/outputmode`):
+```bash
+node cli/output-mode.js [low|medium|high] --json
+```
+
+**Socket Mode listener daemon** — must be running for approval buttons, event-driven
+free-text answers, and every ACP agent-session trigger below:
+```bash
+node cli/daemon.js start --json      # idempotent — safe as a cron entry for auto-restart-on-crash
 node cli/daemon.js status --json
 node cli/daemon.js logs --lines 80
+node cli/daemon.js restart --json
 node cli/daemon.js stop --json
-
-# progress message that gets edited in place
-node cli/progress.js start --channel "#deploys" --label "Deploy" --detail "starting" --json
-node cli/progress.js update --channel "#deploys" --ts "1699999999.000100" --label "Deploy" --status "running" --detail "tests passed" --json
-node cli/progress.js finish --channel "#deploys" --ts "1699999999.000100" --label "Deploy" --detail "released" --json
-
-# local output-mode control; the same can be exposed as Slack /outputmode
-node cli/output-mode.js medium --json
 ```
+
+**Named repo registry** (D23 — an ACP session's fs/terminal access is scoped to one
+of these, never a raw path typed into Slack):
+```bash
+node cli/repos.js add <name> --path /absolute/path
+node cli/repos.js list
+node cli/repos.js remove <name>
+node cli/repos.js set-default <name>
+```
+
+**Agent-session records** (local bookkeeping/listing — see "ACP agent sessions"
+below for the actual Slack-facing start/close/reopen commands):
+```bash
+node cli/agent-session.js create [--channel C123] [--thread-ts ts] [--kind review-request] [--json]
+node cli/agent-session.js list [--status active|closed|created] [--kind acp-session] [--limit 20] [--json]
+```
+
+**Local HTTP endpoint** (optional, off unless `http.enabled` in `slack-config.json`):
+```bash
+node cli/http.js --json
+```
+
+See "Connecting multiple AI coding harnesses / multiple Slack accounts" below for
+`cli/accounts.js` and `cli/mcp-daemon.js`.
 
 ## Runtime Notes
 
@@ -204,6 +274,20 @@ claude-agent-acp`, Codex via `@agentclientprotocol/codex-acp`, OpenCode via
 `opencode acp`, or Gemini CLI via `gemini --acp`). A human replies in the thread,
 that becomes a prompt into the agent; the agent's streamed output, tool calls, and
 permission requests render back into the same thread.
+
+**Quick reference** — everything below is covered in detail further down:
+
+| Action | How |
+| --- | --- |
+| Start a session | `/agent-session start [--backend name] [--repo name] [--model name] <task>`, an `@mention`/DM starting with `agentSessions.mentionKeyword` (or any of `mentionKeywords`), or the "Start agent session" message shortcut |
+| Reply / continue | Just reply in the session's thread — no command needed |
+| End a session | Reply `stop` or `exit` **exactly** in its thread, or `/agent-session close <id>` |
+| End every session in this channel | `/agent-session close all` |
+| Bring a closed session back | `/agent-session reopen <id>` (only works for a thread's *latest* session) |
+| List sessions / find an id | `node cli/agent-session.js list` (or read it off any close confirmation) |
+| Trim context and keep going | Reply `compact` once a session has warned it's near its limit |
+| Continue with a fresh session, seeded from the handoff | Reply `here` (or `new session`) after the context-limit warning |
+| Seed a new session from an earlier point in this one | Reply `rewind`, then answer how far back and how much detail |
 
 Not every message starts a session — only one of three explicit triggers does, and
 only for `config.owner` or someone in the `agentSessions.allowedUsers` allow-list

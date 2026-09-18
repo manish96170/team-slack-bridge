@@ -14,7 +14,14 @@ import { ask } from './ask.js'
 import { writeHandoffFile } from './handoff.js'
 
 const DEBOUNCE_MS = 1500
-const MAX_RENDERED_CHARS = 2800
+// Slack's chat.update/postMessage text limit is 40,000 chars — this stays
+// safely under it (label/status prefix, separators) while keeping the
+// WHOLE session's turn-by-turn log in one message, per the live-testing
+// feedback that a fresh Slack message per reply (this constant's earlier,
+// much smaller value) or growing the thread's root message (pre-existing
+// behavior) were both wrong: replies should append into one dedicated
+// thread message, so the full conversation stays in one copyable block.
+const MAX_RENDERED_CHARS = 36000
 const DEFAULT_CONTEXT_WARNING_THRESHOLD = 0.8
 const HANDOFF_SUMMARY_PROMPT =
   'Your context window is almost full. Summarize your progress so far and the concrete next steps as a concise handoff TODO for a fresh session to continue from, in plain markdown.'
@@ -344,7 +351,12 @@ function sessionLabel(entry) {
 // (no rate-limit-aware coalescing exists in core/progress.js itself — this
 // is that missing piece, kept here rather than in progress.js).
 export async function runPromptTurn(entry, promptText) {
-  entry.accumulatedText = ''
+  // Appended, never reset — every turn (the initial task and every reply
+  // after it) lands in the SAME log message (entry.progressTs), separated
+  // and prefixed with the prompt that triggered it, so the whole session
+  // reads as one copyable transcript instead of many separate messages.
+  const separator = entry.accumulatedText ? '\n\n---\n\n' : ''
+  entry.accumulatedText = `${entry.accumulatedText || ''}${separator}*> ${promptText}*\n`
   let flushTimer = null
 
   function scheduleFlush() {
@@ -548,16 +560,6 @@ async function handleContextFullReply({ entry, text, env, config, dbPath, reques
   }
   if (command === 'compact') {
     entry.contextState = 'normal'
-    const progressPost = await startProgress({
-      token: entry.env.SLACK_BOT_TOKEN,
-      channel: entry.channel,
-      label: sessionLabel(entry),
-      detail: 'starting…',
-      threadTs: entry.threadTs,
-      config: entry.config,
-    })
-    if (!progressPost.ok) return progressPost
-    entry.progressTs = progressPost.ts
     const response = await runPromptTurn(entry, COMPACT_NUDGE_PROMPT)
     return { ok: true, stopReason: response.stopReason }
   }
@@ -802,6 +804,40 @@ async function startAgentSessionBody({ env, config, dbPath, channel, backend, re
       onPermissionRequest: params => handlePermissionRequest({ env, dbPath, channel, threadTs: anchorThreadTs, requestedBy, params }),
     })
 
+    // progressPost (posted by startAgentSession, before this ran) is the
+    // thread's root when no threadTs was given — that message is stuck in
+    // the channel's main view forever, not just the thread, so it must stay
+    // short and static. This second message, always posted INTO the thread
+    // (anchorThreadTs is guaranteed set by now either way), is what
+    // actually accumulates the whole session's turn-by-turn log — every
+    // future runPromptTurn call edits THIS one, never progressPost. Found
+    // live: editing the root itself made it grow into a huge message
+    // sitting in the channel's main area, not just the thread.
+    const logPost = await startProgress({
+      token: env.SLACK_BOT_TOKEN,
+      channel,
+      label: `Agent session (${backend.name}${appliedModel ? ` · ${appliedModel}` : ''} · ${repo.name})`,
+      detail: 'starting…',
+      threadTs: anchorThreadTs,
+      config,
+    })
+    if (!logPost.ok) {
+      activeSession.dispose()
+      unregisterSession(sessions, activeSession.sessionId)
+      return logPost
+    }
+    // One single edit to the root, from "starting…" to a permanent pointer
+    // — never touched again after this, so it stays short regardless of
+    // how long the thread's conversation grows.
+    await updateProgress({
+      token: env.SLACK_BOT_TOKEN,
+      channel,
+      ts: progressPost.ts,
+      label: `Agent session (${backend.name}${appliedModel ? ` · ${appliedModel}` : ''} · ${repo.name})`,
+      detail: 'Started — see thread for the conversation.',
+      config,
+    })
+
     const entry = {
       activeSession,
       backend,
@@ -810,7 +846,7 @@ async function startAgentSessionBody({ env, config, dbPath, channel, backend, re
       model: appliedModel,
       agentSessionRowId: created.session.id,
       startedBy: requestedBy,
-      progressTs: progressPost.ts,
+      progressTs: logPost.ts,
       channel,
       threadTs: anchorThreadTs,
       env,
@@ -882,20 +918,12 @@ export async function routeThreadReply({ env, config, dbPath, channel, threadTs,
     }
     if (entry.contextState === 'full') return handleContextFullReply({ entry, text, env, config, dbPath, requestedBy })
 
-    // Post a fresh message for this turn instead of reusing the
-    // progressTs captured at session creation — without this, every
-    // reply in the thread just edits that first "starting…" message
-    // in place rather than appearing as its own reply.
-    const progressPost = await startProgress({
-      token: entry.env.SLACK_BOT_TOKEN,
-      channel: entry.channel,
-      label: sessionLabel(entry),
-      detail: 'starting…',
-      threadTs,
-      config: entry.config,
-    })
-    if (!progressPost.ok) return progressPost
-    entry.progressTs = progressPost.ts
+    // No fresh message here — runPromptTurn appends this turn onto the
+    // SAME log message (entry.progressTs) the session started with, so the
+    // whole conversation stays in one copyable thread message rather than
+    // a new Slack message per reply (tried that; live testing found it
+    // just scattered the conversation across many separate messages
+    // instead — one accumulating log is what was actually wanted).
     const response = await runPromptTurn(entry, text)
     return { ok: true, stopReason: response.stopReason }
   })

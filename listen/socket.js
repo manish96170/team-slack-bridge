@@ -89,22 +89,36 @@ export function createListener({ env, botToken, appToken, config, configPath, db
   // message.im / message.channels / message.groups all land here; classify()
   // itself decides relevance from channel_type — see core/classify.js.
   app.message(async ({ message }) => {
-    // A bot_message normally means an edit/join/other-app noise, not a
-    // proposal — unless it's a DM from an app explicitly trusted to act on
-    // a named human's behalf via agentSessions.trustedApps ({ botOrAppId:
-    // slackUserId }), in which case it's treated exactly like a DM from
-    // that human (same allowlist/repo checks apply downstream, since
-    // requestedBy below resolves to their real user id, not the app's).
-    // Scoped to channel_type === 'im' deliberately — without this, the
-    // same trusted app posting a bot_message into any CHANNEL thread
-    // would resolve to the mapped human there too, letting it stop/reply
-    // to/rewind sessions across every channel it can post into, not just
-    // DM-trigger one as documented (found in review before publishing).
-    const trustedActingAs = message.subtype === 'bot_message' && message.channel_type === 'im'
+    // A bot/app-authored message normally means noise (an edit, a join, a
+    // notification from some other app), not a proposal — unless it's a DM
+    // from an app explicitly trusted to act on a named human's behalf via
+    // agentSessions.trustedApps ({ botOrAppId: slackUserId }), in which
+    // case it's treated exactly like a DM from that human (same
+    // allowlist/repo checks apply downstream, since requestedBy below
+    // resolves to their real user id, not the app's).
+    //
+    // Detected via `bot_id`, not `subtype === 'bot_message'` — confirmed
+    // live against a real message from a bot app (via conversations.history)
+    // that carried `bot_id`/`app_id` with NO `subtype` field at all, which
+    // would have skipped the trustedApps lookup entirely and fallen through
+    // as an ordinary message. `bot_id` is the reliable signal either way.
+    //
+    // Scoped to channel_type === 'im' deliberately — without this, the same
+    // trusted app posting a bot message into any CHANNEL thread would
+    // resolve to the mapped human there too, letting it stop/reply-to/
+    // rewind sessions across every channel it can post into, not just the
+    // DM-trigger grant documented (found in review before publishing).
+    const isBotOrSystemMessage = Boolean(message.subtype) || Boolean(message.bot_id)
+    const trustedActingAs = message.bot_id && message.channel_type === 'im'
       ? config.agentSessions?.trustedApps?.[message.bot_id] || config.agentSessions?.trustedApps?.[message.app_id]
       : undefined
-    if (message.subtype && !trustedActingAs) return
-    const requestedBy = message.user || trustedActingAs
+    if (isBotOrSystemMessage && !trustedActingAs) return
+    // trustedActingAs must win over message.user when both are present —
+    // a bot message from an app with its own associated bot USER (confirmed
+    // live: `user` was populated with the bot's own U-id, not absent as
+    // generic Slack docs suggest) would otherwise resolve requestedBy to
+    // the bot's own identity instead of the human it's mapped to act as.
+    const requestedBy = trustedActingAs || message.user
 
     // A free-text reply in a pending ask's thread is an answer, not a new
     // inbound proposal — capture it and stop, so it never also shows up as

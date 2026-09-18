@@ -255,6 +255,17 @@ against whichever ones the backend actually offers (by name or raw id) — an un
 name fails the session start with the real list of what that backend supports, rather
 than silently picking something else.
 
+**One message per session, not one per reply.** Starting a session posts two
+messages: a short static one (the thread's root, if this is a new thread — that one
+is never touched again, so it doesn't grow into a wall of text sitting in the
+channel's main view) and a second message, always inside the thread, that every
+turn — the initial task and every reply after it — appends onto, separated and
+prefixed with the prompt that triggered it. The whole conversation ends up in one
+message you can open and copy in full, rather than scattered across many separate
+Slack messages (tried that first; it just made the thread noisy) or grown into the
+channel-visible root (the very first behavior — worse, since it's not even inside
+the thread).
+
 `--backend` defaults to `claude`; `--repo` defaults to whichever repo is registered as
 default. Permission requests render as Approve/Deny buttons in the thread itself (not
 a DM) using the same primitive as `core/ask.js`'s existing human-in-the-loop flow.

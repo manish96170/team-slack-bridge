@@ -451,6 +451,43 @@ function makeFakeSession(script) {
   }
 }
 
+// Regression test for live-testing feedback: replies were each posting a
+// brand-new Slack message (or, before that fix, editing the thread's root
+// — visible in the channel's main area, not just the thread). Neither was
+// wanted; every turn should append onto the SAME log message instead, so
+// the whole session reads as one copyable transcript.
+test('runPromptTurn appends each turn onto the same accumulated log instead of resetting it', async () => {
+  const posted = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    const body = Object.fromEntries(new URLSearchParams(init.body))
+    posted.push(body)
+    return { status: 200, headers: new Headers(), url: url.toString(), text: async () => JSON.stringify({ ok: true, channel: body.channel, ts: '100.001' }) }
+  }
+  try {
+    const fakeActiveSession = makeFakeSession([[], []])
+    const entry = {
+      activeSession: fakeActiveSession,
+      backend: { name: 'claude' },
+      repoName: 'dashboard',
+      progressTs: '100.001',
+      channel: 'C1',
+      threadTs: '100.001',
+      env: { SLACK_BOT_TOKEN: 'xoxb-append-test' },
+      config: {},
+      accumulatedText: '',
+    }
+    await runPromptTurn(entry, 'first task')
+    assert.match(entry.accumulatedText, /\*> first task\*/)
+    await runPromptTurn(entry, 'a follow-up reply')
+    assert.match(entry.accumulatedText, /\*> first task\*/, 'first turn should still be present, not reset')
+    assert.match(entry.accumulatedText, /\*> a follow-up reply\*/)
+    assert.ok(entry.accumulatedText.indexOf('first task') < entry.accumulatedText.indexOf('a follow-up reply'))
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('runPromptTurn writes a handoff file and gates the thread once usage crosses the configured threshold', async () => {
   await withTempHome(async () => {
     const posted = []

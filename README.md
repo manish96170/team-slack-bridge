@@ -260,11 +260,13 @@ messages: a short static one (the thread's root, if this is a new thread — tha
 is never touched again, so it doesn't grow into a wall of text sitting in the
 channel's main view) and a second message, always inside the thread, that every
 turn — the initial task and every reply after it — appends onto, separated and
-prefixed with the prompt that triggered it. The whole conversation ends up in one
-message you can open and copy in full, rather than scattered across many separate
-Slack messages (tried that first; it just made the thread noisy) or grown into the
-channel-visible root (the very first behavior — worse, since it's not even inside
-the thread).
+prefixed with the prompt that triggered it, rather than scattering the conversation
+across many separate Slack messages (tried that first; it just made the thread
+noisy) or growing the channel-visible root (the very first behavior — worse, since
+that's not even inside the thread). This is Slack's `chat.update`, which hard-errors
+past 4,000 characters — there's no way to keep an unlimited transcript live in one
+continuously-edited message, so only the most recent ~3,500 characters stay visible
+in it; it's a rolling window onto the conversation, not a guaranteed full history.
 
 `--backend` defaults to `claude`; `--repo` defaults to whichever repo is registered as
 default. Permission requests render as Approve/Deny buttons in the thread itself (not

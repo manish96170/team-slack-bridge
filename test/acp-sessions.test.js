@@ -488,6 +488,46 @@ test('runPromptTurn appends each turn onto the same accumulated log instead of r
   }
 })
 
+// Regression test for a real bug this session: since accumulatedText no
+// longer resets per turn (the fix above), entry.transcript[i].response —
+// used to seed a rewind — was initially wired to store entry.accumulatedText
+// itself, meaning each entry held an ever-larger, overlapping copy of the
+// WHOLE conversation rather than just what that one turn produced.
+test('runPromptTurn records only each turn\'s OWN response in the transcript, not the cumulative log', async () => {
+  const posted = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    const body = Object.fromEntries(new URLSearchParams(init.body))
+    posted.push(body)
+    return { status: 200, headers: new Headers(), url: url.toString(), text: async () => JSON.stringify({ ok: true, channel: body.channel, ts: '100.001' }) }
+  }
+  try {
+    const fakeActiveSession = makeFakeSession([
+      [{ kind: 'session_update', notification: { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'first turn output' } } } }],
+      [{ kind: 'session_update', notification: { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'second turn output' } } } }],
+    ])
+    const entry = {
+      activeSession: fakeActiveSession,
+      backend: { name: 'claude' },
+      repoName: 'dashboard',
+      progressTs: '100.001',
+      channel: 'C1',
+      threadTs: '100.001',
+      env: { SLACK_BOT_TOKEN: 'xoxb-transcript-test' },
+      config: {},
+      accumulatedText: '',
+      transcript: [],
+    }
+    await runPromptTurn(entry, 'first prompt')
+    await runPromptTurn(entry, 'second prompt')
+    assert.equal(entry.transcript.length, 2)
+    assert.equal(entry.transcript[0].response, 'first turn output')
+    assert.equal(entry.transcript[1].response, 'second turn output')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('runPromptTurn writes a handoff file and gates the thread once usage crosses the configured threshold', async () => {
   await withTempHome(async () => {
     const posted = []

@@ -14,14 +14,17 @@ import { ask } from './ask.js'
 import { writeHandoffFile } from './handoff.js'
 
 const DEBOUNCE_MS = 1500
-// Slack's chat.update/postMessage text limit is 40,000 chars — this stays
-// safely under it (label/status prefix, separators) while keeping the
-// WHOLE session's turn-by-turn log in one message, per the live-testing
-// feedback that a fresh Slack message per reply (this constant's earlier,
-// much smaller value) or growing the thread's root message (pre-existing
-// behavior) were both wrong: replies should append into one dedicated
-// thread message, so the full conversation stays in one copyable block.
-const MAX_RENDERED_CHARS = 36000
+// chat.update (unlike chat.postMessage, which merely truncates past 40,000)
+// hard-errors with msg_too_long past 4,000 chars on its `text` field —
+// verified against Slack's own docs, not assumed; an earlier version of
+// this constant (36000) would have made every progress edit past the
+// first ~4k characters of a session silently fail (updateProgress's
+// errors aren't surfaced to the caller). This is Slack's real ceiling —
+// there is no way to keep an UNLIMITED transcript live in one
+// continuously-edited message; this only controls how much of the most
+// recent conversation stays visible in it. Left some headroom under 4000
+// for the label/status prefix renderProgress adds on top.
+const MAX_RENDERED_CHARS = 3500
 const DEFAULT_CONTEXT_WARNING_THRESHOLD = 0.8
 const HANDOFF_SUMMARY_PROMPT =
   'Your context window is almost full. Summarize your progress so far and the concrete next steps as a concise handoff TODO for a fresh session to continue from, in plain markdown.'
@@ -357,6 +360,12 @@ export async function runPromptTurn(entry, promptText) {
   // reads as one copyable transcript instead of many separate messages.
   const separator = entry.accumulatedText ? '\n\n---\n\n' : ''
   entry.accumulatedText = `${entry.accumulatedText || ''}${separator}*> ${promptText}*\n`
+  // Tracks ONLY this turn's own response text, separate from
+  // entry.accumulatedText (which is the whole session's cumulative
+  // display log) — without this, transcript entries used by rewind would
+  // each store an ever-larger, overlapping copy of the ENTIRE
+  // conversation instead of just what that turn actually produced.
+  let turnText = ''
   let flushTimer = null
 
   function scheduleFlush() {
@@ -398,7 +407,13 @@ export async function runPromptTurn(entry, promptText) {
         channel: entry.channel,
         ts: entry.progressTs,
         label: sessionLabel(entry),
-        detail: `${entry.accumulatedText.slice(-MAX_RENDERED_CHARS)}\n\n⚠️ ${message.error.message || message.error}`.trim(),
+        // Slice the FINAL combined string, not accumulatedText alone —
+        // otherwise a long error message appended after an already
+        // MAX_RENDERED_CHARS-sized slice could push the total back over
+        // Slack's 4,000-char chat.update ceiling. The error itself is the
+        // important part, so it's guaranteed to survive; only the
+        // accumulated log gets trimmed if there isn't room for both.
+        detail: `${entry.accumulatedText}\n\n⚠️ ${message.error.message || message.error}`.trim().slice(-MAX_RENDERED_CHARS),
         ok: false,
         config: entry.config,
       })
@@ -416,8 +431,13 @@ export async function runPromptTurn(entry, promptText) {
         config: entry.config,
       })
       entry.transcript = entry.transcript || []
-      entry.transcript.push({ prompt: promptText, response: entry.accumulatedText, ts: Date.now() })
+      entry.transcript.push({ prompt: promptText, response: turnText, ts: Date.now() })
       if (entry.transcript.length > 20) entry.transcript = entry.transcript.slice(-20)
+      // Cap the cumulative log itself, not just what's rendered per edit —
+      // without this, entry.accumulatedText grows without bound for the
+      // life of a long-running session even though only the last
+      // MAX_RENDERED_CHARS of it is ever actually displayed.
+      entry.accumulatedText = entry.accumulatedText.slice(-MAX_RENDERED_CHARS)
       await maybeWarnContextFull(entry)
       return message.response
     }
@@ -425,6 +445,7 @@ export async function runPromptTurn(entry, promptText) {
     if (described) {
       if (described.text) {
         entry.accumulatedText += described.text
+        turnText += described.text
         scheduleFlush()
       }
       if (described.usage) entry.contextUsage = described.usage

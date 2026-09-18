@@ -14,6 +14,26 @@ this repo's own source/tests, which aren't part of the published package.
 
 ## Four surfaces, one core
 
+```
+┌───────────────┐   ┌───────────────┐   ┌───────────────┐   ┌───────────────┐
+│      CLI      │   │  MCP server   │   │     Skill     │   │   Dashboard   │
+│ node cli/*.js │   │(stdio / HTTP) │   │   SKILL.md    │   │     agent     │
+└───────────────┘   └───────────────┘   └───────────────┘   └───────────────┘
+        │                   │                   │                   │
+        ┴───────────────────┴─────────┬─────────┴───────────────────┴
+                                      │
+                  ┌───────────────────┬──────────────────┐
+                  │              core/*.js               │
+                  │  no ambient state, tokens as params  │
+                  └──────────────────────────────────────┘
+                                      │
+               ┌──────────────────────┬─────────────────────┐
+               │                   Slack                    │
+               │           Web API + Socket Mode            │
+               │(post, DM, events, approvals, ACP sessions) │
+               └────────────────────────────────────────────┘
+```
+
 See `PLAN.md` for the full architecture and decisions log, `TODO.md` for the current
 done/pending status, and `ROADMAP.md` for longer-horizon ideas that aren't decided or
 scheduled yet. In short: every capability is
@@ -69,6 +89,13 @@ For the feature matrix and exact on/off switches, see `FEATURES.md`.
 
 ## One-time setup
 
+```
+┌──────────────────────────┐     ┌──────────────────────────┐     ┌──────────────────────────┐     ┌──────────────────────────┐
+│    npm install -g        │  ▶  │  node cli/setup.js init  │  ▶  │node cli/daemon.js start  │  ▶  │  talk to it in Slack     │
+│  team-slack-bridge       │     │  (interactive wizard)    │     │ (Socket Mode listener)   │     │(@mention / DM / slash)   │
+└──────────────────────────┘     └──────────────────────────┘     └──────────────────────────┘     └──────────────────────────┘
+```
+
 1. Create a Slack app from `config/slack-app-manifest.template.json`, or create a
    **Blank app** and configure the same scopes/events by hand. Under **OAuth &
    Permissions -> Scopes**, add these **Bot Token Scopes**:
@@ -98,12 +125,50 @@ For the feature matrix and exact on/off switches, see `FEATURES.md`.
 2. Install the app to your workspace. Invite the bot to any channel you want it posting
    in (`/invite @your-app-name`). To DM the bot yourself, search its name in Slack or
    find it under **Apps** in the sidebar — no separate "invite to DM" step exists.
-3. Run the setup wizard:
+3. Run the setup wizard — every prompt has a default/skip and a "leave off if unsure"
+   hint, so it's safe to just hit enter through anything you're not ready to answer yet:
    ```bash
    node cli/setup.js init
    ```
+   ```text
+   $ node cli/setup.js init
+   Slack bot token (xoxb-, paste locally; input is echoed): xoxb-...
+   Slack app token for Socket Mode (xapp-, optional but needed for listener): xapp-...
+   Slack signing secret (optional, needed for HTTP/slash endpoints):
+   Owner Slack user ID (U...): U0123ABC
+   Watched channel ID or name (#code-review): #code-review
+   Channel purpose (review-request|team-request): review-request
+   Output mode (low|medium|high, default medium): medium
+   Enable the HTTP surface? (y/N — recommended: N if unsure) — an alternative to Socket
+   Mode for slash commands/interactivity — opens a local port. Socket Mode (the listener)
+   already covers this without one. Leave off unless you specifically need an HTTP
+   endpoint: n
+   Enable Slack slash commands (/outputmode)? (y/N — recommended: N if unsure) — requires
+   Interactivity enabled in the Slack app manifest first — leave off if you have not
+   reinstalled the app with that setting yet: n
+   Enable agent-session tracking? (y/N — recommended: N if unsure) — links Slack threads
+   to Claude Code/OpenCode sessions — leave off until you have picked a provider: y
+   Enable the OpenACP (Agent Client Protocol) adapter? (y/N — recommended: N if unsure): n
+   Enable Slack's own remote MCP connector passthrough? (y/N — recommended: N if unsure): n
+   Initialized ~/.team-slack-bridge/slack-config.json and ~/.team-slack-bridge/.env
+   (token values not printed).
+   Enabled: Enable agent-session tracking
+   ```
    It writes `.env` and `slack-config.json`. Token prompts are local terminal input;
-   do not run setup in a shared recording or paste tokens into chat.
+   do not run setup in a shared recording or paste tokens into chat. Every value can
+   also be passed as a flag to skip its prompt non-interactively (e.g.
+   `--owner U0123ABC`), which is what CI or a scripted install would use instead.
+
+   The wizard has other subcommands too, for changing things later without re-running
+   `init`'s full token/owner/channel flow:
+   ```bash
+   node cli/setup.js add-user                                            # interactive: name, handle, Slack user ID, Jira handle
+   node cli/setup.js set-owner --user U0123ABC
+   node cli/setup.js watch-channel --channel '#code-review' --purpose review-request
+   node cli/setup.js dm-allow --user U0456DEF
+   node cli/setup.js features                       # revisit the default-off toggles later, same prompts as init
+   node cli/setup.js features --enable-http true     # skip a specific prompt non-interactively
+   ```
 4. If you want the "post as me" capability:
    ```
    npm run get-user-token
@@ -288,6 +353,14 @@ permission requests render back into the same thread.
 | Trim context and keep going | Reply `compact` once a session has warned it's near its limit |
 | Continue with a fresh session, seeded from the handoff | Reply `here` (or `new session`) after the context-limit warning |
 | Seed a new session from an earlier point in this one | Reply `rewind`, then answer how far back and how much detail |
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│     ① START     │     │   ② CONVERSE    │     │ ③ CONTEXT LIMIT │     │      ④ END      │
+│ start session,  │  ▶  │  reply in the   │  ▶  │   ~80% full:    │  ▶  │  stop / exit /  │
+│ @mention, or DM │     │thread — one log │     │handoff + choice │     │   close <id>    │
+└─────────────────┘     └─────────────────┘     └─────────────────┘     └─────────────────┘
+```
 
 Not every message starts a session — only one of three explicit triggers does, and
 only for `config.owner` or someone in the `agentSessions.allowedUsers` allow-list

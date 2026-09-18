@@ -473,6 +473,11 @@ async function runInternalPrompt(entry, promptText) {
     const described = describeUpdate(message.notification.update)
     if (described?.text) text += described.text
     if (described?.usage) entry.contextUsage = described.usage
+    // If the backend compacts on its own WHILE generating this internal
+    // handoff summary, the caller (maybeWarnContextFull) needs to know —
+    // otherwise it unconditionally gates the thread into 'full' right
+    // after, even though context was just freed up.
+    if (described?.compacted) entry.contextState = 'normal'
   }
 }
 
@@ -488,6 +493,11 @@ async function maybeWarnContextFull(entry) {
   if (ratio < threshold) return
 
   const summary = await runInternalPrompt(entry, HANDOFF_SUMMARY_PROMPT)
+  // runInternalPrompt may have set contextState back to 'normal' if the
+  // backend compacted on its own while generating this very summary — in
+  // that case context was just freed up, so don't gate the thread into
+  // 'full' right after telling the user everything's fine.
+  if (entry.contextState === 'normal' && contextUsageRatio(entry.contextUsage) < threshold) return
   const path = writeHandoffFile({ repoName: entry.repoName, summary })
   entry.contextState = 'full'
   entry.remindersSent = 0
@@ -513,12 +523,15 @@ async function maybeWarnContextFull(entry) {
 // already running inside that same lock (routeThreadReply's callback) —
 // re-acquiring it here would deadlock forever waiting on itself.
 async function startFreshSessionInPlace(entry, { env, config, dbPath, seedTask }) {
-  const key = sessionKey(entry.channel, entry.threadTs)
-  entry.activeSession.dispose()
-  unregisterSession(entry.sessions, entry.activeSession.sessionId)
-  activeSessionsByKey.delete(key)
-  if (entry.agentSessionRowId) updateAgentSession({ dbPath, id: entry.agentSessionRowId, status: 'closed' })
-
+  // Attempt the replacement FIRST, and only retire the old session once it
+  // actually succeeds — the old ordering disposed/closed the old session
+  // up front, so a transient failure anywhere in starting the new one
+  // (repo missing, Slack post failure, backend connection failure) left
+  // the thread with NO active session at all, having destroyed a working
+  // one for nothing. startAgentSessionBody sets its own new entry into
+  // activeSessionsByKey on success — this function's own `entry` reference
+  // is a separate closure variable, unaffected by that, so it's still
+  // safe to dispose here afterward regardless of what the map now holds.
   const backend = entry.backend
   const repo = resolveRepoPath(entry.repoName)
   if (!repo.ok) return repo
@@ -531,7 +544,7 @@ async function startFreshSessionInPlace(entry, { env, config, dbPath, seedTask }
     config,
   })
   if (!progressPost.ok) return progressPost
-  return startAgentSessionBody({
+  const started = await startAgentSessionBody({
     env,
     config,
     dbPath,
@@ -544,6 +557,12 @@ async function startFreshSessionInPlace(entry, { env, config, dbPath, seedTask }
     progressPost,
     anchorThreadTs: entry.threadTs,
   })
+  if (!started.ok) return started
+
+  entry.activeSession.dispose()
+  unregisterSession(entry.sessions, entry.activeSession.sessionId)
+  if (entry.agentSessionRowId) updateAgentSession({ dbPath, id: entry.agentSessionRowId, status: 'closed' })
+  return started
 }
 
 function buildHandoffSeedTask(handoffText) {
@@ -845,6 +864,11 @@ async function startAgentSessionBody({ env, config, dbPath, channel, backend, re
     if (!logPost.ok) {
       activeSession.dispose()
       unregisterSession(sessions, activeSession.sessionId)
+      // Without this, the DB row created just above stays status:'created'
+      // forever with no in-memory entry and a disposed ACP session behind
+      // it — a phantom that looks resumable (findAgentSessionBySlackThread
+      // doesn't filter by status) but has nothing real to reconnect to.
+      updateAgentSession({ dbPath, id: created.session.id, status: 'closed' })
       return logPost
     }
     // One single edit to the root, from "starting…" to a permanent pointer
@@ -1009,7 +1033,35 @@ export async function closeAgentSessionById({ dbPath, config, id, requestedBy })
   if (!persisted || persisted.kind !== 'acp-session') {
     return { ok: false, error: 'session-not-found', retryable: false }
   }
-  return closeAgentSession({ dbPath, config, channel: persisted.slackChannel, threadTs: persisted.slackThreadTs, requestedBy })
+  if (persisted.status === 'closed') {
+    return { ok: false, error: 'no-active-session-for-thread', retryable: false }
+  }
+  if (!isAllowedToCloseSession(config, requestedBy, persisted.metadata?.requestedBy)) {
+    return { ok: false, error: 'not-allowed-to-close-agent-session', retryable: false }
+  }
+  // Deliberately does NOT delegate to closeAgentSession({channel, threadTs})
+  // — a thread can legitimately accumulate more than one row over its
+  // life (close a session, start a new one in the same thread later — an
+  // entirely normal workflow, not just here/rewind), and that function
+  // resolves by (channel, threadTs), i.e. whichever session is CURRENT for
+  // the thread, not necessarily the one matching `id`. Confirmed live: an
+  // old id closed a completely different, newer session for the same
+  // thread instead, and reported ITS id back. This only ever touches the
+  // exact row requested, and the in-memory entry only if it's actually
+  // still holding this same row (an older, already-superseded id won't be
+  // — startFreshSessionInPlace always disposes+closes the old one before
+  // registering the new one under the same key).
+  const key = sessionKey(persisted.slackChannel, persisted.slackThreadTs)
+  return withKeyLock(key, async () => {
+    const entry = activeSessionsByKey.get(key)
+    if (entry && entry.agentSessionRowId === id) {
+      entry.activeSession.dispose()
+      unregisterSession(entry.sessions, entry.activeSession.sessionId)
+      activeSessionsByKey.delete(key)
+    }
+    updateAgentSession({ dbPath, id, status: 'closed' })
+    return { ok: true, id }
+  })
 }
 
 // `/agent-session close all` — every currently-open (not yet closed)
@@ -1047,6 +1099,18 @@ export function reopenAgentSession({ dbPath, config, id, requestedBy }) {
   }
   if (persisted.status !== 'closed') {
     return { ok: false, error: 'session-not-closed', retryable: false }
+  }
+  // tryResumeSession/findAgentSessionBySlackThread always pick a thread's
+  // MOST RECENT row (by created_at), regardless of status — so flipping an
+  // OLDER row back to 'active' would report success but change nothing:
+  // the next reply still resumes (or refuses, if it's closed too) whatever
+  // the actual latest row is, never this one. A thread can have more than
+  // one row over its life (close a session, start a new one later in the
+  // same thread — an ordinary workflow), so refuse rather than silently
+  // no-op'ing and leaving the user thinking they reopened something.
+  const latest = findAgentSessionBySlackThread({ dbPath, slackChannel: persisted.slackChannel, slackThreadTs: persisted.slackThreadTs })
+  if (latest?.id !== id) {
+    return { ok: false, error: 'not-the-latest-session-for-this-thread', retryable: false }
   }
   // Same D31 gate as closing it — being allowed to reopen a session is the
   // same trust level as being allowed to close it, not a separate grant.

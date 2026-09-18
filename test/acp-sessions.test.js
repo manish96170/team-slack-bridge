@@ -417,6 +417,20 @@ test('reopenAgentSession flips a closed session back to active and returns its o
   assert.equal(getAgentSession({ dbPath, id: created.session.id }).status, 'active')
 })
 
+test('reopenAgentSession refuses to reopen a superseded (non-latest) session for its thread', () => {
+  const dbPath = tempDbPath()
+  const oldSession = createAgentSession({ dbPath, config: baseConfig, slackChannel: 'C1', slackThreadTs: '1.1', kind: 'acp-session', metadata: { requestedBy: 'U_ALLOWED' } })
+  updateAgentSession({ dbPath, id: oldSession.session.id, status: 'closed' })
+  // findAgentSessionBySlackThread/tryResumeSession always pick the most
+  // recent row for a thread — reopening an older one would report success
+  // but never actually become reachable, since a newer row already exists.
+  createAgentSession({ dbPath, config: baseConfig, slackChannel: 'C1', slackThreadTs: '1.1', kind: 'acp-session', metadata: { requestedBy: 'U_ALLOWED' } })
+  const result = reopenAgentSession({ dbPath, config: baseConfig, id: oldSession.session.id, requestedBy: 'U_ALLOWED' })
+  assert.equal(result.ok, false)
+  assert.equal(result.error, 'not-the-latest-session-for-this-thread')
+  assert.equal(getAgentSession({ dbPath, id: oldSession.session.id }).status, 'closed', 'should be left alone, not silently flipped to active')
+})
+
 test('reopenAgentSession refuses a session that is not actually closed', () => {
   const dbPath = tempDbPath()
   const created = createAgentSession({ dbPath, config: baseConfig, slackChannel: 'C1', slackThreadTs: '1.1', kind: 'acp-session', metadata: {} })
@@ -473,6 +487,20 @@ test('closeAgentSessionById fails clearly for an unknown id instead of throwing'
   const result = await closeAgentSessionById({ dbPath: tempDbPath(), config: baseConfig, id: 'not-a-real-id', requestedBy: 'U_OWNER' })
   assert.equal(result.ok, false)
   assert.equal(result.error, 'session-not-found')
+})
+
+test('closeAgentSessionById on an already-closed id refuses instead of reaching for whatever else is current in that thread', async () => {
+  const dbPath = tempDbPath()
+  const oldSession = createAgentSession({ dbPath, config: baseConfig, slackChannel: 'C1', slackThreadTs: '1.1', kind: 'acp-session', metadata: { requestedBy: 'U_ALLOWED' } })
+  updateAgentSession({ dbPath, id: oldSession.session.id, status: 'closed' })
+  // A completely ordinary workflow: close a session, then later start a
+  // NEW one in the same thread — the old id must never be able to reach
+  // this one.
+  const newSession = createAgentSession({ dbPath, config: baseConfig, slackChannel: 'C1', slackThreadTs: '1.1', kind: 'acp-session', metadata: { requestedBy: 'U_ALLOWED' } })
+  const result = await closeAgentSessionById({ dbPath, config: baseConfig, id: oldSession.session.id, requestedBy: 'U_ALLOWED' })
+  assert.equal(result.ok, false)
+  assert.equal(result.error, 'no-active-session-for-thread')
+  assert.equal(getAgentSession({ dbPath, id: newSession.session.id }).status, 'created', 'the newer, unrelated session for this thread must be left untouched')
 })
 
 test('closeAllAgentSessions closes every open session in the given channel, respecting D31 per session', async () => {

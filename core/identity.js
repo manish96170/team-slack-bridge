@@ -28,6 +28,11 @@ export function loadConfig(path) {
         trustedApps: {},
         contextWarningThreshold: 0.8,
       },
+      awayMode: {
+        gatedTools: ['Bash', 'Edit', 'Write', 'NotebookEdit'],
+        hookTimeoutSeconds: 300,
+        maxContinuations: 3,
+      },
       openacp: { enabled: false, adapterPackage: '@openacp/slack-adapter', autoCreateSession: false },
       slackbotMcp: normalizeSlackbotMcp(),
       remote: { postableChannels: [], readableChannels: [] },
@@ -84,6 +89,15 @@ export function loadConfig(path) {
       // used/size) at which the bridge triggers the handoff-file warning —
       // see maybeWarnContextFull in core/acp-sessions.js.
       contextWarningThreshold: raw.agentSessions?.contextWarningThreshold ?? 0.8,
+    },
+    // D39/D40 — away-mode policy lives in the bridge, not harness config.
+    // hookTimeoutSeconds was previously read as config.hookTimeoutSeconds
+    // (core/hooks.js:75, :171) but never listed here, so it was permanently
+    // undefined and the || 300 fallback always won — now surfaced properly.
+    awayMode: {
+      gatedTools: raw.awayMode?.gatedTools || ['Bash', 'Edit', 'Write', 'NotebookEdit'],
+      hookTimeoutSeconds: raw.awayMode?.hookTimeoutSeconds ?? 300,
+      maxContinuations: raw.awayMode?.maxContinuations ?? 3,
     },
     openacp: {
       enabled: !!raw.openacp?.enabled,

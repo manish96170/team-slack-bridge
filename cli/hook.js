@@ -1,20 +1,18 @@
 #!/usr/bin/env node
 // tsb-hook preToolUse|stop|preCompact|notification
 //
-// Claude Code hook dispatcher. Reads hook input from stdin (JSON),
-// calls the handler in core/hooks.js, writes the hook output to stdout.
+// Claude Code hook adapter. Reads hook input from stdin (JSON), calls the
+// harness-neutral handlers in core/hooks.js with harness='claude', and
+// translates neutral verdicts into Claude Code's hook output format.
 //
 // Safety contract: any internal error prints nothing and exits 0, so a
 // bug in this file can never wedge the user's session. The only path
-// that exits non-zero is `stop` when blocking (exit 2 + reason on
-// stderr), per the verified harness contract.
+// that exits non-zero is stop→block (exit 2 + reason on stderr).
 //
 // Hook output schema (verified against Claude Code docs):
 // - hookEventName is REQUIRED in hookSpecificOutput for all events
 // - PreToolUse: permissionDecision = "allow" | "deny" | "block"
-//   ("ignore" is NOT valid — for fail-open, emit no JSON and exit 0)
-// - PreCompact: observational only, no blocking mechanism exists
-//   (exit 2 does NOT prevent compaction either)
+// - PreCompact: observational only, no blocking mechanism
 // - Stop: exit 2 blocks the stop and continues; exit 0 allows it
 
 import { loadContext } from './context.js'
@@ -25,9 +23,7 @@ const HANDLERS = { preToolUse, preCompact, stop, notification }
 async function main() {
   const [event] = process.argv.slice(2)
   const handler = HANDLERS[event]
-  if (!handler) {
-    process.exit(0)
-  }
+  if (!handler) process.exit(0)
 
   let input = {}
   let stdinValid = false
@@ -39,67 +35,43 @@ async function main() {
       input = JSON.parse(raw)
       stdinValid = true
     }
-  } catch {
-    // Malformed stdin — fail open rather than acting on garbage.
-  }
-  // A stop hook with missing/malformed input must never block the session.
-  if (!stdinValid && event === 'stop') {
-    process.exit(0)
-  }
+  } catch {}
+
+  if (!stdinValid && event === 'stop') process.exit(0)
 
   const { env, config, dbPath } = loadContext()
-  const result = await handler(input, { env, config, dbPath })
+  const result = await handler(input, { env, config, dbPath, harness: 'claude' })
 
-  if (result.skip) {
+  if (result.verdict === 'skip' || result.verdict === 'ok') {
     process.exit(0)
   }
 
   if (event === 'preToolUse') {
-    if (result.decision === 'allow' || result.decision === 'deny') {
-      const output = {
+    if (result.verdict === 'allow' || result.verdict === 'deny') {
+      process.stdout.write(JSON.stringify({
         hookSpecificOutput: {
           hookEventName: 'PreToolUse',
-          permissionDecision: result.decision,
+          permissionDecision: result.verdict,
           ...(result.reason ? { permissionDecisionReason: result.reason } : {}),
         },
-      }
-      process.stdout.write(JSON.stringify(output))
+      }))
     }
-    // For fail-open (ignore/timeout/error): emit no JSON, just exit 0 —
-    // "ignore" is not a valid permissionDecision value, and exiting 0 with
-    // no output means the harness falls through to the normal local prompt.
+    // verdict='defer' → no JSON, exit 0 (Claude falls through to local prompt)
     process.exit(0)
   }
 
   if (event === 'stop') {
-    if (result.block) {
-      // Write the JSON output first (hookEventName required), then the
-      // reason to stderr, then exit 2. Use an explicit drain to avoid
-      // truncation when stderr is a pipe.
-      const output = { hookSpecificOutput: { hookEventName: 'Stop' } }
-      process.stdout.write(JSON.stringify(output))
+    if (result.verdict === 'block') {
+      process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'Stop' } }))
       const reason = result.reason || 'Continue with instruction from Slack'
       await new Promise(resolve => process.stderr.write(reason, resolve))
       process.exit(2)
     }
-    // allow — just exit 0
     process.exit(0)
   }
 
-  if (event === 'preCompact') {
-    // PreCompact is observational only — there is no blocking mechanism
-    // in the Claude Code hook contract (no compactionDecision field,
-    // exit 2 does NOT prevent compaction). All we can do is observe and
-    // log. The handler ran (it may have sent a Slack notification); now
-    // just exit cleanly.
-    process.exit(0)
-  }
-
-  // notification — no output needed
+  // preCompact, notification — observational, just exit
   process.exit(0)
 }
 
-main().catch(() => {
-  // Safety net — any uncaught error must never wedge the session.
-  process.exit(0)
-})
+main().catch(() => process.exit(0))

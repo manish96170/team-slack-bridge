@@ -62,7 +62,7 @@ async function answerNextPendingAsk(dbPath, answer, { maxWaitMs = 3000, pollMs =
   throw new Error('timed out waiting for a pending ask to appear')
 }
 
-const baseConfig = { owner: { slackUserId: 'U_OWNER' }, hookTimeoutSeconds: 10 }
+const baseConfig = { owner: { slackUserId: 'U_OWNER' }, awayMode: { hookTimeoutSeconds: 10, gatedTools: ['Bash', 'Edit', 'Write', 'NotebookEdit'] } }
 let tokenCounter = 0
 function freshEnv() { return { SLACK_BOT_TOKEN: `xoxb-hooks-test-${++tokenCounter}` } }
 
@@ -72,7 +72,7 @@ test('preToolUse skips when away mode is off', async () => {
   await withTempHome(async () => {
     setAway(false)
     const result = await preToolUse({ tool_name: 'Bash' }, { env: freshEnv(), config: baseConfig, dbPath: tempDbPath() })
-    assert.equal(result.skip, true)
+    assert.equal(result.verdict, 'skip')
   })
 })
 
@@ -80,7 +80,7 @@ test('preCompact skips when away mode is off', async () => {
   await withTempHome(async () => {
     setAway(false)
     const result = await preCompact({ trigger: 'auto' }, { env: freshEnv(), config: baseConfig, dbPath: tempDbPath() })
-    assert.equal(result.skip, true)
+    assert.equal(result.verdict, 'skip')
   })
 })
 
@@ -88,7 +88,7 @@ test('stop skips when away mode is off', async () => {
   await withTempHome(async () => {
     setAway(false)
     const result = await stop({ session_id: 's1' }, { env: freshEnv(), config: baseConfig, dbPath: tempDbPath() })
-    assert.equal(result.skip, true)
+    assert.equal(result.verdict, 'skip')
   })
 })
 
@@ -107,7 +107,7 @@ test('preToolUse returns allow when the ask is answered with Approve', async () 
       )
       await answerNextPendingAsk(dbPath, { kind: 'approval', label: 'Approve' })
       const result = await askPromise
-      assert.equal(result.decision, 'allow')
+      assert.equal(result.verdict, 'allow')
       assert.ok(result.reason.includes('Approved'))
     } finally {
       restore()
@@ -128,14 +128,14 @@ test('preToolUse returns deny when the ask is answered with Deny', async () => {
       )
       await answerNextPendingAsk(dbPath, { kind: 'approval', label: 'Deny' })
       const result = await askPromise
-      assert.equal(result.decision, 'deny')
+      assert.equal(result.verdict, 'deny')
     } finally {
       restore()
     }
   })
 })
 
-test('preToolUse returns failOpen on timeout (no JSON output, exit 0 in the dispatcher)', async () => {
+test('preToolUse returns defer on timeout for Claude (adapter emits no JSON, exit 0)', async () => {
   await withTempHome(async () => {
     setAway(true)
     const dbPath = tempDbPath()
@@ -144,13 +144,44 @@ test('preToolUse returns failOpen on timeout (no JSON output, exit 0 in the disp
     try {
       const result = await preToolUse(
         { tool_name: 'Bash' },
-        { env: freshEnv(), config: { ...baseConfig, hookTimeoutSeconds: 1 }, dbPath, skipDaemonCheck: true }
+        { env: freshEnv(), config: { ...baseConfig, awayMode: { ...baseConfig.awayMode, hookTimeoutSeconds: 1 } }, dbPath, skipDaemonCheck: true }
       )
-      assert.equal(result.failOpen, true)
-      assert.ok(!result.decision, 'should not have a decision — cli/hook.js emits no JSON for failOpen')
+      assert.equal(result.verdict, 'defer')
+      assert.ok(result.reason, 'defer should carry a reason for the adapter to surface')
     } finally {
       restore()
     }
+  })
+})
+
+// D39 — THE divergence test: same timeout, different verdicts per harness
+test('preToolUse returns deny on timeout for OpenCode (cannot defer, must deny)', async () => {
+  await withTempHome(async () => {
+    setAway(true)
+    const dbPath = tempDbPath()
+    const posted = []
+    const restore = mockSlack(posted)
+    try {
+      const result = await preToolUse(
+        { tool_name: 'Bash' },
+        { env: freshEnv(), config: { ...baseConfig, awayMode: { ...baseConfig.awayMode, hookTimeoutSeconds: 1 } }, dbPath, skipDaemonCheck: true, harness: 'opencode' }
+      )
+      assert.equal(result.verdict, 'deny', 'OpenCode cannot defer — timeout must hard-deny')
+      assert.ok(result.reason.includes('timeout'), 'reason should mention it was a timeout, not a policy denial')
+    } finally {
+      restore()
+    }
+  })
+})
+
+test('preToolUse skips ungated tools even when away', async () => {
+  await withTempHome(async () => {
+    setAway(true)
+    const result = await preToolUse(
+      { tool_name: 'Read' },
+      { env: freshEnv(), config: baseConfig, dbPath: tempDbPath(), skipDaemonCheck: true }
+    )
+    assert.equal(result.verdict, 'skip')
   })
 })
 
@@ -167,7 +198,7 @@ test('preCompact sends a notification DM (observational only, no blocking mechan
         { trigger: 'auto' },
         { env: freshEnv(), config: baseConfig, dbPath }
       )
-      assert.equal(result.ok, true)
+      assert.equal(result.verdict, 'ok')
       assert.ok(posted.some(p => p.text?.includes('compaction')))
     } finally {
       restore()
@@ -179,7 +210,7 @@ test('preCompact skips non-auto triggers', async () => {
   await withTempHome(async () => {
     setAway(true)
     const result = await preCompact({ trigger: 'manual' }, { env: freshEnv(), config: baseConfig, dbPath: tempDbPath() })
-    assert.equal(result.skip, true)
+    assert.equal(result.verdict, 'skip')
   })
 })
 
@@ -198,7 +229,7 @@ test('stop returns allow when user replies done', async () => {
       )
       await answerNextPendingAsk(dbPath, { kind: 'question', text: 'done' })
       const result = await askPromise
-      assert.equal(result.allow, true)
+      assert.equal(result.verdict, 'allow')
     } finally {
       restore()
     }
@@ -218,7 +249,7 @@ test('stop returns block when user sends an instruction', async () => {
       )
       await answerNextPendingAsk(dbPath, { kind: 'question', text: 'fix the remaining test' })
       const result = await askPromise
-      assert.equal(result.block, true)
+      assert.equal(result.verdict, 'block')
       assert.ok(result.reason.includes('fix the remaining test'))
     } finally {
       restore()
@@ -239,7 +270,7 @@ test('notification sends a DM when away and returns ok', async () => {
         { notification_type: 'idle_prompt', message: 'Agent is idle.' },
         { env: freshEnv(), config: baseConfig, dbPath, skipDaemonCheck: true }
       )
-      assert.equal(result.ok, true)
+      assert.equal(result.verdict, 'ok')
       assert.ok(posted.some(p => p.text?.includes('idle_prompt')), `expected idle_prompt in posted texts: ${JSON.stringify(posted.map(p => p.text))}`)
     } finally {
       restore()
@@ -254,7 +285,7 @@ test('notification skips when not away', async () => {
       { notification_type: 'idle_prompt', message: 'hi' },
       { env: freshEnv(), config: baseConfig, dbPath: tempDbPath() }
     )
-    assert.equal(result.skip, true)
+    assert.equal(result.verdict, 'skip')
   })
 })
 
@@ -267,7 +298,7 @@ test('preToolUse skips when no owner is configured (no Slack call attempted)', a
     const restore = mockSlack(posted)
     try {
       const result = await preToolUse({ tool_name: 'Bash' }, { env: freshEnv(), config: {}, dbPath: tempDbPath(), skipDaemonCheck: true })
-      assert.equal(result.skip, true)
+      assert.equal(result.verdict, 'skip')
       assert.equal(posted.length, 0)
     } finally {
       restore()

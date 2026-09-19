@@ -38,6 +38,7 @@
     "env.js",
     "core",
     "cli",
+    "adapters",
     "listen",
     "mcp",
     "skill",

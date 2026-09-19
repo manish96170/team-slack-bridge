@@ -56,3 +56,33 @@ test('loadConfig validates outputMode and preserves enabled integration config',
     rateLimitPerMinute: 10,
   })
 })
+
+test('loadConfig round-trips awayMode through both branches (defaults and raw)', () => {
+  // Branch 1: defaults when file is missing
+  const defaults = loadConfig('/no/such/config.json')
+  assert.deepEqual(defaults.awayMode, {
+    gatedTools: ['Bash', 'Edit', 'Write', 'NotebookEdit'],
+    hookTimeoutSeconds: 300,
+    maxContinuations: 3,
+  })
+
+  // Branch 2: raw config normalization
+  const path = join(mkdtempSync(join(tmpdir(), 'config-test-')), 'slack-config.json')
+  writeFileSync(path, JSON.stringify({
+    awayMode: { gatedTools: ['Bash', 'Read'], hookTimeoutSeconds: 120, maxContinuations: 5 },
+  }))
+  const config = loadConfig(path)
+  assert.deepEqual(config.awayMode, {
+    gatedTools: ['Bash', 'Read'],
+    hookTimeoutSeconds: 120,
+    maxContinuations: 5,
+  })
+})
+
+test('loadConfig awayMode defaults survive an empty awayMode object in config (the hookTimeoutSeconds bug)', () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'config-test-')), 'slack-config.json')
+  writeFileSync(path, JSON.stringify({ awayMode: {} }))
+  const config = loadConfig(path)
+  assert.equal(config.awayMode.hookTimeoutSeconds, 300, 'should default to 300, not undefined')
+  assert.equal(config.awayMode.maxContinuations, 3)
+})

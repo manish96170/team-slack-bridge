@@ -1,10 +1,10 @@
-// D34 — All hook decision logic, pure and testable, no stdio.
-// One exported handler per Claude Code hook event, each taking
-// (input, {env, config, dbPath}) and returning a plain result object.
-// cli/hook.js is the thin dispatcher that reads stdin, calls these,
-// and handles exit codes.
+// D34/D39 — Harness-neutral hook decision logic, pure and testable, no
+// stdio. Returns neutral verdicts ({ verdict, reason }) that adapters
+// translate into harness-specific output. Each handler takes
+// (input, { env, config, dbPath, harness, skipDaemonCheck }).
 
 import { isAway, getAwayConfig } from './away.js'
+import { shouldGate, failMode } from './away-policy.js'
 import { ask } from './ask.js'
 import { dm } from './dm.js'
 import { status as daemonStatus } from '../listen/daemon.js'
@@ -33,14 +33,16 @@ function truncate(text, maxLen = 200) {
 
 function describeToolCall(input) {
   const parts = []
-  if (input.tool_name) parts.push(`\`${input.tool_name}\``)
+  const toolName = input.tool_name || input.tool || 'unknown tool'
+  parts.push(`\`${toolName}\``)
   if (input.cwd) parts.push(`in \`${basename(input.cwd)}\``)
   if (input.agent_type) parts.push(`(${input.agent_type}${input.agent_id ? ` #${input.agent_id}` : ''})`)
-  if (input.tool_input) {
-    const summary = typeof input.tool_input === 'string' ? input.tool_input : JSON.stringify(input.tool_input)
+  const toolInput = input.tool_input || input.args
+  if (toolInput) {
+    const summary = typeof toolInput === 'string' ? toolInput : JSON.stringify(toolInput)
     parts.push(`\n\`\`\`\n${truncate(summary, 500)}\n\`\`\``)
   }
-  return parts.join(' ') || 'unknown tool'
+  return parts.join(' ')
 }
 
 function preflight(config, { skipDaemonCheck } = {}) {
@@ -53,13 +55,27 @@ function preflight(config, { skipDaemonCheck } = {}) {
   return { ok: true, ownerId }
 }
 
-// --- PreToolUse ---
+function getTimeout(config) {
+  return config?.awayMode?.hookTimeoutSeconds || 300
+}
 
-export async function preToolUse(input, { env, config, dbPath, skipDaemonCheck } = {}) {
-  if (!isAway()) return { skip: true }
+// --- PreToolUse / tool.execute.before ---
+
+export async function preToolUse(input, { env, config, dbPath, harness = 'claude', skipDaemonCheck } = {}) {
+  if (!isAway()) return { verdict: 'skip' }
+
+  const toolName = input.tool_name || input.tool
+  if (!shouldGate(toolName, { config })) return { verdict: 'skip' }
+
   const pre = preflight(config, { skipDaemonCheck })
-  if (pre.skip) return pre
-  if (pre.failOpen) return { decision: 'ignore', reason: pre.reason }
+  if (pre.skip) return { verdict: 'skip', reason: pre.reason }
+  // D35/D39 — daemon-down fail mode depends on the harness
+  if (pre.failOpen) {
+    const mode = failMode(harness)
+    return mode === 'defer'
+      ? { verdict: 'defer', reason: pre.reason }
+      : { verdict: 'deny', reason: `Bridge timeout (listener not running) — ${pre.reason}` }
+  }
 
   const question = `Permission requested: ${describeToolCall(input)}`
   validateLabel('Approve')
@@ -72,44 +88,43 @@ export async function preToolUse(input, { env, config, dbPath, skipDaemonCheck }
     kind: 'approval',
     options: ['Approve', 'Deny'],
     dbPath,
-    timeoutSeconds: config.hookTimeoutSeconds || 300,
+    timeoutSeconds: getTimeout(config),
   })
 
   if (result.ok && result.answer?.label === 'Approve') {
-    return { decision: 'allow', reason: 'Approved via Slack' }
+    return { verdict: 'allow', reason: 'Approved via Slack' }
   }
   if (result.ok && result.answer?.label === 'Deny') {
-    return { decision: 'deny', reason: 'Denied via Slack' }
+    return { verdict: 'deny', reason: 'Denied via Slack' }
   }
-  // D35 — fail open: return a marker that cli/hook.js treats as "no
-  // JSON output, just exit 0" — falling through to the normal local
-  // prompt. "ignore" is not a valid permissionDecision value in the
-  // Claude Code hook contract; the correct fail-open is no output at all.
-  return { failOpen: true, reason: result.error || 'no-answer' }
+  // D35/D39 — timeout/error fail mode depends on the harness
+  const mode = failMode(harness)
+  return mode === 'defer'
+    ? { verdict: 'defer', reason: result.error || 'no-answer' }
+    : { verdict: 'deny', reason: `Bridge timeout — no answer received (${result.error || 'timeout'})` }
 }
 
-// --- PreCompact ---
-// Verified against Claude Code docs: PreCompact is observational only.
-// There is no compactionDecision field and exit 2 does NOT prevent
-// compaction. All we can do is send a Slack notification that it's
-// happening, so the user knows.
+// --- PreCompact / experimental.session.compacting ---
+// Observational only on Claude (no blocking mechanism).
+// On OpenCode, experimental.session.compacting may differ — treat as
+// informational for now (D38 out-of-scope note).
 
-export async function preCompact(input, { env, config, dbPath, skipDaemonCheck } = {}) {
-  if (!isAway()) return { skip: true }
-  if (input.trigger !== 'auto') return { skip: true }
+export async function preCompact(input, { env, config, dbPath } = {}) {
+  if (!isAway()) return { verdict: 'skip' }
+  if (input.trigger !== 'auto') return { verdict: 'skip' }
   const ownerId = config?.owner?.slackUserId
-  if (!ownerId) return { skip: true }
+  if (!ownerId) return { verdict: 'skip' }
 
   await dm({
     botToken: env.SLACK_BOT_TOKEN,
     userId: ownerId,
-    text: 'Auto-compaction is about to run on your session (informational — compaction cannot be blocked by hooks).',
+    text: 'Auto-compaction is about to run on your session (informational only).',
     dbPath,
   })
-  return { ok: true }
+  return { verdict: 'ok' }
 }
 
-// --- Stop ---
+// --- Stop / session.idle ---
 
 function stopCounterPath(sessionId) {
   return join(hooksDir(), `stop-${sessionId}.json`)
@@ -125,12 +140,6 @@ function readStopCounter(sessionId) {
   }
 }
 
-// Atomic-ish via write-to-temp + rename — two concurrent stop hooks for
-// the same session can still race (one's rename overwrites the other's),
-// but the worst case is a lost increment (one fewer continuation than the
-// cap), not a doubled block or a crash. A proper advisory lock would fix
-// this fully but adds complexity disproportionate to the risk, since
-// concurrent stops for the same session are rare in practice.
 function incrementStopCounter(sessionId) {
   const dir = hooksDir()
   mkdirSync(dir, { recursive: true })
@@ -142,13 +151,13 @@ function incrementStopCounter(sessionId) {
   return count
 }
 
-export async function stop(input, { env, config, dbPath, skipDaemonCheck } = {}) {
-  if (!isAway()) return { skip: true }
+export async function stop(input, { env, config, dbPath, harness = 'claude', skipDaemonCheck } = {}) {
+  if (!isAway()) return { verdict: 'skip' }
   const pre = preflight(config, { skipDaemonCheck })
-  if (pre.skip || pre.failOpen) return { allow: true, reason: pre.reason || 'skipped' }
+  if (pre.skip || pre.failOpen) return { verdict: 'allow', reason: pre.reason || 'skipped' }
 
   const awayConfig = getAwayConfig()
-  const maxContinuations = awayConfig?.maxContinuations ?? 3
+  const maxContinuations = config?.awayMode?.maxContinuations ?? awayConfig?.maxContinuations ?? 3
   const sessionId = input.session_id || 'unknown'
   const currentCount = readStopCounter(sessionId)
 
@@ -159,39 +168,40 @@ export async function stop(input, { env, config, dbPath, skipDaemonCheck } = {})
       text: `Session reached the continuation cap (${maxContinuations}). Allowing it to stop.`,
       dbPath,
     })
-    return { allow: true, reason: 'continuation-cap-reached' }
+    return { verdict: 'allow', reason: 'continuation-cap-reached' }
   }
 
   const result = await ask({
     botToken: env.SLACK_BOT_TOKEN,
     userId: pre.ownerId,
-    question: `Session wants to stop. What should it do?\n\nReply \`done\` to let it stop, or type an instruction to continue.`,
+    question: 'Session wants to stop. What should it do?\n\nReply `done` to let it stop, or type an instruction to continue.',
     kind: 'question',
     dbPath,
-    timeoutSeconds: config.hookTimeoutSeconds || 300,
+    timeoutSeconds: getTimeout(config),
   })
 
-  if (!result.ok) return { allow: true, reason: result.error || 'no-answer' }
+  if (!result.ok) return { verdict: 'allow', reason: result.error || 'no-answer' }
 
   const answer = (result.answer?.text || '').trim().toLowerCase()
   if (!answer || answer === 'done' || answer === 'stop') {
-    return { allow: true, reason: 'user-said-done' }
+    return { verdict: 'allow', reason: 'user-said-done' }
   }
 
   incrementStopCounter(sessionId)
-  // D36 — block via exit 2 + stderr. cli/hook.js reads this and exits 2.
-  return { block: true, reason: result.answer.text }
+  // D36 — block. Adapters translate: Claude exits 2 + stderr, OpenCode
+  // returns the instruction text for continuation.
+  return { verdict: 'block', reason: result.answer.text }
 }
 
 // --- Notification ---
 
-export async function notification(input, { env, config, dbPath }) {
-  if (!isAway()) return { skip: true }
+export async function notification(input, { env, config, dbPath } = {}) {
+  if (!isAway()) return { verdict: 'skip' }
   const ownerId = config?.owner?.slackUserId
-  if (!ownerId) return { skip: true }
+  if (!ownerId) return { verdict: 'skip' }
 
-  const type = input.notification_type || 'notification'
-  const message = input.message || input.notification_type || ''
+  const type = input.notification_type || input.event || 'notification'
+  const message = input.message || input.notification_type || input.event || ''
   const text = `[${type}] ${message}`
 
   await dm({
@@ -200,5 +210,5 @@ export async function notification(input, { env, config, dbPath }) {
     text,
     dbPath,
   })
-  return { ok: true }
+  return { verdict: 'ok' }
 }

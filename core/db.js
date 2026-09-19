@@ -16,6 +16,16 @@ export function getDb(path) {
   if (db) return db
   mkdirSync(dirname(path), { recursive: true })
   db = new DatabaseSync(path)
+  // D37 — WAL + busy_timeout are a correctness prerequisite for N
+  // concurrent processes sharing the same sqlite file (the listener
+  // daemon, ACP session handlers, and hook processes all hit this).
+  // Default rollback-journal mode takes an exclusive lock on writes and
+  // returns SQLITE_BUSY immediately with no retry to a colliding reader;
+  // WAL allows concurrent reads alongside a single writer, and
+  // busy_timeout makes a blocked caller retry for up to 5s before giving
+  // up, rather than failing instantly.
+  db.exec('PRAGMA journal_mode=WAL')
+  db.exec('PRAGMA busy_timeout=5000')
   db.exec(`
     CREATE TABLE IF NOT EXISTS ledger (
       key TEXT PRIMARY KEY,

@@ -9,7 +9,8 @@
     "url": "git+https://github.com/manish96170/team-slack-bridge.git"
   },
   "bin": {
-    "team-slack-bridge": "post.js"
+    "team-slack-bridge": "post.js",
+    "tsb-hook": "cli/hook.js"
   },
   "scripts": {
     "get-user-token": "node get-user-token.js",

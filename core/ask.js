@@ -165,13 +165,30 @@ export function recordAnswerByThread(dbPath, channel, threadTs, answer) {
 export async function waitForAnswer({ dbPath, askId, timeoutSeconds = 300, pollIntervalMs = 1000 }) {
   const deadline = Date.now() + timeoutSeconds * 1000
   while (Date.now() < deadline) {
-    const found = getAsk(dbPath, askId)
+    let found
+    try {
+      found = getAsk(dbPath, askId)
+    } catch (err) {
+      // D37 — with WAL + busy_timeout a transient SQLITE_BUSY should be
+      // rare (the timeout covers most races), but if it does happen during
+      // this 1 Hz poll loop, retrying on the next tick is correct rather
+      // than rejecting the whole ask() promise with a stack trace.
+      if (/SQLITE_BUSY|database is locked/i.test(err?.message)) {
+        await new Promise(resolve => setTimeout(resolve, pollIntervalMs))
+        continue
+      }
+      throw err
+    }
     if (!found) return { ok: false, error: 'ask-not-found', retryable: false }
     if (found.status === 'answered') return { ok: true, askId, answer: found.answer }
     await new Promise(resolve => setTimeout(resolve, pollIntervalMs))
   }
-  const db = getDb(dbPath)
-  db.prepare("UPDATE asks SET status = 'timeout' WHERE id = ? AND status = 'pending'").run(askId)
+  try {
+    const db = getDb(dbPath)
+    db.prepare("UPDATE asks SET status = 'timeout' WHERE id = ? AND status = 'pending'").run(askId)
+  } catch {
+    // Best-effort — the timeout result is the important thing to return.
+  }
   return { ok: false, error: 'timeout', retryable: true }
 }
 

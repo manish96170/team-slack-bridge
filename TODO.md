@@ -1,11 +1,20 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D33) and architecture; this file is the scannable done/pending list.
+log (D1–D38) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
 ## Done
 
+- [x] Away mode (D34–D38) — Claude Code hooks (`tsb-hook preToolUse|stop|preCompact|
+      notification`) route a local session's approvals to Slack, gated by a `.away` flag
+      file (`cli/away.js on|off|status`). Fails open in every failure mode. Includes the
+      WAL + `busy_timeout` db fix (D37) that concurrent asks require.
+  - Unit tests pass; **end-to-end not yet verified** — needs a live daemon and a human
+    tapping buttons: subagent attribution with two concurrent asks, fail-open-fast with
+    the daemon stopped, and the `Stop` continuation cap.
+  - `PreCompact` is announce-only (D38) — "block autocompact until I approve" is not
+    achievable with hooks.
 - [x] Core posting/DM/scheduling/reactions/progress-messages, CLI + local MCP server
       (stdio, full tool set) + Slack `skill/SKILL.md`
 - [x] Human-in-the-loop `ask`/approve primitive (DM-based, button + free-text capture)

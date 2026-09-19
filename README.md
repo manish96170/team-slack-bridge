@@ -223,6 +223,20 @@ button click is never visible to a direct poll):
 node cli/ask.js --user U0123ABC --question 'Deploy to prod?' --kind approval [--options 'Approve,Deny'] [--timeout 300] [--capture-mode listener|poll] [--json]
 ```
 
+**Away mode** — route a *local* Claude Code session's approvals to Slack so the laptop can
+be left alone (PLAN D34–D38; full wiring and per-event behaviour in `FEATURES.md`). Hooks
+work on sessions the bridge never spawned, which ACP cannot do:
+```bash
+node cli/away.js on [--timeout-seconds 3600] [--max-continuations 3] [--json]
+node cli/away.js status --json
+node cli/away.js off
+```
+Then point the target project's `.claude/settings.json` hooks at the `tsb-hook` binary
+(`tsb-hook preToolUse|stop|preCompact|notification`). Approvals need the Socket Mode
+listener running and the same `TSB_HOME` as the daemon. Everything fails open — a timeout
+or a stopped listener falls through to the normal local prompt, never a silent approval.
+Autocompact can only be announced, not gated (D38).
+
 **Setup and health:**
 ```bash
 node cli/setup.js init                 # interactive: writes .env and slack-config.json

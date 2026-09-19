@@ -472,6 +472,63 @@ populate it). Absent `accounts.json` entirely, every account-aware code path
 synthesizes a single `"default"` account pointing at today's `TSB_HOME` — this feature
 is fully opt-in and changes nothing for an existing single-account install.
 
+### Away mode — Claude Code hooks (PLAN D34–D38)
+
+Default: off (no `.away` flag file, hooks exit immediately).
+
+Routes a *local* Claude Code session's permission prompts to Slack, so the laptop can be
+left alone. Unlike ACP agent sessions, this works on sessions the bridge never spawned —
+see D34 for why mid-way ACP adoption is impossible.
+
+Toggle:
+
+```bash
+node cli/away.js on [--timeout-seconds 3600] [--max-continuations 3] [--json]
+node cli/away.js status --json
+node cli/away.js off
+```
+
+Wire the hooks once, in the target project's `.claude/settings.json` (a global install
+exposes the `tsb-hook` binary):
+
+```json
+{ "hooks": {
+  "PreToolUse":   [{ "matcher": "Bash|Write|Edit|NotebookEdit",
+                     "hooks": [{ "type": "command", "command": "tsb-hook preToolUse", "timeout": 330 }] }],
+  "Stop":         [{ "hooks": [{ "type": "command", "command": "tsb-hook stop", "timeout": 330 }] }],
+  "PreCompact":   [{ "matcher": "auto",
+                     "hooks": [{ "type": "command", "command": "tsb-hook preCompact", "timeout": 30 }] }],
+  "Notification": [{ "matcher": "idle_prompt|agent_needs_input|agent_completed",
+                     "hooks": [{ "type": "command", "command": "tsb-hook notification", "timeout": 15 }] }]
+} }
+```
+
+Per event:
+
+| Event | Behaviour |
+| --- | --- |
+| `PreToolUse` | Approve/Deny buttons in a DM; tool name, cwd and subagent attribution (`agent_type`/`agent_id`) in the question |
+| `Stop` | Free-text "what should it do?" — reply `done`/`stop`/empty lets it stop, any other text continues the session with your reply as steering context |
+| `PreCompact` | Informational DM on `trigger: auto` only. **Cannot be blocked** (D38) |
+| `Notification` | Fire-and-forget DM, never blocks |
+
+Hook `timeout` must exceed the ask timeout (default 300s) or the harness cancels the hook
+mid-ask and the tool call proceeds ungated.
+
+Everything fails **open** (D35): a timeout, a stopped listener, or any internal error
+produces no output and exit 0, so the tool call falls through to the normal local prompt.
+Nothing is ever silently approved. Because approval buttons require the Socket Mode
+listener, the hook preflights the daemon and fails open immediately rather than waiting
+out the full timeout.
+
+`PreToolUse` approvals need the listener running and the hook must resolve the same
+`TSB_HOME` as the daemon — a mismatch means two different `.ledger.sqlite` files and
+every ask silently times out.
+
+Away mode makes whoever can DM the bot as the owner the permission authority for that
+session. It reads `config.owner.slackUserId` only; the `agentSessions` allowlists
+(`allowedUsers`, `allowedControllers`) deliberately do not grant it.
+
 ## Health checks
 
 Run:

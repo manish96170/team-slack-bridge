@@ -24,8 +24,10 @@ export function getDb(path) {
   // WAL allows concurrent reads alongside a single writer, and
   // busy_timeout makes a blocked caller retry for up to 5s before giving
   // up, rather than failing instantly.
-  db.exec('PRAGMA journal_mode=WAL')
+  // busy_timeout FIRST — it must be in place before journal_mode=WAL, which
+  // itself can hit a lock if another process already has the file open.
   db.exec('PRAGMA busy_timeout=5000')
+  db.exec('PRAGMA journal_mode=WAL')
   db.exec(`
     CREATE TABLE IF NOT EXISTS ledger (
       key TEXT PRIMARY KEY,

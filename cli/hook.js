@@ -8,6 +8,14 @@
 // bug in this file can never wedge the user's session. The only path
 // that exits non-zero is `stop` when blocking (exit 2 + reason on
 // stderr), per the verified harness contract.
+//
+// Hook output schema (verified against Claude Code docs):
+// - hookEventName is REQUIRED in hookSpecificOutput for all events
+// - PreToolUse: permissionDecision = "allow" | "deny" | "block"
+//   ("ignore" is NOT valid — for fail-open, emit no JSON and exit 0)
+// - PreCompact: observational only, no blocking mechanism exists
+//   (exit 2 does NOT prevent compaction either)
+// - Stop: exit 2 blocks the stop and continues; exit 0 allows it
 
 import { loadContext } from './context.js'
 import { preToolUse, preCompact, stop, notification } from '../core/hooks.js'
@@ -22,14 +30,21 @@ async function main() {
   }
 
   let input = {}
+  let stdinValid = false
   try {
     const chunks = []
     for await (const chunk of process.stdin) chunks.push(chunk)
     const raw = Buffer.concat(chunks).toString('utf8').trim()
-    if (raw) input = JSON.parse(raw)
+    if (raw) {
+      input = JSON.parse(raw)
+      stdinValid = true
+    }
   } catch {
-    // Malformed or missing stdin — proceed with empty input, handler
-    // will skip or fail open as appropriate.
+    // Malformed stdin — fail open rather than acting on garbage.
+  }
+  // A stop hook with missing/malformed input must never block the session.
+  if (!stdinValid && event === 'stop') {
+    process.exit(0)
   }
 
   const { env, config, dbPath } = loadContext()
@@ -39,33 +54,44 @@ async function main() {
     process.exit(0)
   }
 
+  if (event === 'preToolUse') {
+    if (result.decision === 'allow' || result.decision === 'deny') {
+      const output = {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: result.decision,
+          ...(result.reason ? { permissionDecisionReason: result.reason } : {}),
+        },
+      }
+      process.stdout.write(JSON.stringify(output))
+    }
+    // For fail-open (ignore/timeout/error): emit no JSON, just exit 0 —
+    // "ignore" is not a valid permissionDecision value, and exiting 0 with
+    // no output means the harness falls through to the normal local prompt.
+    process.exit(0)
+  }
+
   if (event === 'stop') {
     if (result.block) {
-      process.stderr.write(result.reason || 'Continue with instruction from Slack')
+      // Write the JSON output first (hookEventName required), then the
+      // reason to stderr, then exit 2. Use an explicit drain to avoid
+      // truncation when stderr is a pipe.
+      const output = { hookSpecificOutput: { hookEventName: 'Stop' } }
+      process.stdout.write(JSON.stringify(output))
+      const reason = result.reason || 'Continue with instruction from Slack'
+      await new Promise(resolve => process.stderr.write(reason, resolve))
       process.exit(2)
     }
     // allow — just exit 0
     process.exit(0)
   }
 
-  if (event === 'preToolUse') {
-    const output = {
-      hookSpecificOutput: {
-        permissionDecision: result.decision || 'ignore',
-        ...(result.reason ? { permissionDecisionReason: result.reason } : {}),
-      },
-    }
-    process.stdout.write(JSON.stringify(output))
-    process.exit(0)
-  }
-
   if (event === 'preCompact') {
-    const output = {
-      hookSpecificOutput: {
-        compactionDecision: result.decision || 'allow',
-      },
-    }
-    process.stdout.write(JSON.stringify(output))
+    // PreCompact is observational only — there is no blocking mechanism
+    // in the Claude Code hook contract (no compactionDecision field,
+    // exit 2 does NOT prevent compaction). All we can do is observe and
+    // log. The handler ran (it may have sent a Slack notification); now
+    // just exit cleanly.
     process.exit(0)
   }
 

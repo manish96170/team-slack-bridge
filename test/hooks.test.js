@@ -135,7 +135,7 @@ test('preToolUse returns deny when the ask is answered with Deny', async () => {
   })
 })
 
-test('preToolUse returns ignore on timeout (fails open)', async () => {
+test('preToolUse returns failOpen on timeout (no JSON output, exit 0 in the dispatcher)', async () => {
   await withTempHome(async () => {
     setAway(true)
     const dbPath = tempDbPath()
@@ -146,7 +146,8 @@ test('preToolUse returns ignore on timeout (fails open)', async () => {
         { tool_name: 'Bash' },
         { env: freshEnv(), config: { ...baseConfig, hookTimeoutSeconds: 1 }, dbPath, skipDaemonCheck: true }
       )
-      assert.equal(result.decision, 'ignore')
+      assert.equal(result.failOpen, true)
+      assert.ok(!result.decision, 'should not have a decision — cli/hook.js emits no JSON for failOpen')
     } finally {
       restore()
     }
@@ -155,7 +156,7 @@ test('preToolUse returns ignore on timeout (fails open)', async () => {
 
 // --- preCompact ---
 
-test('preCompact returns allow on timeout (fails open to allow, not ignore)', async () => {
+test('preCompact sends a notification DM (observational only, no blocking mechanism)', async () => {
   await withTempHome(async () => {
     setAway(true)
     const dbPath = tempDbPath()
@@ -164,9 +165,10 @@ test('preCompact returns allow on timeout (fails open to allow, not ignore)', as
     try {
       const result = await preCompact(
         { trigger: 'auto' },
-        { env: freshEnv(), config: { ...baseConfig, hookTimeoutSeconds: 1 }, dbPath, skipDaemonCheck: true }
+        { env: freshEnv(), config: baseConfig, dbPath }
       )
-      assert.equal(result.decision, 'allow')
+      assert.equal(result.ok, true)
+      assert.ok(posted.some(p => p.text?.includes('compaction')))
     } finally {
       restore()
     }

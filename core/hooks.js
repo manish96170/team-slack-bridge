@@ -8,7 +8,7 @@ import { isAway, getAwayConfig } from './away.js'
 import { ask } from './ask.js'
 import { dm } from './dm.js'
 import { status as daemonStatus } from '../listen/daemon.js'
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, basename } from 'node:path'
 
@@ -81,37 +81,32 @@ export async function preToolUse(input, { env, config, dbPath, skipDaemonCheck }
   if (result.ok && result.answer?.label === 'Deny') {
     return { decision: 'deny', reason: 'Denied via Slack' }
   }
-  // D35 — fail open to ignore (never silent-allow, never false-deny)
-  return { decision: 'ignore', reason: result.error || 'no-answer' }
+  // D35 — fail open: return a marker that cli/hook.js treats as "no
+  // JSON output, just exit 0" — falling through to the normal local
+  // prompt. "ignore" is not a valid permissionDecision value in the
+  // Claude Code hook contract; the correct fail-open is no output at all.
+  return { failOpen: true, reason: result.error || 'no-answer' }
 }
 
 // --- PreCompact ---
+// Verified against Claude Code docs: PreCompact is observational only.
+// There is no compactionDecision field and exit 2 does NOT prevent
+// compaction. All we can do is send a Slack notification that it's
+// happening, so the user knows.
 
 export async function preCompact(input, { env, config, dbPath, skipDaemonCheck } = {}) {
   if (!isAway()) return { skip: true }
   if (input.trigger !== 'auto') return { skip: true }
-  const pre = preflight(config, { skipDaemonCheck })
-  if (pre.skip || pre.failOpen) return { decision: 'allow', reason: pre.reason || 'skipped' }
+  const ownerId = config?.owner?.slackUserId
+  if (!ownerId) return { skip: true }
 
-  const result = await ask({
+  await dm({
     botToken: env.SLACK_BOT_TOKEN,
-    userId: pre.ownerId,
-    question: 'Auto-compaction triggered. Allow the session to compact its context?',
-    kind: 'approval',
-    options: ['Allow compaction', 'Deny'],
+    userId: ownerId,
+    text: 'Auto-compaction is about to run on your session (informational — compaction cannot be blocked by hooks).',
     dbPath,
-    timeoutSeconds: config.hookTimeoutSeconds || 300,
   })
-
-  if (result.ok && result.answer?.label === 'Allow compaction') {
-    return { decision: 'allow', reason: 'Approved via Slack' }
-  }
-  if (result.ok && result.answer?.label === 'Deny') {
-    return { decision: 'deny', reason: 'Denied via Slack' }
-  }
-  // D35 — preCompact fails open to ALLOW, not ignore — a denied
-  // compaction leaves context full and can wedge the session.
-  return { decision: 'allow', reason: result.error || 'no-answer-allowing-compaction' }
+  return { ok: true }
 }
 
 // --- Stop ---
@@ -130,11 +125,20 @@ function readStopCounter(sessionId) {
   }
 }
 
+// Atomic-ish via write-to-temp + rename — two concurrent stop hooks for
+// the same session can still race (one's rename overwrites the other's),
+// but the worst case is a lost increment (one fewer continuation than the
+// cap), not a doubled block or a crash. A proper advisory lock would fix
+// this fully but adds complexity disproportionate to the risk, since
+// concurrent stops for the same session are rare in practice.
 function incrementStopCounter(sessionId) {
   const dir = hooksDir()
   mkdirSync(dir, { recursive: true })
+  const path = stopCounterPath(sessionId)
   const count = readStopCounter(sessionId) + 1
-  writeFileSync(stopCounterPath(sessionId), JSON.stringify({ count, updatedAt: new Date().toISOString() }) + '\n')
+  const tmpPath = `${path}.${process.pid}.tmp`
+  writeFileSync(tmpPath, JSON.stringify({ count, updatedAt: new Date().toISOString() }) + '\n')
+  renameSync(tmpPath, path)
   return count
 }
 

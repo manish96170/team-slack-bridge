@@ -42,6 +42,12 @@ export const AwayModePlugin = async ({ project, client, $, directory, worktree }
       if (result.verdict === 'deny') {
         throw new Error(result.reason || 'Denied via Slack (away mode)')
       }
+      // D39 — OpenCode cannot defer; if core ever returns 'defer' for
+      // this harness (it shouldn't — failMode('opencode') returns 'deny'),
+      // fail closed rather than silently allowing.
+      if (result.verdict === 'defer') {
+        throw new Error('Bridge could not reach Slack for approval (away mode) — denying as a safety precaution')
+      }
       // 'allow' and 'skip' pass through silently
     },
 

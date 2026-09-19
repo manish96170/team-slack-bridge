@@ -472,15 +472,34 @@ populate it). Absent `accounts.json` entirely, every account-aware code path
 synthesizes a single `"default"` account pointing at today's `TSB_HOME` — this feature
 is fully opt-in and changes nothing for an existing single-account install.
 
-### Away mode — Claude Code hooks (PLAN D34–D38)
+### Away mode — approve your own local session from Slack (PLAN D34–D40)
 
-Default: off (no `.away` flag file, hooks exit immediately).
+Default: off (no `.away` flag file — hooks return immediately and prompting stays local).
 
-Routes a *local* Claude Code session's permission prompts to Slack, so the laptop can be
-left alone. Unlike ACP agent sessions, this works on sessions the bridge never spawned —
-see D34 for why mid-way ACP adoption is impossible.
+Routes a session **you** started in your own terminal to Slack, so the laptop can be left
+alone. This is the complement to ACP agent sessions, and the distinction matters:
 
-Toggle:
+| | Who starts it | How permissions reach Slack | Per-harness config |
+| --- | --- | --- | --- |
+| **ACP agent sessions** | the bridge, from Slack | in-process `onPermissionRequest` | none |
+| **Away mode** | you, in your terminal | harness hook / plugin | written once by the installer |
+
+A session the bridge did not spawn can never be adopted into ACP mid-way (D34): ACP
+installs its permission callback at spawn, when the bridge owns the agent's stdio.
+
+#### Setup
+
+```bash
+node cli/hooks-install.js claude   [--global|--project <dir>] [--json]
+node cli/hooks-install.js opencode [--project <dir>] [--json]
+```
+
+Writes the harness's own config for you. For Claude Code it **merges** into
+`.claude/settings.json` — safe alongside unrelated hooks you already have, and idempotent,
+because it replaces only entries whose command contains `tsb-hook`. For OpenCode it writes
+a small stub to `~/.config/opencode/plugins/tsb-away.mjs` re-exporting the packaged plugin.
+
+Then toggle away mode whenever you like:
 
 ```bash
 node cli/away.js on [--timeout-seconds 3600] [--max-continuations 3] [--json]
@@ -488,46 +507,68 @@ node cli/away.js status --json
 node cli/away.js off
 ```
 
-Wire the hooks once, in the target project's `.claude/settings.json` (a global install
-exposes the `tsb-hook` binary):
+#### Policy lives in the bridge, not the harness (D40)
 
-```json
-{ "hooks": {
-  "PreToolUse":   [{ "matcher": "Bash|Write|Edit|NotebookEdit",
-                     "hooks": [{ "type": "command", "command": "tsb-hook preToolUse", "timeout": 330 }] }],
-  "Stop":         [{ "hooks": [{ "type": "command", "command": "tsb-hook stop", "timeout": 330 }] }],
-  "PreCompact":   [{ "matcher": "auto",
-                     "hooks": [{ "type": "command", "command": "tsb-hook preCompact", "timeout": 30 }] }],
-  "Notification": [{ "matcher": "idle_prompt|agent_needs_input|agent_completed",
-                     "hooks": [{ "type": "command", "command": "tsb-hook notification", "timeout": 15 }] }]
-} }
-```
+Adapters register for **all** tools and `core/away-policy.js` decides what to gate. Every
+knob is read fresh from `TSB_HOME` on each invocation, so all of it takes effect
+**mid-session with nothing to restart**:
 
-Per event:
+| Knob | Where | Default |
+| --- | --- | --- |
+| on / off | `<TSB_HOME>/.away` via `cli/away.js` | off |
+| which tools are gated | `slack-config.json` → `awayMode.gatedTools` | `Bash`, `Edit`, `Write`, `NotebookEdit` |
+| ask timeout | `awayMode.hookTimeoutSeconds` | 300 |
+| continuation cap | `awayMode.maxContinuations` | 3 |
 
-| Event | Behaviour |
+`normalizeToolName` absorbs naming differences (Claude `Bash`/`Edit`, OpenCode
+`bash`/`edit`), so one `gatedTools` list is correct for every harness.
+
+#### What each event does
+
+| Intent | Claude Code | OpenCode |
+| --- | --- | --- |
+| Gate a tool call | `PreToolUse` → Approve/Deny buttons | `tool.execute.before` → throw on deny |
+| Ask what's next | `Stop` → free-text reply; `done`/`stop`/empty lets it stop | `session.idle` |
+| Autocompact | `PreCompact` — informational only (D38) | `experimental.session.compacting` |
+| Idle / waiting pings | `Notification` — fire-and-forget | — |
+
+The `PreToolUse` DM names the tool, the cwd, and — when a subagent made the call — its
+`agent_type`/`agent_id`, so parallel agents stay distinguishable on your phone.
+
+#### ⚠️ The fail mode differs by harness (D39)
+
+| Harness | On timeout / listener down / internal error |
 | --- | --- |
-| `PreToolUse` | Approve/Deny buttons in a DM; tool name, cwd and subagent attribution (`agent_type`/`agent_id`) in the question |
-| `Stop` | Free-text "what should it do?" — reply `done`/`stop`/empty lets it stop, any other text continues the session with your reply as steering context |
-| `PreCompact` | Informational DM on `trigger: auto` only. **Cannot be blocked** (D38) |
-| `Notification` | Fire-and-forget DM, never blocks |
+| **Claude Code** | **defers** — no output, exit 0, falls through to the normal local prompt |
+| **OpenCode, Codex, Gemini, anything unknown** | **denies** — the only signal available is `throw` |
 
-Hook `timeout` must exceed the ask timeout (default 300s) or the harness cancels the hook
-mid-ask and the tool call proceeds ungated.
+Claude Code documents a third state ("exit 0 with no output means the hook has no decision
+to report, so the tool call continues through the normal permission flow"). OpenCode has no
+equivalent: throwing is a hard deny and there is no "ask locally instead". So a transient
+network blip degrades to a local prompt on Claude and kills the turn on OpenCode. Unknown
+harnesses default to **deny**, because a dead turn is recoverable and a silent approval
+while nobody is watching is not. Nothing is ever silently approved on any harness.
 
-Everything fails **open** (D35): a timeout, a stopped listener, or any internal error
-produces no output and exit 0, so the tool call falls through to the normal local prompt.
-Nothing is ever silently approved. Because approval buttons require the Socket Mode
-listener, the hook preflights the daemon and fails open immediately rather than waiting
-out the full timeout.
+#### Requirements and gotchas
 
-`PreToolUse` approvals need the listener running and the hook must resolve the same
-`TSB_HOME` as the daemon — a mismatch means two different `.ledger.sqlite` files and
-every ask silently times out.
+- **The Socket Mode listener must be running** for approval buttons — a click is never
+  visible to a poll. The hook preflights the daemon and fails fast rather than waiting out
+  the full timeout.
+- **The hook must resolve the same `TSB_HOME` as the daemon.** A mismatch means two
+  different `.ledger.sqlite` files and every ask silently times out.
+- **Hook `timeout` must exceed `awayMode.hookTimeoutSeconds`** or the harness cancels the
+  hook mid-ask and the tool call proceeds ungated. The installer writes 330 against the
+  default 300; raise both together.
+- OpenCode loads plugins at startup, so plugin *code* changes need a restart — policy
+  changes do not.
+- **Not yet verified end-to-end.** `session.idle` on OpenCode is handled by throwing to
+  signal "continue with this instruction", which is unproven — OpenCode documents
+  `throw` for `tool.execute.before`, and whether an event handler can steer a session
+  the same way has not been tested. Treat OpenCode's Stop equivalent as experimental.
 
 Away mode makes whoever can DM the bot as the owner the permission authority for that
 session. It reads `config.owner.slackUserId` only; the `agentSessions` allowlists
-(`allowedUsers`, `allowedControllers`) deliberately do not grant it.
+(`allowedUsers` D24, `allowedControllers` D31) deliberately do not grant it.
 
 ## Health checks
 

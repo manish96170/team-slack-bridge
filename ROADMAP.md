@@ -18,6 +18,21 @@ why; this file is deliberately *not* a decisions log.
   per-feature format for consistency with every other feature in this repo.
 - **Session concurrency cap** — a configurable `agentSessions.maxConcurrent`,
   rejecting a new session start once hit rather than letting it grow unbounded.
+- **Away-mode ask hygiene** — the `asks` table has no TTL sweep and Slack messages are
+  never edited after an answer or a timeout, so buttons stay live forever and rows
+  accumulate. Away mode makes both far more visible than the occasional manual
+  `cli/ask.js` did: a `chat.update` rewriting the message to "✅ Approved" plus a reaper
+  for stale rows. Related: the timeout/answer TOCTOU in `core/ask.js` can strand an
+  approval as `answered` while reporting `timeout` to the caller.
+- **Away-mode delegation** — approvals currently go to `config.owner.slackUserId` only.
+  Letting the owner delegate to a named list would be a *third* trust grant alongside
+  D24 `allowedUsers` and D31 `allowedControllers`, and should get its own config key
+  rather than overloading either, on the same reasoning D31 records.
+- **Per-tool gate granularity** — `awayMode.gatedTools` matches on tool name alone, so
+  `Bash` is all-or-nothing. Gating on the *argument* (e.g. only `git push`, only writes
+  outside the repo) is the obvious next axis, and `updatedInput` in the Claude hook
+  contract suggests the harness would even allow rewriting a call rather than just
+  allowing or denying it.
 
 ## Medium-term (real feature work, not yet started)
 

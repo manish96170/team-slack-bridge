@@ -1,20 +1,41 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D38) and architecture; this file is the scannable done/pending list.
+log (D1–D40) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
 ## Done
 
+- [x] Away mode, harness-agnostic (D39/D40) — policy moved out of harness config into
+      `core/away-policy.js` + `awayMode.*` in `slack-config.json`; adapters now only
+      translate (`cli/hook.js` for Claude Code, `adapters/opencode-plugin.js` for
+      OpenCode). `cli/hooks-install.js claude|opencode` writes each harness's own config,
+      merging rather than clobbering. Fixed on the way: `hookTimeoutSeconds` was read by
+      `core/hooks.js` but never normalized by `loadConfig`, so it silently did nothing.
+  - Fail mode is now per-harness (D39): Claude defers to the local prompt, everything
+    else denies. Unknown harnesses default to deny.
 - [x] Away mode (D34–D38) — Claude Code hooks (`tsb-hook preToolUse|stop|preCompact|
       notification`) route a local session's approvals to Slack, gated by a `.away` flag
-      file (`cli/away.js on|off|status`). Fails open in every failure mode. Includes the
-      WAL + `busy_timeout` db fix (D37) that concurrent asks require.
-  - Unit tests pass; **end-to-end not yet verified** — needs a live daemon and a human
-    tapping buttons: subagent attribution with two concurrent asks, fail-open-fast with
-    the daemon stopped, and the `Stop` continuation cap.
+      file (`cli/away.js on|off|status`). Includes the WAL + `busy_timeout` db fix (D37)
+      that concurrent asks require.
   - `PreCompact` is announce-only (D38) — "block autocompact until I approve" is not
     achievable with hooks.
+
+## Pending
+
+- [ ] **Away mode end-to-end verification — never run.** 228 unit tests pass, but no part
+      of away mode has been exercised against a live daemon with a human tapping buttons.
+      Specifically unverified: subagent attribution with two concurrent asks, fail-open-fast
+      with the daemon stopped, the `Stop` continuation cap, and whether
+      `~/.claude/settings.json`'s pre-existing hooks still work after an install.
+- [ ] **OpenCode `session.idle` is unproven.** The adapter throws to mean "continue with
+      this instruction from Slack". OpenCode documents `throw` for `tool.execute.before`;
+      whether an *event* handler can steer a session the same way has not been tested. If
+      it cannot, OpenCode has no Stop equivalent and that should be stated rather than
+      shipped as if it works.
+- [ ] Codex and Gemini adapters — `failMode` already classifies them (deny), and
+      `core/acp-backends.js` already supports them on the ACP axis, but no hook/plugin
+      adapter exists.
 - [x] Core posting/DM/scheduling/reactions/progress-messages, CLI + local MCP server
       (stdio, full tool set) + Slack `skill/SKILL.md`
 - [x] Human-in-the-loop `ask`/approve primitive (DM-based, button + free-text capture)

@@ -7,8 +7,8 @@ orchestration system, AI agent framework, or dashboard.
 Runtime: **Node >=26** (`package.json`'s `engines`). `.nvmrc` pins `26` for local dev on
 this machine so the bridge stays on the current Node line rather than LTS.
 
-**Install**: `npm install team-slack-bridge` (or `-g` for the `team-slack-bridge` CLI
-binary) for normal use. `npm run build:sea` (standalone-binary packaging) and
+**Install**: `npm install team-slack-bridge` (or `-g` for the `team-slack-bridge` and
+`tsb-hook` binaries) for normal use. `npm run build:sea` (standalone-binary packaging) and
 `npm test` only work from a git clone with `devDependencies` installed — they bundle
 this repo's own source/tests, which aren't part of the published package.
 
@@ -61,6 +61,36 @@ agent sessions where a Slack thread *is* a live session with Claude/Codex/OpenCo
 Gemini CLI (see "ACP agent sessions" below).
 
 For the feature matrix and exact on/off switches, see `FEATURES.md`.
+
+## Two ways to run an agent from Slack
+
+These solve different problems and are easy to confuse, so it is worth being explicit
+about which one you want:
+
+```
+  ACP agent sessions                        Away mode
+  "start the work from Slack"               "I already started; let me leave"
+
+  ┌──────────┐                              ┌──────────────────────────┐
+  │  Slack   │  start session               │   your terminal          │
+  │  thread  │ ───────────────►             │   claude / opencode …    │
+  └────┬─────┘                              └───────────┬──────────────┘
+       │                                                │ hook / plugin
+       ▼                                                ▼
+  ┌──────────────────┐                      ┌──────────────────────────┐
+  │ bridge SPAWNS    │                      │ bridge is ASKED by the   │
+  │ the agent (stdio)│                      │ harness, per tool call   │
+  └────────┬─────────┘                      └───────────┬──────────────┘
+           │                                            │
+           └──────────────► Slack DM: Approve / Deny ◄───┘
+
+  thread == the session                     your session stays yours
+  no per-harness config                     one-time install per harness
+```
+
+A session the bridge did **not** spawn can never be adopted into ACP mid-way — ACP
+installs its permission callback at spawn, when it owns the agent's stdio. That is exactly
+the gap away mode fills (PLAN D34).
 
 ## Design principles
 
@@ -223,19 +253,14 @@ button click is never visible to a direct poll):
 node cli/ask.js --user U0123ABC --question 'Deploy to prod?' --kind approval [--options 'Approve,Deny'] [--timeout 300] [--capture-mode listener|poll] [--json]
 ```
 
-**Away mode** — route a *local* Claude Code session's approvals to Slack so the laptop can
-be left alone (PLAN D34–D38; full wiring and per-event behaviour in `FEATURES.md`). Hooks
-work on sessions the bridge never spawned, which ACP cannot do:
+**Away mode** — route a session *you* started to Slack, so you can leave the laptop
+(PLAN D34–D40; see "Away mode" below and `FEATURES.md` for the full matrix):
 ```bash
-node cli/away.js on [--timeout-seconds 3600] [--max-continuations 3] [--json]
+node cli/hooks-install.js claude    # or: opencode — writes that harness's config, once
+node cli/away.js on                 # flip on before you walk away
 node cli/away.js status --json
 node cli/away.js off
 ```
-Then point the target project's `.claude/settings.json` hooks at the `tsb-hook` binary
-(`tsb-hook preToolUse|stop|preCompact|notification`). Approvals need the Socket Mode
-listener running and the same `TSB_HOME` as the daemon. Everything fails open — a timeout
-or a stopped listener falls through to the normal local prompt, never a silent approval.
-Autocompact can only be announced, not gated (D38).
 
 **Setup and health:**
 ```bash
@@ -525,6 +550,97 @@ back (1-10) and whether you want the raw prompt/response text or just a plain-
 prose summary, then starts a **new** session in the same thread seeded from that
 excerpt of the bridge's own saved transcript — not a true rewind of the original
 session's live state, just a workaround built from what the bridge already logged.
+
+## Away mode — approve your own session from Slack (PLAN D34–D40)
+
+You are working locally. You want to go and do something else without the session stalling
+on the next permission prompt. Away mode routes those prompts to a Slack DM with
+Approve/Deny buttons, so you answer from your phone.
+
+```
+                                     ┌─────────────────┐
+  your session wants to run Bash ──► │ away mode on?   │ ── no ──► normal local prompt
+                                     └────────┬────────┘
+                                              │ yes
+                                     ┌────────▼────────┐
+                                     │ tool gated?     │ ── no ──► allowed, no DM
+                                     │ awayMode.       │
+                                     │  gatedTools     │
+                                     └────────┬────────┘
+                                              │ yes
+                                     ┌────────▼────────┐
+                                     │  Slack DM       │
+                                     │ [Approve][Deny] │
+                                     └────────┬────────┘
+                    ┌─────────────────────────┼─────────────────────────┐
+                    ▼                         ▼                         ▼
+                 Approve                    Deny              no answer / listener down
+                    │                         │                         │
+                    ▼                         ▼                         ▼
+              tool proceeds            tool blocked         Claude: local prompt (defer)
+                                                            others: denied  (see D39)
+```
+
+### Two commands
+
+```bash
+node cli/hooks-install.js claude      # once per harness — writes its config for you
+node cli/away.js on                   # before you walk away
+node cli/away.js off                  # when you're back
+```
+
+`hooks-install` **merges** into `.claude/settings.json`, so hooks you already have keep
+working, and re-running it is idempotent. For OpenCode it drops a stub into
+`~/.config/opencode/plugins/`.
+
+### Works on more than Claude Code
+
+| Harness | Adapter | Gate a tool | On timeout |
+| --- | --- | --- | --- |
+| **Claude Code** | `tsb-hook` (`cli/hook.js`) | `PreToolUse` | **defers** to the local prompt |
+| **OpenCode** | `adapters/opencode-plugin.js` | `tool.execute.before` | **denies** |
+| Codex, Gemini | ACP axis only, no adapter yet | — | would deny |
+
+The difference is not a preference, it is a capability: Claude Code documents "exit 0 with
+no output → continues through the normal permission flow", which is a real third state.
+OpenCode's only signal is `throw`, a hard deny. So there is no "ask me locally instead" on
+OpenCode, and unknown harnesses default to **deny** — a dead turn is recoverable, a silent
+approval while nobody is watching is not (PLAN D39).
+
+### One place to change your mind
+
+Every knob is read fresh on each invocation, so it all applies **mid-session with nothing
+to restart**, and none of it lives in a harness-specific file (PLAN D40):
+
+```jsonc
+// ~/.team-slack-bridge/slack-config.json
+"awayMode": {
+  "gatedTools": ["Bash", "Edit", "Write", "NotebookEdit"],  // Bash|bash both match
+  "hookTimeoutSeconds": 300,
+  "maxContinuations": 3
+}
+```
+
+### Beyond approvals
+
+- **"What's next?"** — when the session finishes, it DMs you instead of going idle. Reply
+  with an instruction to keep it going, or `done` to let it stop. Capped at
+  `maxContinuations` so it can't loop forever.
+- **Idle and waiting pings** — a DM when a session goes idle, a subagent needs input, or a
+  run completes.
+- **Autocompact** — you get told it happened. You cannot veto it; no hook mechanism for
+  that exists (PLAN D38).
+
+### Before you rely on it
+
+- The **Socket Mode listener must be running** (`node cli/daemon.js start`) — a button
+  click is never visible to a poll. The hook checks first and fails fast instead of hanging.
+- The hook must resolve the **same `TSB_HOME` as the daemon**, or they use different
+  `.ledger.sqlite` files and every ask silently times out.
+- Whoever can DM the bot as you becomes the permission authority for that session. Away
+  mode reads `config.owner.slackUserId` only — the `agentSessions` allowlists do not grant it.
+- **End-to-end verification is still outstanding**, and OpenCode's `session.idle` handling
+  is unproven — see `TODO.md`'s pending list before trusting either unattended.
 
 ## Connecting multiple AI coding harnesses / multiple Slack accounts (PLAN D21/D22)
 

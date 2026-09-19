@@ -9,15 +9,20 @@
 // policy denial, because a dead turn is recoverable and a silent
 // approval is not.
 
-import { preToolUse, preCompact, stop, notification } from '../core/hooks.js'
+import { preToolUse, preCompact, stop as stopHandler, notification } from '../core/hooks.js'
 import { normalizeToolName } from '../core/away-policy.js'
 
-function loadBridgeContext() {
-  // Lazy import — the plugin is loaded once at OpenCode startup, but
-  // context (env/config/dbPath) should be read fresh per invocation so
-  // config changes (like awayMode.gatedTools) take effect without restart.
-  const { loadContext } = require('../cli/context.js')
-  return loadContext()
+// Lazy import via dynamic ESM import() — the plugin is loaded once at
+// OpenCode startup, but context (env/config/dbPath) should be read fresh
+// per invocation so config changes take effect without restart. Cannot
+// use require() here — package.json has "type": "module".
+let _loadContext
+async function loadBridgeContext() {
+  if (!_loadContext) {
+    const mod = await import('../cli/context.js')
+    _loadContext = mod.loadContext
+  }
+  return _loadContext()
 }
 
 // OpenCode plugin entry point
@@ -26,7 +31,7 @@ export const AwayModePlugin = async ({ project, client, $, directory, worktree }
     'tool.execute.before': async (input, output) => {
       let ctx
       try {
-        ctx = loadBridgeContext()
+        ctx = await loadBridgeContext()
       } catch {
         return // bridge not configured — don't block
       }
@@ -40,18 +45,27 @@ export const AwayModePlugin = async ({ project, client, $, directory, worktree }
       // 'allow' and 'skip' pass through silently
     },
 
+    // OpenCode's session.idle is the equivalent of Claude's Stop hook —
+    // "the session finished its work and wants to stop". The stop handler
+    // asks Slack what to do next; if the user replies with an instruction,
+    // the handler returns verdict:'block' with the instruction as the
+    // reason, which we surface as a thrown message so OpenCode continues.
     'session.idle': async (input) => {
       let ctx
-      try { ctx = loadBridgeContext() } catch { return }
-      await notification(
-        { notification_type: 'idle_prompt', message: 'OpenCode session is idle.' },
-        { env: ctx.env, config: ctx.config, dbPath: ctx.dbPath }
+      try { ctx = await loadBridgeContext() } catch { return }
+      const result = await stopHandler(
+        { session_id: input?.sessionId || 'opencode' },
+        { env: ctx.env, config: ctx.config, dbPath: ctx.dbPath, harness: 'opencode', skipDaemonCheck: false }
       )
+      if (result.verdict === 'block') {
+        throw new Error(result.reason || 'Continue with instruction from Slack')
+      }
+      // verdict='allow' or 'skip' — let the session stop
     },
 
     'experimental.session.compacting': async (input) => {
       let ctx
-      try { ctx = loadBridgeContext() } catch { return }
+      try { ctx = await loadBridgeContext() } catch { return }
       await preCompact(
         { trigger: 'auto' },
         { env: ctx.env, config: ctx.config, dbPath: ctx.dbPath }

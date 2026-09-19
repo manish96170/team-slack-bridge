@@ -22,6 +22,9 @@ function claudeSettingsPath(flags) {
   return join(homedir(), '.claude', 'settings.json')
 }
 
+// timeout must exceed awayMode.hookTimeoutSeconds (default 300) or the
+// harness cancels the hook mid-ask. 330 gives 30s headroom over the
+// default; if you raise hookTimeoutSeconds above 300, raise this too.
 function claudeHookEntries() {
   return {
     PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'tsb-hook preToolUse', timeout: 330 }] }],
@@ -49,7 +52,12 @@ function installClaude() {
   const settingsPath = claudeSettingsPath(flags)
   let settings = {}
   if (existsSync(settingsPath)) {
-    try { settings = JSON.parse(readFileSync(settingsPath, 'utf8')) } catch {}
+    const raw = readFileSync(settingsPath, 'utf8')
+    try {
+      settings = JSON.parse(raw)
+    } catch (err) {
+      return { ok: false, error: `cannot parse ${settingsPath}: ${err.message}`, retryable: false }
+    }
   }
   const existingHooks = settings.hooks || {}
   settings.hooks = mergeClaudeHooks(existingHooks, claudeHookEntries())

@@ -1,14 +1,14 @@
 // The full local tool registry (PLAN §6.3, §5). One tool per core function.
-// `slack_post_as_user` is its own tool, separate from `slack_post` — a
-// capability that can't be granted separately can't be gated separately
-// (§6.2) — and it, `slack_dm`, `slack_dm_as_user`, `slack_update_message_as_user`,
-// `slack_search`, `slack_list_channels`, `slack_upload_file` and
-// `slack_upload_file_as_user` are exactly what mcp/tools.remote.js (built in a
-// later step, §11.2) must NOT import. The upload tools additionally read an
-// arbitrary local `filePath` — a remote-exposed version would be a
-// local-file-read primitive, independent of the token-identity reasoning.
+// User-token tools are separate from their bot equivalents because identity
+// capabilities cannot be silently substituted. `slack_post_as_user`,
+// `slack_react_as_user`, `slack_unreact_as_user`, `slack_dm`,
+// `slack_dm_as_user`, `slack_update_message_as_user`, `slack_search`,
+// `slack_list_channels`, `slack_upload_file`, and `slack_upload_file_as_user`
+// are exactly what mcp/tools.remote.js must NOT import. The upload tools
+// additionally read an arbitrary local `filePath`, which would be a local-file
+// read primitive in a remote profile.
 
-import { postToChannel, reply, react, updateMessage, deleteMessage } from '../core/post.js'
+import { postToChannel, reply, react, unreact, updateMessage, deleteMessage } from '../core/post.js'
 import { dm } from '../core/dm.js'
 import { queryMessages, getThread } from '../core/query.js'
 import { search } from '../core/search.js'
@@ -62,6 +62,27 @@ export const tools = {
     inputSchema: schemas.slack_react,
     handler: (args, ctx) =>
       react({ token: ctx.env.SLACK_BOT_TOKEN, channel: args.channel, ts: args.ts, emoji: args.emoji, dryRun: args.dryRun }),
+  },
+  slack_react_as_user: {
+    name: 'slack_react_as_user',
+    description: 'Add an emoji reaction as the locally authorized user. Requires a locally configured user token.',
+    inputSchema: schemas.slack_react_as_user,
+    handler: (args, ctx) =>
+      react({ token: ctx.env.SLACK_USER_TOKEN, channel: args.channel, ts: args.ts, emoji: args.emoji, dryRun: args.dryRun }),
+  },
+  slack_unreact: {
+    name: 'slack_unreact',
+    description: 'Remove this installation bot\'s emoji reaction from a message.',
+    inputSchema: schemas.slack_unreact,
+    handler: (args, ctx) =>
+      unreact({ token: ctx.env.SLACK_BOT_TOKEN, channel: args.channel, ts: args.ts, emoji: args.emoji, dryRun: args.dryRun }),
+  },
+  slack_unreact_as_user: {
+    name: 'slack_unreact_as_user',
+    description: 'Remove the locally authorized user\'s emoji reaction from a message. Requires a locally configured user token.',
+    inputSchema: schemas.slack_unreact_as_user,
+    handler: (args, ctx) =>
+      unreact({ token: ctx.env.SLACK_USER_TOKEN, channel: args.channel, ts: args.ts, emoji: args.emoji, dryRun: args.dryRun }),
   },
   slack_update_message: {
     name: 'slack_update_message',

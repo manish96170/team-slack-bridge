@@ -53,6 +53,39 @@ export const schemas = {
     required: ['channel', 'ts', 'emoji'],
     additionalProperties: false,
   },
+  slack_react_as_user: {
+    type: 'object',
+    properties: {
+      channel: { type: 'string' },
+      ts: { type: 'string' },
+      emoji: { type: 'string', description: 'Emoji name without colons, e.g. "eyes"' },
+      dryRun: { type: 'boolean' },
+    },
+    required: ['channel', 'ts', 'emoji'],
+    additionalProperties: false,
+  },
+  slack_unreact: {
+    type: 'object',
+    properties: {
+      channel: { type: 'string' },
+      ts: { type: 'string' },
+      emoji: { type: 'string', description: 'Emoji name without colons, e.g. "eyes"' },
+      dryRun: { type: 'boolean' },
+    },
+    required: ['channel', 'ts', 'emoji'],
+    additionalProperties: false,
+  },
+  slack_unreact_as_user: {
+    type: 'object',
+    properties: {
+      channel: { type: 'string' },
+      ts: { type: 'string' },
+      emoji: { type: 'string', description: 'Emoji name without colons, e.g. "eyes"' },
+      dryRun: { type: 'boolean' },
+    },
+    required: ['channel', 'ts', 'emoji'],
+    additionalProperties: false,
+  },
   slack_update_message: {
     type: 'object',
     properties: {

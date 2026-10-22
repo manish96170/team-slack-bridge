@@ -1,7 +1,7 @@
 // Local-trust MCP HTTP daemon (PLAN D22) — lets multiple AI coding harnesses
 // (Claude Code, Codex, others) share one running server instead of each
 // spawning their own stdio mcp/server.js subprocess. Deliberately separate
-// from mcp/http.js (the locked-down, Slack-signature-gated, 9-tool remote
+// from mcp/http.js (the locked-down, Slack-signature-gated, 10-tool remote
 // profile per D5/D20) — this exposes the FULL local tool set, because
 // anything that can reach this server already has filesystem/env access to
 // the same secrets. Hardcoded to bind 127.0.0.1 only; never configurable to

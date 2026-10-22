@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { postToChannel, react, updateMessage, deleteMessage } from '../core/post.js'
+import { postToChannel, react, unreact, updateMessage, deleteMessage } from '../core/post.js'
 import { dm } from '../core/dm.js'
 
 test('postToChannel dry-run resolves and formats the request but sends nothing, even with no token', async () => {
@@ -15,6 +15,13 @@ test('react dry-run requires no token', async () => {
   const result = await react({ channel: '#x', ts: '1.1', emoji: 'eyes', dryRun: true })
   assert.equal(result.ok, true)
   assert.equal(result.dryRun, true)
+})
+
+test('unreact dry-run requires no token', async () => {
+  const result = await unreact({ channel: '#x', ts: '1.1', emoji: 'eyes', dryRun: true })
+  assert.equal(result.ok, true)
+  assert.equal(result.dryRun, true)
+  assert.equal(result.request.method, 'reactions.remove')
 })
 
 test('updateMessage dry-run requires no token and skips the ledger-ownership check', async () => {

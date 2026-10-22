@@ -9,6 +9,7 @@ test('MCP validation rejects unknown arguments even when the handler would ignor
 
 test('MCP validation rejects missing required arguments', () => {
   assert.equal(validateArguments(schemas.slack_reply, { channel: '#x', text: 'hi' }), 'missing required argument: threadTs')
+  assert.equal(validateArguments(schemas.slack_unreact, { channel: '#x', ts: '1.1' }), 'missing required argument: emoji')
 })
 
 test('MCP validation rejects invalid enum values', () => {

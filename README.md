@@ -153,6 +153,8 @@ the gap away mode fills (PLAN D34).
      workspace)
    - `files:write` — upload a screenshot/video as the user (`cli/upload.js --as-user`/
      `slack_upload_file_as_user`), e.g. evidence attached to an MR announcement
+   - `reactions:write` — add/remove a reaction as the user (`cli/react.js --as-user`/
+     `slack_react_as_user`/`slack_unreact_as_user`)
 
    `get-user-token.js`/`npm run get-user-token` requests all of the above in one go.
    **Any scope change here requires reinstalling the app and re-running
@@ -259,7 +261,7 @@ node post.js --channel '#x' --text 'hi' [--thread-ts …] [--as-user] [--idempot
 node cli/reply.js --channel '#x' --thread-ts '169…' --text 'hi' [--idempotency-key …] [--dry-run] [--json]
 node cli/update.js --channel '#x' --ts '169…' --text 'new text' [--as-user] [--dry-run] [--json]  # --as-user required if the original was posted as-user
 node cli/delete.js --channel '#x' --ts '169…' [--dry-run] [--json]
-node cli/react.js --channel '#x' --ts '169…' --emoji eyes [--dry-run] [--json]
+node cli/react.js --channel '#x' --ts '169…' --emoji eyes [--remove] [--as-user] [--dry-run] [--json]  # --as-user adds/removes only the authorized user's reaction
 ```
 
 **DM someone** (find their Slack member ID via their profile → "Copy member ID"):

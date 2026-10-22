@@ -2,7 +2,7 @@
 // tools.local.js, core/dm.js, core/ask.js, or user-token search paths. The
 // remote profile's WHAT is structural; config may only decide WHERE.
 
-import { postToChannel, reply, react, updateMessage, deleteMessage } from '../core/post.js'
+import { postToChannel, reply, react, unreact, updateMessage, deleteMessage } from '../core/post.js'
 import { queryMessages, getThread } from '../core/query.js'
 import { resolveUser } from '../core/identity.js'
 import { doctor } from '../core/doctor.js'
@@ -63,6 +63,13 @@ export const tools = {
     inputSchema: schemas.slack_react,
     handler: (args, ctx) =>
       react({ token: ctx.env.SLACK_BOT_TOKEN, channel: args.channel, ts: args.ts, emoji: args.emoji, dryRun: args.dryRun }),
+  },
+  slack_unreact: {
+    name: 'slack_unreact',
+    description: 'Remote-safe removal of this installation bot\'s emoji reaction in an allow-listed Slack channel.',
+    inputSchema: schemas.slack_unreact,
+    handler: (args, ctx) =>
+      unreact({ token: ctx.env.SLACK_BOT_TOKEN, channel: args.channel, ts: args.ts, emoji: args.emoji, dryRun: args.dryRun }),
   },
   slack_update_message: {
     name: 'slack_update_message',

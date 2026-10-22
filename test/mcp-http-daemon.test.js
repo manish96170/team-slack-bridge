@@ -37,14 +37,14 @@ async function rpc(port, message) {
   return res.json()
 }
 
-test('single-account daemon exposes the full local tool set, unlike the 9-tool remote profile', () =>
+test('single-account daemon exposes the full local tool set, unlike the 10-tool remote profile', () =>
   withTempHome(async () => {
     await withServer({ accountMode: 'single', port: 0 }, async port => {
       const response = await rpc(port, { jsonrpc: '2.0', id: 1, method: 'tools/list' })
       const names = response.result.tools.map(tool => tool.name)
       assert.ok(names.includes('slack_dm'), 'slack_dm should be present on the local daemon')
       assert.ok(names.includes('slack_ask'), 'slack_ask should be present on the local daemon')
-      assert.ok(names.length > 9, 'local daemon tool set should exceed the remote 9-tool set')
+      assert.ok(names.length > 10, 'local daemon tool set should exceed the remote 10-tool set')
     })
   }))
 

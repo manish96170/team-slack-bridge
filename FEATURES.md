@@ -81,6 +81,7 @@ groups:read
 im:read
 mpim:read
 files:write
+reactions:write
 ```
 
 `get-user-token.js`/`npm run get-user-token` requests all of the above. Changing this list
@@ -114,6 +115,7 @@ Use:
 node cli/post.js --channel "#deploys" --text "build finished" --json
 node cli/reply.js --channel "#deploys" --thread-ts "123.456" --text "done" --json
 node cli/react.js --channel "#deploys" --ts "123.456" --emoji eyes --json
+node cli/react.js --channel "#deploys" --ts "123.456" --emoji eyes --remove --json
 ```
 
 Turn off: remove/withhold `SLACK_BOT_TOKEN`, or avoid using the commands.
@@ -132,6 +134,8 @@ Use:
 
 ```bash
 node cli/post.js --channel "#deploys" --text "from me" --as-user --json
+node cli/react.js --channel "#deploys" --ts "123.456" --emoji eyes --as-user --json
+node cli/react.js --channel "#deploys" --ts "123.456" --emoji eyes --as-user --remove --json
 ```
 
 Turn off: remove `SLACK_USER_TOKEN` from `.env`.
@@ -527,7 +531,7 @@ messages that the same Slack caller created through the remote MCP path.
 ### Local MCP daemon + multi-account (PLAN D21/D22)
 
 Local-only, separate from `slackbotMcp` above — not signature-gated, not restricted to
-9 tools, never touches the remote/hosted profile (D6 unchanged).
+10 tools, never touches the remote/hosted profile (D6 unchanged).
 
 Default:
 

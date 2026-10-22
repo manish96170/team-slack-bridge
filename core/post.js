@@ -54,6 +54,14 @@ export async function react({ token, channel, ts, emoji, dryRun }) {
   return callSlack('reactions.add', token, body)
 }
 
+export async function unreact({ token, channel, ts, emoji, dryRun }) {
+  if (!channel || !ts || !emoji) return { ok: false, error: 'channel-ts-emoji-required', retryable: false }
+  const body = { channel, timestamp: ts, name: emoji }
+  if (dryRun) return { ok: true, dryRun: true, request: { method: 'reactions.remove', body } }
+  if (!token) return { ok: false, error: 'no-token', retryable: false }
+  return callSlack('reactions.remove', token, body)
+}
+
 // `requireLedgerOwnership` is the remote limit (§11.6 #2): refuse to touch a
 // ts this instance's ledger did not itself record, so a shared bot token
 // can't be used to edit/delete a message a different caller posted. Local

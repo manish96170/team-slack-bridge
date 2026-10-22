@@ -85,11 +85,33 @@ test('the remote slack_doctor MCP tool reports ok:true regardless of connection 
   assert.equal(result.connected, false)
 })
 
-test('as-user DM and edit tools are local-only', () => {
+test('as-user DM, edit, and reaction tools are local-only', () => {
   assert.ok(localTools.slack_dm_as_user)
   assert.ok(localTools.slack_update_message_as_user)
+  assert.ok(localTools.slack_react_as_user)
+  assert.ok(localTools.slack_unreact_as_user)
   assert.equal(remoteTools.slack_dm_as_user, undefined)
   assert.equal(remoteTools.slack_update_message_as_user, undefined)
+  assert.equal(remoteTools.slack_react_as_user, undefined)
+  assert.equal(remoteTools.slack_unreact_as_user, undefined)
+})
+
+test('bot reaction removal is available to both local and remote MCP profiles', () => {
+  assert.ok(localTools.slack_unreact)
+  assert.ok(remoteTools.slack_unreact)
+})
+
+test('reaction MCP tools preserve the requested identity and operation in dry-run mode', async () => {
+  const userAdd = await localTools.slack_react_as_user.handler(
+    { channel: 'C1', ts: '1.1', emoji: 'white_check_mark', dryRun: true },
+    { env: {}, config: emptyConfig },
+  )
+  const botRemove = await remoteTools.slack_unreact.handler(
+    { channel: 'C1', ts: '1.1', emoji: 'white_check_mark', dryRun: true },
+    { env: {}, config: emptyConfig },
+  )
+  assert.equal(userAdd.request.method, 'reactions.add')
+  assert.equal(botRemove.request.method, 'reactions.remove')
 })
 
 test('slack_list_channels is local-only (user-token-shaped, same posture as slack_search)', () => {

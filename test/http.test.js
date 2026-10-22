@@ -21,6 +21,7 @@ const remoteToolNames = [
   'slack_react',
   'slack_reply',
   'slack_resolve_user',
+  'slack_unreact',
   'slack_update_message',
 ]
 const forbiddenRemoteToolNames = [
@@ -32,6 +33,7 @@ const forbiddenRemoteToolNames = [
   'slack_list_channels',
   'slack_list_scheduled_messages',
   'slack_post_as_user',
+  'slack_react_as_user',
   'slack_progress_finish',
   'slack_progress_start',
   'slack_progress_update',
@@ -39,6 +41,7 @@ const forbiddenRemoteToolNames = [
   'slack_schedule_message',
   'slack_search',
   'slack_update_message_as_user',
+  'slack_unreact_as_user',
   'slack_upload_file',
   'slack_upload_file_as_user',
 ]

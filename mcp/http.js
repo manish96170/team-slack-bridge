@@ -12,6 +12,7 @@ const WRITE_TOOLS = new Set([
   'slack_post',
   'slack_reply',
   'slack_react',
+  'slack_unreact',
   'slack_update_message',
   'slack_delete_message',
 ])
@@ -19,6 +20,7 @@ const CHANNEL_WRITE_TOOLS = new Set([
   'slack_post',
   'slack_reply',
   'slack_react',
+  'slack_unreact',
   'slack_update_message',
   'slack_delete_message',
   'slack_schedule_message',

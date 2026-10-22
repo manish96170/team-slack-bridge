@@ -84,3 +84,15 @@ test('the remote slack_doctor MCP tool reports ok:true regardless of connection 
   assert.equal(result.ok, true)
   assert.equal(result.connected, false)
 })
+
+test('as-user DM and edit tools are local-only', () => {
+  assert.ok(localTools.slack_dm_as_user)
+  assert.ok(localTools.slack_update_message_as_user)
+  assert.equal(remoteTools.slack_dm_as_user, undefined)
+  assert.equal(remoteTools.slack_update_message_as_user, undefined)
+})
+
+test('slack_list_channels is local-only (user-token-shaped, same posture as slack_search)', () => {
+  assert.ok(localTools.slack_list_channels)
+  assert.equal(remoteTools.slack_list_channels, undefined)
+})

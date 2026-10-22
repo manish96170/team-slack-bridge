@@ -28,6 +28,8 @@ const forbiddenRemoteToolNames = [
   'slack_ask',
   'slack_delete_scheduled_message',
   'slack_dm',
+  'slack_dm_as_user',
+  'slack_list_channels',
   'slack_list_scheduled_messages',
   'slack_post_as_user',
   'slack_progress_finish',
@@ -36,6 +38,7 @@ const forbiddenRemoteToolNames = [
   'slack_publish_home',
   'slack_schedule_message',
   'slack_search',
+  'slack_update_message_as_user',
 ]
 const signingSecret = 'test-signing-secret'
 

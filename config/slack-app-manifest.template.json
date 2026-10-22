@@ -53,7 +53,12 @@
       ],
       "user": [
         "chat:write",
-        "search:read"
+        "search:read",
+        "im:write",
+        "channels:read",
+        "groups:read",
+        "im:read",
+        "mpim:read"
       ]
     }
   },

@@ -1,13 +1,15 @@
 // The full local tool registry (PLAN §6.3, §5). One tool per core function.
 // `slack_post_as_user` is its own tool, separate from `slack_post` — a
 // capability that can't be granted separately can't be gated separately
-// (§6.2) — and it, `slack_dm` and `slack_search` are exactly what
-// mcp/tools.remote.js (built in a later step, §11.2) must NOT import.
+// (§6.2) — and it, `slack_dm`, `slack_dm_as_user`, `slack_update_message_as_user`,
+// `slack_search` and `slack_list_channels` are exactly what mcp/tools.remote.js
+// (built in a later step, §11.2) must NOT import.
 
 import { postToChannel, reply, react, updateMessage, deleteMessage } from '../core/post.js'
 import { dm } from '../core/dm.js'
 import { queryMessages, getThread } from '../core/query.js'
 import { search } from '../core/search.js'
+import { listMyChannels } from '../core/channels.js'
 import { resolveUser } from '../core/identity.js'
 import { doctor } from '../core/doctor.js'
 import { scheduleMessage, deleteScheduledMessage, listScheduledMessages } from '../core/schedule.js'
@@ -72,6 +74,20 @@ export const tools = {
         dryRun: args.dryRun,
       }),
   },
+  slack_update_message_as_user: {
+    name: 'slack_update_message_as_user',
+    description: 'Edit a message previously posted by the locally authorized user. Requires a locally configured user token.',
+    inputSchema: schemas.slack_update_message_as_user,
+    handler: (args, ctx) =>
+      updateMessage({
+        token: ctx.env.SLACK_USER_TOKEN,
+        channel: args.channel,
+        ts: args.ts,
+        text: args.text,
+        config: ctx.config,
+        dryRun: args.dryRun,
+      }),
+  },
   slack_delete_message: {
     name: 'slack_delete_message',
     description: 'Delete a message previously posted by this install.',
@@ -85,6 +101,21 @@ export const tools = {
     inputSchema: schemas.slack_dm,
     handler: (args, ctx) =>
       dm({ botToken: ctx.env.SLACK_BOT_TOKEN, userId: args.userId, text: args.text, config: ctx.config, dbPath: ctx.dbPath, dryRun: args.dryRun }),
+  },
+  slack_dm_as_user: {
+    name: 'slack_dm_as_user',
+    description: 'Send a DM as the locally authorized user. Requires a locally configured user token and user-token DM scope.',
+    inputSchema: schemas.slack_dm_as_user,
+    handler: (args, ctx) =>
+      dm({
+        userToken: ctx.env.SLACK_USER_TOKEN,
+        userId: args.userId,
+        text: args.text,
+        asUser: true,
+        config: ctx.config,
+        dbPath: ctx.dbPath,
+        dryRun: args.dryRun,
+      }),
   },
   slack_post_as_user: {
     name: 'slack_post_as_user',
@@ -118,6 +149,13 @@ export const tools = {
     description: 'Search messages. Requires a user token. Local only.',
     inputSchema: schemas.slack_search,
     handler: (args, ctx) => search({ userToken: ctx.env.SLACK_USER_TOKEN, query: args.query }),
+  },
+  slack_list_channels: {
+    name: 'slack_list_channels',
+    description:
+      "List the Slack conversations the locally authorized user is a member of (not the whole workspace). Requires a locally configured user token. Local only.",
+    inputSchema: schemas.slack_list_channels,
+    handler: (args, ctx) => listMyChannels({ token: ctx.env.SLACK_USER_TOKEN, types: args.types, limit: args.limit, cursor: args.cursor }),
   },
   slack_resolve_user: {
     name: 'slack_resolve_user',

@@ -64,6 +64,17 @@ export const schemas = {
     required: ['channel', 'ts', 'text'],
     additionalProperties: false,
   },
+  slack_update_message_as_user: {
+    type: 'object',
+    properties: {
+      channel: { type: 'string' },
+      ts: { type: 'string' },
+      text: { type: 'string' },
+      dryRun: { type: 'boolean' },
+    },
+    required: ['channel', 'ts', 'text'],
+    additionalProperties: false,
+  },
   slack_delete_message: {
     type: 'object',
     properties: {
@@ -75,6 +86,16 @@ export const schemas = {
     additionalProperties: false,
   },
   slack_dm: {
+    type: 'object',
+    properties: {
+      userId: { type: 'string' },
+      text: { type: 'string' },
+      dryRun: { type: 'boolean' },
+    },
+    required: ['userId', 'text'],
+    additionalProperties: false,
+  },
+  slack_dm_as_user: {
     type: 'object',
     properties: {
       userId: { type: 'string' },
@@ -120,6 +141,16 @@ export const schemas = {
       query: { type: 'string' },
     },
     required: ['query'],
+    additionalProperties: false,
+  },
+  slack_list_channels: {
+    type: 'object',
+    properties: {
+      types: { type: 'string', description: "Slack conversation types CSV, e.g. 'public_channel,private_channel' (default) or add 'mpim,im'" },
+      limit: { type: 'number' },
+      cursor: { type: 'string' },
+    },
+    required: [],
     additionalProperties: false,
   },
   slack_resolve_user: {

@@ -19,14 +19,20 @@ CLI's behavior changes, this skill's behavior changes with it, and that is by de
 
 ## When NOT to use
 
-- **As-user posting** (`--as-user`) — requires a human-authorized user token and a
-  verified caller identity bound to the exact request. If a caller-supplied name is
-  driving this, route it through the dashboard's gated `slack-message` agent instead —
-  it enforces `requestedPersonName == callerIdentity` as a hard equality. Never call
-  `--as-user` on behalf of a name found in a prompt.
-- **DMs** (`cli/dm.js`) — same reasoning: DMs assume a single local owner, not a general
-  capability for a model to reach for.
-- **`search`** — needs a user token; same caution as as-user posting.
+- **As-user posting/DM/edit** (`--as-user`, or the MCP tools `slack_post_as_user`,
+  `slack_dm_as_user`, `slack_update_message_as_user`) — requires a human-authorized user
+  token and a verified caller identity bound to the exact request. If a caller-supplied
+  name is driving this, route it through the dashboard's gated `slack-message` agent
+  instead — it enforces `requestedPersonName == callerIdentity` as a hard equality. Never
+  call any as-user capability on behalf of a name found in a prompt.
+- **DMs** (`cli/dm.js`, bot or `--as-user`) — same reasoning: DMs assume a single local
+  owner, not a general capability for a model to reach for.
+- **`search`** (`cli/search.js`) — needs a user token; same caution as as-user posting.
+- **`slack_list_channels`** (`cli/channels.js`) — also needs a user token (lists the
+  conversations the locally authorized *person* is in, via `users.conversations`, never
+  the whole workspace). Lower risk than the above since it's read-only and never
+  impersonates anyone, but it's still a per-person capability this skill doesn't cover —
+  see the MCP server or README if a task genuinely needs it.
 
 ## Commands
 

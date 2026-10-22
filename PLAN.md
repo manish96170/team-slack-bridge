@@ -54,6 +54,7 @@ Slack (so the two do not drift), what to lift from the working sample next door,
 | D40 | **Which tools are gated is bridge policy, not harness config** (2026-09-20, on request) — the gate list previously lived as a `"matcher": "Bash\|Edit\|Write"` string inside `.claude/settings.json`, i.e. a Claude-specific file expressing a bridge-level intent, which would have to be restated in a second format for every additional harness. Adapters now register for **all** tools (Claude matcher `"*"`) and `shouldGate` decides from `awayMode.gatedTools`, with a `TOOL_ALIASES` map absorbing the naming difference (Claude `Bash`/`Edit`, OpenCode `bash`/`edit`). Consequence worth stating plainly: every policy knob (`.away` on/off, `gatedTools`, `hookTimeoutSeconds`, `maxContinuations`) is read fresh from `TSB_HOME` on each invocation, so all of it is changeable mid-session with nothing to restart, while the harness's own config is written once by `cli/hooks-install.js` and never touched again. That installer **merges rather than clobbers** — a real install already had unrelated gitnexus and iterm2 hooks on the same events | `core/away-policy.js`'s `shouldGate`, `cli/hooks-install.js` |
 | D41 | **`slack_list_channels` uses `users.conversations`, never `conversations.list`, and is local-only** (2026-10-22, on request — a user asked the local MCP server to list the channels they're in; no tool for that existed) — `conversations.list` enumerates every channel in the workspace regardless of caller membership, which is a directory-enumeration primitive the same way unrestricted `resolveUser` was (D20's reasoning applies here too); `users.conversations` scopes the result to conversations the *token's own user* already belongs to, so the user-token call can only ever reveal what that person could already see in their own Slack sidebar. Requires `SLACK_USER_TOKEN` (not the bot token) and is local-only by construction, same posture as `slack_search` — not an extra gate added on top, just the natural consequence of being user-token-shaped like D20/D21/D26's other local-only tools. Checked first whether this duplicated an existing capability: `core/doctor.js`'s `findChannelByName` also calls a Slack list method, but it's `conversations.list` on the **bot** token, scoped to resolving one already-*configured* channel name to an ID (never enumerates); `verify-dm.js` is a standalone bot-token diagnostic script limited to `types:'im'`. Neither returns "every channel the human user is in," so this is new, not duplicated | §13 |
 | D42 | **DM-as-user (`slack_dm_as_user`/`slack_update_message_as_user`) found mid-flight from another session, 2026-10-22 — logged here since it was only tracked in a standalone `USER_TOKEN_DM_SUPPORT_PLAN.md`, not in this decisions log.** Root cause of the original bug: `core/dm.js`'s `resolveDmChannel` opened/cached a DM with the bot token even when sending as the user, and a bot↔recipient DM is not a conversation the human user token owns, so Slack correctly refused it. Fixed by caching `dm_channels` rows per **token identity**, never shared, and by opening the conversation with whichever token is actually about to send. A GPT-5.6 Terra review of this pass caught that the first version of the fix only namespaced by caller *type* (`bot:<userId>`/`user:<userId>`), which still collides if `SLACK_BOT_TOKEN`/`SLACK_USER_TOKEN` is later rotated or re-authorized as a different identity against the same local `TSB_HOME` — the cache key now also includes a truncated SHA-256 fingerprint of the token itself (never the token, never logged, just enough to bust the cache on a token change), covered by a new "rotating `SLACK_USER_TOKEN` busts the cache" test. The two new tools are local-only, same posture as `slack_post_as_user` (D-less, pre-existing) — absent from `mcp/tools.remote.js` by construction, asserted by `test/doctor.test.js`/`test/http.test.js`. **Still blocked on a live scope**: `conversations.open` with a user token needs `im:write`, which neither `config/slack-app-manifest.template.json`'s user scopes nor `get-user-token.js`'s `USER_SCOPES` requested before this pass — both fixed here (also added D41's `channels:read`/`groups:read`/`im:read`/`mpim:read`, and backfilled `search:read`, which the manifest listed but `get-user-token.js` never actually requested — a separate pre-existing gap caught while touching the same scope list). The manifest update, reinstall, and `npm run get-user-token` re-run are manual owner steps and remain undone — see `USER_TOKEN_DM_SUPPORT_PLAN.md` for the remaining checklist | `core/dm.js`, `mcp/tools.local.js`, `config/slack-app-manifest.template.json`, `get-user-token.js`, `USER_TOKEN_DM_SUPPORT_PLAN.md` |
+| D43 | **npm publish runs via GitHub Actions + OIDC Trusted Publishing (`.github/workflows/publish.yml`), triggered only by a pushed `v*` tag — never by a push to `main`** (2026-10-22, on request) — the owner already had a Trusted Publisher registered on npmjs.com for this package, keyed to an exact repo + workflow filename, but that file didn't exist in this repo, so nothing could fire. No `NPM_TOKEN` anywhere; `permissions: id-token: write` is what OIDC Trusted Publishing needs instead. The workflow runs `npm ci`/`npm test` before publishing, verifies the pushed tag's version against `package.json`, and publishes with `--provenance`. Pushing a tag to actually exercise this for the first time is a separate, deliberate owner action, not bundled into this change | §15 (new) |
 
 ---
 
@@ -993,9 +994,50 @@ changes," five should-fix findings, all addressed before merge:
 
 ---
 
+## 15. npm publish via GitHub Actions + OIDC Trusted Publishing (D43, 2026-10-22)
+
+The repo was pushed to `main` with no CI at all — no `.github/workflows`, no release/tag
+automation, nothing wired to the npm registry despite this package being published there
+by hand since `0.1.0`. The owner already has an npm **Trusted Publisher** registered for
+this package, pointing at a specific GitHub repo + workflow file (OIDC Trusted Publishing
+is keyed to that exact pair, not "any Action run from this repo") — but that file didn't
+exist here yet, so nothing could have fired, automatically or manually.
+
+**Added `.github/workflows/publish.yml`**, filename chosen to match the owner's existing
+Trusted Publisher registration. Deliberately **not** triggered on push to `main` (explicit
+owner request — a merge to main is a review/integration event, not a release decision) —
+triggers only on a pushed `v*` tag, a separate, deliberate step taken after `main` already
+has the reviewed commit:
+
+```bash
+git tag v$(node -p "require('./package.json').version")
+git push origin --tags
+```
+
+- `permissions: id-token: write` is what makes OIDC Trusted Publishing possible — no
+  `NPM_TOKEN` secret anywhere in this repo or its Actions config.
+- Upgrades npm to latest inside the runner before publishing — Trusted Publishing needs
+  npm 11.5.0+, newer than what a given `setup-node` Node build may ship with by default.
+- Runs `npm ci` + `npm test` before publishing — a red test run never reaches `npm publish`.
+- Verifies the pushed tag's version actually matches `package.json`'s before publishing,
+  failing loudly on a mismatch instead of shipping the wrong version under the right tag
+  name (or vice versa).
+- `npm publish --provenance` — npm's provenance attestation, which Trusted Publishing
+  (unlike a long-lived token) makes available, and shows up as a "Published from GitHub
+  Actions" badge on the npm package page.
+
+**Not done, deliberately:** actually pushing a `v0.1.7` tag to exercise this for the first
+time — that's a real publish to a public registry, left as an explicit action for the
+owner to trigger (or to ask for separately), not something this change bundles in on its
+own.
+
+---
+
 TODO PENDING:
 1. Live-verify Slack webhooks and Slackbot MCP through a public HTTPS tunnel.
 1. Revisit OpenACP / ACP once there is a concrete agent/session orchestrator to connect.
 1. Manually reinstall the updated Slack app manifest (D41's four read scopes, D42's `im:write`, backfilled
    `search:read`) and re-run `npm run get-user-token` — then live-verify both `slack_list_channels` and the
    as-user DM/edit flow per `USER_TOKEN_DM_SUPPORT_PLAN.md`.
+1. Push a `v0.1.7` tag to actually exercise `.github/workflows/publish.yml` (D43) for the first time and
+   confirm the npm Trusted Publisher registration actually fires end to end.

@@ -1,0 +1,57 @@
+name: Publish to npm
+
+# OIDC Trusted Publishing (no NPM_TOKEN secret) — intentionally NOT triggered
+# by a push to main (per owner request). Fires only on a version tag, pushed
+# as a deliberate, separate step after a release has already been reviewed
+# and merged:
+#
+#   git tag v$(node -p "require('./package.json').version")
+#   git push origin --tags
+#
+# This filename/path (.github/workflows/publish.yml) must match whatever was
+# registered as the Trusted Publisher for this package on npmjs.com — OIDC
+# Trusted Publishing is keyed to the exact repo + workflow file (+ optional
+# environment), not just "a GitHub Actions run from this repo".
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required for npm OIDC Trusted Publishing
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          registry-url: 'https://registry.npmjs.org'
+
+      # OIDC Trusted Publishing needs a recent npm CLI (11.5.0+) — don't rely
+      # on whatever setup-node's Node build happens to ship with.
+      - run: npm install -g npm@latest
+
+      - run: npm ci
+
+      - run: npm test
+
+      # Fail loudly rather than publishing a mismatch if the tag and
+      # package.json's version ever disagree.
+      - name: Verify tag matches package.json version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "Tag $GITHUB_REF_NAME (version $TAG_VERSION) does not match package.json version $PKG_VERSION" >&2
+            exit 1
+          fi
+
+      - run: npm publish --provenance

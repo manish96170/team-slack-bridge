@@ -1,11 +1,17 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D42) and architecture; this file is the scannable done/pending list.
+log (D1–D43) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
 ## Done
 
+- [x] **npm publish via GitHub Actions + OIDC Trusted Publishing (D43, PLAN.md §15)** —
+      `.github/workflows/publish.yml`, triggered only by a pushed `v*` tag, never by a
+      push to `main` (explicit owner request). No `NPM_TOKEN`; the owner's existing npm
+      Trusted Publisher registration needed exactly this workflow filename to have
+      anything to fire against. Runs `npm ci`/`npm test`, checks the tag matches
+      `package.json`'s version, then `npm publish --provenance`.
 - [x] **`slack_list_channels` tool (D41, PLAN.md §13)** — "what channels am I in" answered via
       `core/channels.js`'s `listMyChannels` on `users.conversations` (not `conversations.list` — that
       enumerates the whole workspace regardless of membership, the same over-broad shape D20 already refused
@@ -53,6 +59,8 @@ log (D1–D42) and architecture; this file is the scannable done/pending list.
       and a backfilled `search:read`. None of this is live until the owner manually updates the installed
       Slack app's manifest, reinstalls, and re-runs `npm run get-user-token` — see
       `USER_TOKEN_DM_SUPPORT_PLAN.md` for the remaining checklist (its items 2's manual steps, 3, and 5).
+- [ ] **D43's publish workflow has never actually run** — needs a `v0.1.7` tag pushed to confirm the npm
+      Trusted Publisher registration fires end to end, not just that the YAML parses.
 
 - [ ] **Away mode end-to-end verification — never run.** 228 unit tests pass, but no part
       of away mode has been exercised against a live daemon with a human tapping buttons.

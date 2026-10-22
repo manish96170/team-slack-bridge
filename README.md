@@ -720,6 +720,22 @@ requires the explicit `--as-user` flag, never inferred or defaulted. If you buil
 anything routing requests to different people's tokens, keep that rule: explicit
 beats inferred, always.
 
+## Releasing
+
+Publishing to npm is a deliberate, separate step from merging to `main` — pushing to
+`main` never publishes anything. `.github/workflows/publish.yml` runs on a pushed
+`v*` tag only, using npm's OIDC Trusted Publishing (no `NPM_TOKEN` secret):
+
+```bash
+# after package.json's version is already bumped and merged to main
+git tag v$(node -p "require('./package.json').version")
+git push origin --tags
+```
+
+The workflow runs the test suite, checks the tag matches `package.json`'s version, and
+publishes with `--provenance`. See PLAN.md D43 for why it's tag-triggered rather than
+on every push to `main`.
+
 ## License
 
 MIT

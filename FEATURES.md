@@ -34,7 +34,7 @@ node cli/doctor.js --json
 | `SLACK_BOT_TOKEN` | bot posts, DMs, reads, listener, HTTP MCP | required for real Slack calls |
 | `SLACK_APP_TOKEN` | Socket Mode listener | optional |
 | `SLACK_SIGNING_SECRET` | signed HTTP Events API, slash commands, Slackbot MCP | optional until those surfaces are enabled |
-| `SLACK_USER_TOKEN` | local `--as-user` and local search only | optional |
+| `SLACK_USER_TOKEN` | local `--as-user` post/DM/edit, local search, `slack_list_channels` | optional |
 | `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` | one-time user token OAuth helper | optional |
 
 ## Slack app setup
@@ -67,6 +67,23 @@ Socket Mode also needs an app-level token with:
 ```text
 connections:write
 ```
+
+User token scopes (only if using any `--as-user`/`asUser` capability, local search, or
+`slack_list_channels` — none of these are bot scopes, Slack requires them separately):
+
+```text
+chat:write
+search:read
+im:write
+channels:read
+groups:read
+im:read
+mpim:read
+```
+
+`get-user-token.js`/`npm run get-user-token` requests all of the above. Changing this list
+requires reinstalling the app and re-running `npm run get-user-token` — an already-minted
+`SLACK_USER_TOKEN` keeps whatever scopes it was minted with.
 
 Slackbot MCP is separate. Only add this when exposing a public HTTPS `/mcp`
 endpoint:

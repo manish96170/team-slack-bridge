@@ -53,7 +53,7 @@ Slack (so the two do not drift), what to lift from the working sample next door,
 | D39 | **Away mode is harness-agnostic, and the fail mode is a per-harness capability rather than one shared policy** (2026-09-20, on request) — away mode initially only spoke Claude Code's hook contract, which contradicts what this tool is: `core/acp-backends.js` already supports `claude`/`codex`/`opencode`/`gemini` on the other axis. Policy now lives in `core/away-policy.js` and adapters only translate. The load-bearing difference between harnesses is that **Claude Code can defer and OpenCode cannot**: Claude documents "exit 0 with no output → continues through the normal permission flow", so D35's fail-open degrades to a local prompt; OpenCode's only signal is `throw`, a hard deny, with no "ask locally instead". `failMode(harness)` therefore returns `'defer'` for claude and `'deny'` for everything else, and **unknown harnesses default to deny** — a dead turn is recoverable, a silent approval while nobody is watching is not. This makes D35 harness-conditional rather than universal | `core/away-policy.js`'s `failMode`, `adapters/opencode-plugin.js` |
 | D40 | **Which tools are gated is bridge policy, not harness config** (2026-09-20, on request) — the gate list previously lived as a `"matcher": "Bash\|Edit\|Write"` string inside `.claude/settings.json`, i.e. a Claude-specific file expressing a bridge-level intent, which would have to be restated in a second format for every additional harness. Adapters now register for **all** tools (Claude matcher `"*"`) and `shouldGate` decides from `awayMode.gatedTools`, with a `TOOL_ALIASES` map absorbing the naming difference (Claude `Bash`/`Edit`, OpenCode `bash`/`edit`). Consequence worth stating plainly: every policy knob (`.away` on/off, `gatedTools`, `hookTimeoutSeconds`, `maxContinuations`) is read fresh from `TSB_HOME` on each invocation, so all of it is changeable mid-session with nothing to restart, while the harness's own config is written once by `cli/hooks-install.js` and never touched again. That installer **merges rather than clobbers** — a real install already had unrelated gitnexus and iterm2 hooks on the same events | `core/away-policy.js`'s `shouldGate`, `cli/hooks-install.js` |
 | D41 | **`slack_list_channels` uses `users.conversations`, never `conversations.list`, and is local-only** (2026-10-22, on request — a user asked the local MCP server to list the channels they're in; no tool for that existed) — `conversations.list` enumerates every channel in the workspace regardless of caller membership, which is a directory-enumeration primitive the same way unrestricted `resolveUser` was (D20's reasoning applies here too); `users.conversations` scopes the result to conversations the *token's own user* already belongs to, so the user-token call can only ever reveal what that person could already see in their own Slack sidebar. Requires `SLACK_USER_TOKEN` (not the bot token) and is local-only by construction, same posture as `slack_search` — not an extra gate added on top, just the natural consequence of being user-token-shaped like D20/D21/D26's other local-only tools. Checked first whether this duplicated an existing capability: `core/doctor.js`'s `findChannelByName` also calls a Slack list method, but it's `conversations.list` on the **bot** token, scoped to resolving one already-*configured* channel name to an ID (never enumerates); `verify-dm.js` is a standalone bot-token diagnostic script limited to `types:'im'`. Neither returns "every channel the human user is in," so this is new, not duplicated | §13 |
-| D42 | **DM-as-user (`slack_dm_as_user`/`slack_update_message_as_user`) found mid-flight from another session, 2026-10-22 — logged here since it was only tracked in a standalone `USER_TOKEN_DM_SUPPORT_PLAN.md`, not in this decisions log.** Root cause of the original bug: `core/dm.js`'s `resolveDmChannel` opened/cached a DM with the bot token even when sending as the user, and a bot↔recipient DM is not a conversation the human user token owns, so Slack correctly refused it. Fixed by caching `dm_channels` rows per **caller identity** (`bot:<userId>` / `user:<userId>`), never shared, and by opening the conversation with whichever token is actually about to send. The two new tools are local-only, same posture as `slack_post_as_user` (D-less, pre-existing) — absent from `mcp/tools.remote.js` by construction, asserted by `test/doctor.test.js`/`test/http.test.js`. **Still blocked on a live scope**: `conversations.open` with a user token needs `im:write`, which neither `config/slack-app-manifest.template.json`'s user scopes nor `get-user-token.js`'s `USER_SCOPES` requested before this pass — both fixed here (also added D41's `channels:read`/`groups:read`/`im:read`/`mpim:read`, and backfilled `search:read`, which the manifest listed but `get-user-token.js` never actually requested — a separate pre-existing gap caught while touching the same scope list). The manifest update, reinstall, and `npm run get-user-token` re-run are manual owner steps and remain undone — see `USER_TOKEN_DM_SUPPORT_PLAN.md` for the remaining checklist | `core/dm.js`, `mcp/tools.local.js`, `config/slack-app-manifest.template.json`, `get-user-token.js`, `USER_TOKEN_DM_SUPPORT_PLAN.md` |
+| D42 | **DM-as-user (`slack_dm_as_user`/`slack_update_message_as_user`) found mid-flight from another session, 2026-10-22 — logged here since it was only tracked in a standalone `USER_TOKEN_DM_SUPPORT_PLAN.md`, not in this decisions log.** Root cause of the original bug: `core/dm.js`'s `resolveDmChannel` opened/cached a DM with the bot token even when sending as the user, and a bot↔recipient DM is not a conversation the human user token owns, so Slack correctly refused it. Fixed by caching `dm_channels` rows per **token identity**, never shared, and by opening the conversation with whichever token is actually about to send. A GPT-5.6 Terra review of this pass caught that the first version of the fix only namespaced by caller *type* (`bot:<userId>`/`user:<userId>`), which still collides if `SLACK_BOT_TOKEN`/`SLACK_USER_TOKEN` is later rotated or re-authorized as a different identity against the same local `TSB_HOME` — the cache key now also includes a truncated SHA-256 fingerprint of the token itself (never the token, never logged, just enough to bust the cache on a token change), covered by a new "rotating `SLACK_USER_TOKEN` busts the cache" test. The two new tools are local-only, same posture as `slack_post_as_user` (D-less, pre-existing) — absent from `mcp/tools.remote.js` by construction, asserted by `test/doctor.test.js`/`test/http.test.js`. **Still blocked on a live scope**: `conversations.open` with a user token needs `im:write`, which neither `config/slack-app-manifest.template.json`'s user scopes nor `get-user-token.js`'s `USER_SCOPES` requested before this pass — both fixed here (also added D41's `channels:read`/`groups:read`/`im:read`/`mpim:read`, and backfilled `search:read`, which the manifest listed but `get-user-token.js` never actually requested — a separate pre-existing gap caught while touching the same scope list). The manifest update, reinstall, and `npm run get-user-token` re-run are manual owner steps and remain undone — see `USER_TOKEN_DM_SUPPORT_PLAN.md` for the remaining checklist | `core/dm.js`, `mcp/tools.local.js`, `config/slack-app-manifest.template.json`, `get-user-token.js`, `USER_TOKEN_DM_SUPPORT_PLAN.md` |
 
 ---
 
@@ -943,9 +943,10 @@ true, then tried `chat.postMessage` with the **user** token against that bot-ope
 refuses that — a bot↔recipient DM is not a conversation the human user token owns.
 
 **The fix.** `resolveDmChannel` now takes an explicit `cacheKey` and `dm({ asUser })` passes whichever token is
-about to actually send into both the open call and the cache key (`user:<id>` vs `bot:<id>`), so a bot-opened DM
-is never reused for an as-user send and vice versa. Covered by `test/dm-cache.test.js`'s new "does not share a
-bot DM cache entry with an as-user DM" case.
+about to actually send into both the open call and the cache key, so a bot-opened DM is never reused for an
+as-user send and vice versa. Covered by `test/dm-cache.test.js`'s new "does not share a bot DM cache entry with
+an as-user DM" case, plus a `dm()`-level test (not just `resolveDmChannel()` directly) that mocks both
+`conversations.open` and `chat.postMessage` and asserts neither identity's calls ever use the other's token.
 
 **Two new local-only tools**, same posture as the pre-existing `slack_post_as_user`: `slack_dm_as_user` and
 `slack_update_message_as_user`, both in `mcp/tools.local.js` only, asserted absent from `mcp/tools.remote.js`
@@ -962,6 +963,33 @@ reinstall and `npm run get-user-token` re-run remain manual owner steps, not don
 reauthorize a Slack app on the owner's behalf, and a token must never be minted or pasted by an agent. See
 `USER_TOKEN_DM_SUPPORT_PLAN.md` for the remaining live-verification checklist (items 2's manual steps, 3, and
 5).
+
+**Review pass (GPT-5.6 Terra, India, medium effort, 2026-10-22), before this was pushed:** verdict "request
+changes," five should-fix findings, all addressed before merge:
+
+1. The cache key only namespaced by caller *type*, not by the actual token — a rotated/re-authorized
+   `SLACK_USER_TOKEN` against the same `TSB_HOME` would have reused the previous identity's cached channel.
+   Fixed with a truncated SHA-256 token fingerprint folded into the cache key (never the token itself, never
+   logged); added a "rotating the user token busts the cache" test.
+2. The DM regression test only exercised `resolveDmChannel()` directly, with the cache keys supplied by hand —
+   it would still pass if `dm()` itself regressed to passing the wrong token. Added tests at the `dm()`
+   boundary that mock both Slack methods and assert per-identity token usage end to end, plus a
+   no-silent-bot-fallback test for `asUser: true` with no user token configured.
+3. README/FEATURES.md documented only `chat:write` as a user scope, which would reproduce the exact
+   `missing_scope` failure for anyone following the setup instructions as written. Both now list the full
+   seven-scope set this pass actually requests, and note that a scope change requires reinstall +
+   re-running `npm run get-user-token`.
+4. `USER_TOKEN_DM_SUPPORT_PLAN.md` was linked from shipped docs (`FEATURES.md`, `TODO.md`, this file) but
+   absent from `package.json`'s `files` allow-list, so an installed copy would have a dead local reference.
+   Added to `files`.
+5. `package-lock.json` still said `0.1.0` after multiple version bumps, and `mcp/server.js`/`mcp/http.js`/
+   `listen/mcp-http.js` each hardcoded `serverInfo.version: '0.1.0'` — misleading for an MCP dependency other
+   agents call unattended. Lockfile regenerated (`npm install --package-lock-only`); all three `serverInfo`
+   call sites now read from a new, single `core/version.js` helper instead of carrying their own string
+   (`core/home.js`'s pre-existing App Home version line now shares the same helper instead of duplicating the
+   read-package.json logic). Also ran `npm audit fix` while here — a critical, unrelated transitive
+   `proxy-addr` advisory (via `@slack/bolt`'s Express dependency) is now resolved; `npm audit` reports zero
+   vulnerabilities.
 
 ---
 

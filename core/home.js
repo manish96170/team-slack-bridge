@@ -7,21 +7,14 @@
 // (see config/slack-app-manifest.template.json) — without that, `views.publish`
 // fails with `not_enabled`.
 
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
 import { callSlack } from './slack.js'
+import { packageVersion } from './version.js'
 
 // Best-effort only — a version-less home tab still renders fine, so a
 // missing/unreadable package.json (unlikely, but not worth crashing over)
 // just omits the version line instead of failing publishHome entirely.
 function readVersion() {
-  try {
-    const pkgPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json')
-    return JSON.parse(readFileSync(pkgPath, 'utf8')).version
-  } catch {
-    return null
-  }
+  return packageVersion()
 }
 
 const FEATURES = [

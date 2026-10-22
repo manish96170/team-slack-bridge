@@ -15,11 +15,21 @@ log (D1–D42) and architecture; this file is the scannable done/pending list.
       neither is "every channel the human user is in," so this is new, not a duplicate.
 - [x] **DM-as-user fix (D42, PLAN.md §14, found mid-flight from another session)** — `core/dm.js` was opening
       a bot-token DM even for `asUser` sends, and caching it under a key a user-token send would also hit;
-      fixed with per-caller-identity cache keys (`bot:<id>`/`user:<id>`). Added `slack_dm_as_user` and
+      fixed with cache keys namespaced by a token fingerprint (bot/user mode + a one-way hash of the token),
+      not just a mode label — a GPT-5.6 Terra review caught that the mode-label-only version would still
+      collide across a rotated/re-authorized token against the same `TSB_HOME`. Added `slack_dm_as_user` and
       `slack_update_message_as_user`, both local-only. Also fixed on the way: `config/slack-app-manifest.
       template.json`/`get-user-token.js` were missing the `im:write` user scope `conversations.open` actually
       needs as a user, D41's four read scopes, and a `search:read` the manifest already listed but
       `get-user-token.js` never requested.
+- [x] **Fixed 5 should-fix issues from a GPT-5.6 Terra (India, medium) review of D41/D42 before push** — the
+      token-fingerprint cache-key fix above; `dm()`-boundary regression tests (not just `resolveDmChannel()`
+      directly); README/FEATURES.md documented only `chat:write` as a user scope (now the full 7-scope list);
+      `USER_TOKEN_DM_SUPPORT_PLAN.md` was linked from shipped docs but missing from `package.json`'s `files`;
+      `package-lock.json` and three hardcoded MCP `serverInfo.version` strings had drifted to `0.1.0` across
+      several real version bumps — all three now read a new `core/version.js` helper (which `core/home.js`'s
+      App Home version line also now uses, instead of duplicating the same read-package.json code). Also ran
+      `npm audit fix` while touching the lockfile — resolved an unrelated critical `proxy-addr` advisory.
 - [x] Away mode, harness-agnostic (D39/D40) — policy moved out of harness config into
       `core/away-policy.js` + `awayMode.*` in `slack-config.json`; adapters now only
       translate (`cli/hook.js` for Claude Code, `adapters/opencode-plugin.js` for

@@ -139,8 +139,22 @@ the gap away mode fills (PLAN D34).
      message history later — not used by anything in this repo yet)
    - `users:read` — resolve handles to user IDs
 
-   If you also want the "post as a specific person" capability, add `chat:write` under
-   **User Token Scopes** too, and set an OAuth redirect URL (see step 3).
+   If you also want the "post as a specific person" capability, add these **User Token
+   Scopes**, and set an OAuth redirect URL (see step 3):
+   - `chat:write` — post/edit messages as the authorized user
+   - `search:read` — `cli/search.js`/`slack_search` (user-token-only; Slack has no bot
+     equivalent)
+   - `im:write` — open DMs as the user (`cli/dm.js --as-user`/`slack_dm_as_user`);
+     `conversations.open` fails `missing_scope` without it
+   - `channels:read`, `groups:read`, `im:read`, `mpim:read` — `cli/channels.js`/
+     `slack_list_channels`, "which conversations is this person actually in" (uses
+     `users.conversations`, scoped to their own membership — never the whole
+     workspace)
+
+   `get-user-token.js`/`npm run get-user-token` requests all of the above in one go.
+   **Any scope change here requires reinstalling the app and re-running
+   `npm run get-user-token`** — an existing `SLACK_USER_TOKEN` keeps whatever scopes it
+   was minted with.
 
    **Hard platform limit, not a scope issue**: none of the above ever lets the bot read
    a DM between two other people, or a DM the bot isn't a member of — Slack bots can
@@ -238,6 +252,7 @@ node cli/query.js --channel '#x' [--since-minutes 60] [--limit 20] [--json]
 node cli/thread.js --channel '#x' --thread-ts '169…' [--json]
 node cli/search.js --query 'from:@bob deploy' [--json]
 node cli/resolve-user.js --handle @jane [--json]
+node cli/channels.js [--types 'public_channel,private_channel'] [--limit 100] [--cursor …] [--json]  # requires a user token — which channels the authorized user is actually in, not the whole workspace
 ```
 
 **Scheduling** (`--at` accepts ISO-8601 or raw Unix seconds):

@@ -3,6 +3,7 @@ import { validateArguments } from './validation.js'
 import { findRemoteOwnedByTs, getEntry } from '../core/ledger.js'
 import { recordRemoteAudit, reserveRemoteCall, updateRemoteAudit } from '../core/remote-audit.js'
 import { normalizeSlackbotMcp } from '../core/slackbot-mcp.js'
+import { packageVersion } from '../core/version.js'
 
 const PROTOCOL_VERSION = '2024-11-05'
 const DEFAULT_SLACKBOT_TOOLS = new Set(['slack_doctor'])
@@ -104,7 +105,7 @@ export async function handleMcpMessage({ message, env, config, dbPath }) {
     return success(id, {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: { tools: {} },
-      serverInfo: { name: 'team-slack-bridge-slackbot', version: '0.1.0' },
+      serverInfo: { name: 'team-slack-bridge-slackbot', version: packageVersion() || '0.0.0' },
     })
   }
 

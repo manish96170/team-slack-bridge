@@ -15,6 +15,7 @@ import { createInterface } from 'node:readline'
 import { tools } from './tools.local.js'
 import { validateArguments } from './validation.js'
 import { loadContext } from '../cli/context.js'
+import { packageVersion } from '../core/version.js'
 
 const PROTOCOL_VERSION = '2024-11-05'
 const context = loadContext()
@@ -40,7 +41,7 @@ async function handle(message) {
     respond(id, {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: { tools: {} },
-      serverInfo: { name: 'team-slack-bridge', version: '0.1.0' },
+      serverInfo: { name: 'team-slack-bridge', version: packageVersion() || '0.0.0' },
     })
     return
   }

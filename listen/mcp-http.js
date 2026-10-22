@@ -12,6 +12,7 @@ import { tools } from '../mcp/tools.local.js'
 import { validateArguments } from '../mcp/validation.js'
 import { withAccountField } from '../mcp/schema.js'
 import { loadAccountContext, listAccounts } from '../core/accounts.js'
+import { packageVersion } from '../core/version.js'
 
 const PROTOCOL_VERSION = '2024-11-05'
 const BIND_HOST = '127.0.0.1'
@@ -55,7 +56,7 @@ export function createLocalMcpServer({ accountMode = 'single', port = 8918 } = {
     const { id, method, params } = message || {}
 
     if (method === 'initialize') {
-      return respond(id, { protocolVersion: PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: 'team-slack-bridge-local-daemon', version: '0.1.0' } })
+      return respond(id, { protocolVersion: PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: 'team-slack-bridge-local-daemon', version: packageVersion() || '0.0.0' } })
     }
     if (method === 'notifications/initialized' || method === 'notifications/cancelled') return null
     if (method === 'ping') return respond(id, {})

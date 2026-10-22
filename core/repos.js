@@ -3,7 +3,7 @@
 // path typed into a Slack message — so a trigger can only reach repos an
 // operator explicitly registered.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -23,7 +23,9 @@ function readRegistry() {
 
 function writeRegistry(registry) {
   mkdirSync(rootHome(), { recursive: true })
-  writeFileSync(getReposRegistryPath(), JSON.stringify(registry, null, 2) + '\n')
+  const path = getReposRegistryPath()
+  writeFileSync(path, JSON.stringify(registry, null, 2) + '\n', { mode: 0o600 })
+  chmodSync(path, 0o600)
 }
 
 export function listRepos() {

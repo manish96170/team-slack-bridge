@@ -1,9 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, chmodSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { listAccounts, resolveAccountHome, loadAccountContext, addAccount, removeAccount, setDefaultAccount } from '../core/accounts.js'
+import { listAccounts, resolveAccountHome, loadAccountContext, addAccount, removeAccount, setDefaultAccount, getAccountsRegistryPath } from '../core/accounts.js'
+
+function mode(path) {
+  return statSync(path).mode & 0o777
+}
 
 function withTempHome(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'tsb-accounts-'))
@@ -67,5 +71,22 @@ test('loadAccountContext reads env/config from the resolved account home, not th
     assert.equal(context.accountName, 'work')
     assert.equal(context.env.SLACK_BOT_TOKEN, 'xoxb-work-token')
     assert.equal(context.dbPath, join(workHome, '.ledger.sqlite'))
+  })
+})
+
+// accounts.json maps account names to filesystem home paths, not a secret —
+// still written 0600 as a baseline, and self-heals an already-world-readable
+// file on the next write rather than only protecting newly created ones
+// (writeFileSync's {mode} option is create-only; found during a security
+// audit of this MCP server, 2026-10-22).
+test('addAccount writes accounts.json as 0600, including self-healing an existing 0644 file', () => {
+  if (process.platform === 'win32') return
+  withTempHome(dir => {
+    addAccount('work', join(dir, 'work'))
+    assert.equal(mode(getAccountsRegistryPath()), 0o600)
+
+    chmodSync(getAccountsRegistryPath(), 0o644)
+    addAccount('work2', join(dir, 'work2'))
+    assert.equal(mode(getAccountsRegistryPath()), 0o600)
   })
 })

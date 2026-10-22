@@ -646,3 +646,12 @@ npm pack --dry-run --cache /private/tmp/team-slack-bridge-npm-cache
 ```
 
 `doctor` reports presence booleans only; it must never print token values.
+
+Every local state file holding a credential or PII (`.env`, `slack-config.json`,
+`accounts.json`, `repos.json`) is written `0600` and self-heals that permission on every
+write (D44) — if any of these were created before this protection existed, run once:
+
+```bash
+chmod 600 ~/.team-slack-bridge/.env ~/.team-slack-bridge/slack-config.json \
+  ~/.team-slack-bridge/accounts.json ~/.team-slack-bridge/repos.json
+```

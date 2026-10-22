@@ -1,9 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, chmodSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { listRepos, resolveRepoPath, addRepo, removeRepo, setDefaultRepo } from '../core/repos.js'
+import { listRepos, resolveRepoPath, addRepo, removeRepo, setDefaultRepo, getReposRegistryPath } from '../core/repos.js'
+
+function mode(path) {
+  return statSync(path).mode & 0o777
+}
 
 function withTempHome(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'tsb-repos-'))
@@ -80,5 +84,26 @@ test('setDefaultRepo switches which repo resolveRepoPath() returns with no name 
     addRepo('b', pathB)
     setDefaultRepo('b')
     assert.equal(resolveRepoPath().name, 'b')
+  })
+})
+
+// repos.json maps repo names to filesystem paths, not a secret — still
+// written 0600 as a baseline, and self-heals an already-world-readable file
+// on the next write rather than only protecting newly created ones
+// (writeFileSync's {mode} option is create-only; found during a security
+// audit of this MCP server, 2026-10-22).
+test('addRepo writes repos.json as 0600, including self-healing an existing 0644 file', () => {
+  if (process.platform === 'win32') return
+  withTempHome(dir => {
+    const pathA = join(dir, 'a')
+    mkdirSync(pathA, { recursive: true })
+    addRepo('a', pathA)
+    assert.equal(mode(getReposRegistryPath()), 0o600)
+
+    chmodSync(getReposRegistryPath(), 0o644)
+    const pathB = join(dir, 'b')
+    mkdirSync(pathB, { recursive: true })
+    addRepo('b', pathB)
+    assert.equal(mode(getReposRegistryPath()), 0o600)
   })
 })

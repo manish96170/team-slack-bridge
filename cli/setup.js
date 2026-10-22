@@ -11,7 +11,7 @@
 // node cli/setup.js features                       (revisit the default-false toggles later)
 // node cli/setup.js features --enable-http true     (skip a specific prompt non-interactively)
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import { parseFlags } from './lib/args.js'
@@ -21,7 +21,11 @@ import { ENV_FILE_PATH } from '../env.js'
 
 function writeConfig(config) {
   mkdirSync(dirname(CONFIG_PATH), { recursive: true })
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n')
+  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 })
+  // `{ mode }` only applies on creation, not on overwriting an existing
+  // file — chmod explicitly so a pre-existing world-readable file self-heals
+  // on the next write instead of staying that way forever.
+  chmodSync(CONFIG_PATH, 0o600)
 }
 
 function writeEnvValue(contents, key, value) {
@@ -38,6 +42,7 @@ function writeEnv(updates) {
   for (const [key, value] of Object.entries(updates)) contents = writeEnvValue(contents, key, value)
   mkdirSync(dirname(ENV_FILE_PATH), { recursive: true })
   writeFileSync(ENV_FILE_PATH, contents, { mode: 0o600 })
+  chmodSync(ENV_FILE_PATH, 0o600)
 }
 
 async function promptMissing(flags, questions) {

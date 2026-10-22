@@ -7,7 +7,7 @@
 // TSB_HOME/~/.team-slack-bridge — so nothing changes for anyone who never
 // touches this feature.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { loadContextForHome } from '../cli/context.js'
@@ -32,7 +32,9 @@ function readRegistry() {
 
 function writeRegistry(registry) {
   mkdirSync(rootHome(), { recursive: true })
-  writeFileSync(getAccountsRegistryPath(), JSON.stringify(registry, null, 2) + '\n')
+  const path = getAccountsRegistryPath()
+  writeFileSync(path, JSON.stringify(registry, null, 2) + '\n', { mode: 0o600 })
+  chmodSync(path, 0o600)
 }
 
 export function listAccounts() {

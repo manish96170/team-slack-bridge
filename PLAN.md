@@ -55,6 +55,7 @@ Slack (so the two do not drift), what to lift from the working sample next door,
 | D41 | **`slack_list_channels` uses `users.conversations`, never `conversations.list`, and is local-only** (2026-10-22, on request — a user asked the local MCP server to list the channels they're in; no tool for that existed) — `conversations.list` enumerates every channel in the workspace regardless of caller membership, which is a directory-enumeration primitive the same way unrestricted `resolveUser` was (D20's reasoning applies here too); `users.conversations` scopes the result to conversations the *token's own user* already belongs to, so the user-token call can only ever reveal what that person could already see in their own Slack sidebar. Requires `SLACK_USER_TOKEN` (not the bot token) and is local-only by construction, same posture as `slack_search` — not an extra gate added on top, just the natural consequence of being user-token-shaped like D20/D21/D26's other local-only tools. Checked first whether this duplicated an existing capability: `core/doctor.js`'s `findChannelByName` also calls a Slack list method, but it's `conversations.list` on the **bot** token, scoped to resolving one already-*configured* channel name to an ID (never enumerates); `verify-dm.js` is a standalone bot-token diagnostic script limited to `types:'im'`. Neither returns "every channel the human user is in," so this is new, not duplicated | §13 |
 | D42 | **DM-as-user (`slack_dm_as_user`/`slack_update_message_as_user`) found mid-flight from another session, 2026-10-22 — logged here since it was only tracked in a standalone `USER_TOKEN_DM_SUPPORT_PLAN.md`, not in this decisions log.** Root cause of the original bug: `core/dm.js`'s `resolveDmChannel` opened/cached a DM with the bot token even when sending as the user, and a bot↔recipient DM is not a conversation the human user token owns, so Slack correctly refused it. Fixed by caching `dm_channels` rows per **token identity**, never shared, and by opening the conversation with whichever token is actually about to send. A GPT-5.6 Terra review of this pass caught that the first version of the fix only namespaced by caller *type* (`bot:<userId>`/`user:<userId>`), which still collides if `SLACK_BOT_TOKEN`/`SLACK_USER_TOKEN` is later rotated or re-authorized as a different identity against the same local `TSB_HOME` — the cache key now also includes a truncated SHA-256 fingerprint of the token itself (never the token, never logged, just enough to bust the cache on a token change), covered by a new "rotating `SLACK_USER_TOKEN` busts the cache" test. The two new tools are local-only, same posture as `slack_post_as_user` (D-less, pre-existing) — absent from `mcp/tools.remote.js` by construction, asserted by `test/doctor.test.js`/`test/http.test.js`. **Still blocked on a live scope**: `conversations.open` with a user token needs `im:write`, which neither `config/slack-app-manifest.template.json`'s user scopes nor `get-user-token.js`'s `USER_SCOPES` requested before this pass — both fixed here (also added D41's `channels:read`/`groups:read`/`im:read`/`mpim:read`, and backfilled `search:read`, which the manifest listed but `get-user-token.js` never actually requested — a separate pre-existing gap caught while touching the same scope list). The manifest update, reinstall, and `npm run get-user-token` re-run are manual owner steps and remain undone — see `USER_TOKEN_DM_SUPPORT_PLAN.md` for the remaining checklist | `core/dm.js`, `mcp/tools.local.js`, `config/slack-app-manifest.template.json`, `get-user-token.js`, `USER_TOKEN_DM_SUPPORT_PLAN.md` |
 | D43 | **npm publish runs via GitHub Actions + OIDC Trusted Publishing (`.github/workflows/publish.yml`), triggered only by a pushed `v*` tag — never by a push to `main`** (2026-10-22, on request) — the owner already had a Trusted Publisher registered on npmjs.com for this package, keyed to an exact repo + workflow filename, but that file didn't exist in this repo, so nothing could fire. No `NPM_TOKEN` anywhere; `permissions: id-token: write` is what OIDC Trusted Publishing needs instead. The workflow runs `npm ci`/`npm test` before publishing, verifies the pushed tag's version against `package.json`, and publishes with `--provenance`. Pushing a tag to actually exercise this for the first time is a separate, deliberate owner action, not bundled into this change | §15 (new) |
+| D44 | **Every local state file holding real identity/PII (`slack-config.json`, `accounts.json`, `repos.json`) is now written `0600`, with an explicit `chmodSync` on every write — not just `writeFileSync`'s `{ mode }` option** (2026-10-22, found during a security audit of this repo's MCP server, on request). `{ mode }` only takes effect when `writeFileSync` *creates* a file; it is silently ignored when overwriting one that already exists — so a file that predated this protection (or was ever manually edited) stayed world-readable forever, never self-healing on a later write. `.env` already had the `{ mode: 0o600 }` half of this (D-less, pre-existing) but had the exact same latent gap; `slack-config.json`/`accounts.json`/`repos.json` had neither half. All four now get both: `{ mode: 0o600 }` for the create case, `chmodSync(path, 0o600)` immediately after for the overwrite case. Regression tests assert the actual file mode (`stat().mode & 0o777`) both on first creation and after starting from a `0644` file, skipped on `win32` where POSIX file modes don't apply | `cli/setup.js`, `get-user-token.js`, `core/config-write.js`, `core/accounts.js`, `core/repos.js` |
 
 ---
 
@@ -1026,10 +1027,72 @@ git push origin --tags
   (unlike a long-lived token) makes available, and shows up as a "Published from GitHub
   Actions" badge on the npm package page.
 
-**Not done, deliberately:** actually pushing a `v0.1.7` tag to exercise this for the first
-time — that's a real publish to a public registry, left as an explicit action for the
-owner to trigger (or to ask for separately), not something this change bundles in on its
-own.
+**Live-exercised same day (2026-10-22), outcome: the OIDC path itself is currently broken,
+worked around manually.** The `v0.1.7` tag was pushed and the workflow ran twice. Every
+step passed — `npm ci`, `npm test`, the tag/version check, even provenance signing to
+Sigstore's transparency log — then the actual registry upload (`PUT .../team-slack-bridge`)
+both times returned a bogus `404 Not Found`, identically. This matches a confirmed, still-
+open upstream bug (`npm/cli#8730`, `#8976`): npm's OIDC Trusted Publishing signs
+provenance fine, then 404s the real PUT regardless of a correctly configured Trusted
+Publisher. **Root cause confirmed separately, and it's not actually about OIDC at all**:
+the local npm session's own auth token was invalid (`npm whoami` → `401`, `npm token list`
+→ "your authentication token seems to be invalid") — npm returns `404` instead of `401`
+for an unauthenticated/invalid-token publish attempt, to avoid leaking package existence
+to a caller who isn't authenticated at all, which is indistinguishable from the OIDC
+failure mode at the error-message level. `0.1.7` was published by running `npm login`
+(re-authenticating interactively, including the OTP browser-approval step this account
+requires) followed by a plain `npm publish` — manual, not via the workflow. The workflow
+itself is unchanged and should be retried next release; this was npm's auth state, not a
+flaw in `.github/workflows/publish.yml`.
+
+---
+
+## 16. Local state file permissions — security audit finding (D44, 2026-10-22)
+
+A requested security audit of the local MCP server (`mcp/server.js` and everything it can
+reach) found no code-level vulnerabilities — stdio-only transport with zero network
+surface, no `console.log` anywhere in the MCP path, every SQL query parameterized, no
+shell-string `child_process.exec` anywhere, all 24 tool schemas assert
+`additionalProperties:false`, local-only tools structurally absent from
+`mcp/tools.remote.js`'s import graph (verified by import grep, not just by reading the
+docs), `npm audit` clean. One real finding, filesystem-level rather than code-level:
+
+**`~/.team-slack-bridge/.env` was `0644` (world-readable) on a real machine, despite the
+code already writing it with `{ mode: 0o600 }`.** The cause: `writeFileSync`'s `{ mode }`
+option only applies when the call *creates* the file — Node silently ignores it when
+overwriting a file that already exists. So a `.env` that predated this protection (or was
+ever edited by hand, which can reset permissions depending on the editor) stayed
+world-readable forever; every later `get-user-token.js`/`cli/setup.js` write looked
+correct in the diff but did nothing to actually fix the permission on disk.
+
+**Same gap existed on `slack-config.json`, `accounts.json`, and `repos.json`** — these had
+neither half of the protection (no `{ mode }`, no chmod). `slack-config.json` in
+particular holds real PII (38 real people's names/Slack handles/user IDs in this
+install) — not a credential, but still personal data about real humans that shouldn't be
+world-readable by construction, same posture `.env` already had in intent.
+
+**Fix: every write site now does both** — `{ mode: 0o600 }` for the create case, plus an
+explicit `chmodSync(path, 0o600)` immediately after, which actually enforces the
+permission on an already-existing file too (the create-only option can't). Applied to all
+four write sites: `cli/setup.js` (`.env` and `slack-config.json`), `get-user-token.js`
+(`.env`), `core/config-write.js` (`slack-config.json`'s output-mode write path),
+`core/accounts.js` (`accounts.json`), `core/repos.js` (`repos.json`).
+
+**Regression tests assert the real file mode, not just that the write succeeded** — each
+new test starts from a file deliberately `chmod`'d to `0644`, performs a write, and
+asserts `statSync(path).mode & 0o777 === 0o600` afterward (`test/config-write.test.js`,
+new; `test/accounts.test.js`/`test/repos.test.js`, extended) — this is the one case where
+asserting the returned `{ ok: true }` result proves nothing about the actual bug, since
+the bug was never in the write succeeding, only in the mode it left behind. Skipped on
+`win32`, where POSIX file modes don't apply.
+
+**Any already-existing local install should run this once**, since the fix only
+self-heals on the *next* write to each file, not retroactively on upgrade:
+
+```bash
+chmod 600 ~/.team-slack-bridge/.env ~/.team-slack-bridge/slack-config.json \
+  ~/.team-slack-bridge/accounts.json ~/.team-slack-bridge/repos.json
+```
 
 ---
 
@@ -1039,5 +1102,7 @@ TODO PENDING:
 1. Manually reinstall the updated Slack app manifest (D41's four read scopes, D42's `im:write`, backfilled
    `search:read`) and re-run `npm run get-user-token` — then live-verify both `slack_list_channels` and the
    as-user DM/edit flow per `USER_TOKEN_DM_SUPPORT_PLAN.md`.
-1. Push a `v0.1.7` tag to actually exercise `.github/workflows/publish.yml` (D43) for the first time and
-   confirm the npm Trusted Publisher registration actually fires end to end.
+1. Re-attempt `.github/workflows/publish.yml` on the next version bump to confirm whether the OIDC `E404`
+   was purely the stale local npm session, or whether npm's Trusted Publishing has a real bug independent
+   of that (both are plausible per the upstream issue reports; only one real attempt with valid
+   credentials has happened so far, and it was manual, not through the workflow).

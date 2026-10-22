@@ -8,7 +8,7 @@
 // registered in your app's OAuth config.
 
 import http from 'node:http'
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { loadEnv, ENV_FILE_PATH } from './env.js'
 
@@ -42,6 +42,11 @@ function writeUserToken(token) {
   }
   mkdirSync(dirname(ENV_FILE_PATH), { recursive: true })
   writeFileSync(ENV_FILE_PATH, contents, { mode: 0o600 })
+  // `{ mode }` above only applies when writeFileSync creates the file — it is
+  // silently ignored when overwriting an existing one, so an `.env` that was
+  // ever 644 (e.g. from before this protection existed) would stay 644
+  // forever without this explicit chmod on every write.
+  chmodSync(ENV_FILE_PATH, 0o600)
 }
 
 const server = http.createServer(async (req, res) => {

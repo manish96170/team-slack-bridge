@@ -1,11 +1,30 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D43) and architecture; this file is the scannable done/pending list.
+log (D1–D44) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
 ## Done
 
+- [x] **Local state file permissions hardened (D44, PLAN.md §16, security audit finding)** —
+      `.env` was `0644` on a real machine despite the code writing `{ mode: 0o600 }`;
+      `writeFileSync`'s `{ mode }` only applies on creation, not on overwriting an
+      existing file, so it never actually self-healed. `slack-config.json`/`accounts.json`/
+      `repos.json` had neither half of the protection at all, and `slack-config.json`
+      holds real PII (38 people's names/handles/Slack IDs). Fixed with an explicit
+      `chmodSync(path, 0o600)` on every write, in addition to the create-only `{ mode }`
+      option, across all four write sites. New/extended tests assert the actual file
+      mode after starting from a deliberately `0644` file — the only case where a
+      passing `{ ok: true }` result proves nothing about the bug.
+- [x] **v0.1.7 published to npm (2026-10-22)** — not via the new OIDC workflow, which hit
+      a real `E404` both times it ran (provenance signs fine, the registry PUT 404s
+      regardless, matching a confirmed open upstream bug, `npm/cli#8730`/`#8976`).
+      Separately confirmed root cause: the local npm session's own auth token was
+      invalid (`npm whoami` → 401), not a Trusted Publisher misconfiguration — npm
+      returns 404 instead of 401 for an unauthenticated publish attempt, which looks
+      identical to the OIDC failure. Published manually via `npm login` (OTP
+      browser-approval) + `npm publish`. The workflow itself needs a real retry on the
+      next release to know whether the OIDC path is actually fixed now or still broken.
 - [x] **npm publish via GitHub Actions + OIDC Trusted Publishing (D43, PLAN.md §15)** —
       `.github/workflows/publish.yml`, triggered only by a pushed `v*` tag, never by a
       push to `main` (explicit owner request). No `NPM_TOKEN`; the owner's existing npm
@@ -59,8 +78,10 @@ log (D1–D43) and architecture; this file is the scannable done/pending list.
       and a backfilled `search:read`. None of this is live until the owner manually updates the installed
       Slack app's manifest, reinstalls, and re-runs `npm run get-user-token` — see
       `USER_TOKEN_DM_SUPPORT_PLAN.md` for the remaining checklist (its items 2's manual steps, 3, and 5).
-- [ ] **D43's publish workflow has never actually run** — needs a `v0.1.7` tag pushed to confirm the npm
-      Trusted Publisher registration fires end to end, not just that the YAML parses.
+- [ ] **D43's publish workflow ran twice and failed both times with `E404`** — confirmed
+      a real, still-open upstream npm/cli OIDC bug, but the local npm auth token being
+      invalid at the same time means the workflow itself (not just the npm bug) is still
+      unproven with valid credentials. Needs a real retry on the next version bump.
 
 - [ ] **Away mode end-to-end verification — never run.** 228 unit tests pass, but no part
       of away mode has been exercised against a live daemon with a human tapping buttons.
@@ -87,8 +108,9 @@ log (D1–D43) and architecture; this file is the scannable done/pending list.
       registry; `0.1.5` carries everything after the `0.1.4` publish (id-based
       close/reopen, the codex-review lifecycle fixes, the README overhaul, the
       App Home redesign). `0.1.6` added away mode (D34–D40). `0.1.7` adds
-      `slack_list_channels` (D41) and the DM-as-user fix (D42) — pending review
-      and publish.
+      `slack_list_channels` (D41) and the DM-as-user fix (D42) — live on npm, published
+      manually (see D43's publish-workflow note above). `0.1.8` fixes local state file
+      permissions (D44).
 - [x] Fixed npm-distribution-specific bugs: config cold-start path defaulting inside
       the install dir (would get wiped by `npm update`), `bin` path convention,
       `build:sea` correctly scoped to repo-clone-only

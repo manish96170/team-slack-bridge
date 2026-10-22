@@ -156,6 +156,25 @@ the gap away mode fills (PLAN D34).
    `npm run get-user-token`** — an existing `SLACK_USER_TOKEN` keeps whatever scopes it
    was minted with.
 
+   ```
+   ┌─────────────────────────┐          ┌─────────────────────────┐
+   │     SLACK_BOT_TOKEN     │          │     SLACK_USER_TOKEN    │
+   │  "the bot" — one app,   │          │  "you" — per person,    │
+   │   shared by everyone    │          │   never shared          │
+   ├─────────────────────────┤          ├─────────────────────────┤
+   │ post / reply / react    │          │ post-as-me / dm-as-me   │
+   │ read channels it's a    │          │ search (your own query) │
+   │  member of              │          │                         │
+   │ conversations.list      │          │ users.conversations     │
+   │  → every channel the    │          │  → only the channels    │
+   │    BOT can see          │          │    YOU are a member of  │
+   └─────────────────────────┘          └─────────────────────────┘
+   ```
+
+   `cli/channels.js` / `slack_list_channels` deliberately uses `users.conversations`,
+   never `conversations.list` — the former can only ever return what the authorized
+   person could already see in their own Slack sidebar, never the whole workspace.
+
    **Hard platform limit, not a scope issue**: none of the above ever lets the bot read
    a DM between two other people, or a DM the bot isn't a member of — Slack bots can
    only see conversations they're part of. The only way to read a person's own DM
@@ -243,6 +262,17 @@ node cli/react.js --channel '#x' --ts '169…' --emoji eyes [--dry-run] [--json]
 **DM someone** (find their Slack member ID via their profile → "Copy member ID"):
 ```bash
 node cli/dm.js --user U0123ABC --text 'hi' [--as-user] [--dry-run] [--json]
+```
+
+Bot-sent and as-you-sent DMs are never conflated — each identity opens and caches its
+*own* conversation, keyed by a fingerprint of the actual token in use (never the token
+value itself), so a token rotation busts only that identity's cache entry:
+
+```
+dm({ asUser: false })  ──►  SLACK_BOT_TOKEN   ──►  conversations.open  ──►  its own DM
+dm({ asUser: true  })  ──►  SLACK_USER_TOKEN  ──►  conversations.open  ──►  its own DM
+
+           same recipient, two separate conversations — never shared, never crossed
 ```
 
 **Read channels/threads/search** (search requires a user token — Slack's own
@@ -725,6 +755,15 @@ beats inferred, always.
 Publishing to npm is a deliberate, separate step from merging to `main` — pushing to
 `main` never publishes anything. `.github/workflows/publish.yml` runs on a pushed
 `v*` tag only, using npm's OIDC Trusted Publishing (no `NPM_TOKEN` secret):
+
+```
+┌──────────────────┐     ┌─────────────────────┐     ┌──────────────────────┐     ┌──────────────────┐
+│  merge to main   │  ▶  │   git tag v0.1.x    │  ▶  │   GitHub Actions     │  ▶  │   npm registry   │
+│   (reviewed)     │     │  git push --tags    │     │ (OIDC, no stored     │     │  (--provenance)  │
+│                  │     │                     │     │  secret token)       │     │                  │
+└──────────────────┘     └─────────────────────┘     └──────────────────────┘     └──────────────────┘
+        a plain push to main never reaches this pipeline — only a pushed tag does
+```
 
 ```bash
 # after package.json's version is already bumped and merged to main

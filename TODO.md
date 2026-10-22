@@ -1,11 +1,25 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D40) and architecture; this file is the scannable done/pending list.
+log (D1–D42) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
 ## Done
 
+- [x] **`slack_list_channels` tool (D41, PLAN.md §13)** — "what channels am I in" answered via
+      `core/channels.js`'s `listMyChannels` on `users.conversations` (not `conversations.list` — that
+      enumerates the whole workspace regardless of membership, the same over-broad shape D20 already refused
+      for `resolveUser`). User-token-gated, local-only like `slack_search`. Checked for duplication first:
+      `core/doctor.js`'s `findChannelByName` and `verify-dm.js` both call Slack list methods too, but on the
+      bot token and scoped to one already-configured channel name / the bot's own open DMs respectively —
+      neither is "every channel the human user is in," so this is new, not a duplicate.
+- [x] **DM-as-user fix (D42, PLAN.md §14, found mid-flight from another session)** — `core/dm.js` was opening
+      a bot-token DM even for `asUser` sends, and caching it under a key a user-token send would also hit;
+      fixed with per-caller-identity cache keys (`bot:<id>`/`user:<id>`). Added `slack_dm_as_user` and
+      `slack_update_message_as_user`, both local-only. Also fixed on the way: `config/slack-app-manifest.
+      template.json`/`get-user-token.js` were missing the `im:write` user scope `conversations.open` actually
+      needs as a user, D41's four read scopes, and a `search:read` the manifest already listed but
+      `get-user-token.js` never requested.
 - [x] Away mode, harness-agnostic (D39/D40) — policy moved out of harness config into
       `core/away-policy.js` + `awayMode.*` in `slack-config.json`; adapters now only
       translate (`cli/hook.js` for Claude Code, `adapters/opencode-plugin.js` for
@@ -22,6 +36,13 @@ log (D1–D40) and architecture; this file is the scannable done/pending list.
     achievable with hooks.
 
 ## Pending
+
+- [ ] **Manual Slack app reauthorization needed for D41 + D42 to work live** — `config/slack-app-manifest.
+      template.json`'s user scopes and `get-user-token.js`'s `USER_SCOPES` now request `channels:read`,
+      `groups:read`, `im:read`, `mpim:read` (D41, `slack_list_channels`), `im:write` (D42, as-user DM/edit),
+      and a backfilled `search:read`. None of this is live until the owner manually updates the installed
+      Slack app's manifest, reinstalls, and re-runs `npm run get-user-token` — see
+      `USER_TOKEN_DM_SUPPORT_PLAN.md` for the remaining checklist (its items 2's manual steps, 3, and 5).
 
 - [ ] **Away mode end-to-end verification — never run.** 228 unit tests pass, but no part
       of away mode has been exercised against a live daemon with a human tapping buttons.
@@ -47,7 +68,9 @@ log (D1–D40) and architecture; this file is the scannable done/pending list.
       `team-slack-bridge` — `0.1.0`, `0.1.1`, `0.1.2`, `0.1.4` are live on the
       registry; `0.1.5` carries everything after the `0.1.4` publish (id-based
       close/reopen, the codex-review lifecycle fixes, the README overhaul, the
-      App Home redesign).
+      App Home redesign). `0.1.6` added away mode (D34–D40). `0.1.7` adds
+      `slack_list_channels` (D41) and the DM-as-user fix (D42) — pending review
+      and publish.
 - [x] Fixed npm-distribution-specific bugs: config cold-start path defaulting inside
       the install dir (would get wiped by `npm update`), `bin` path convention,
       `build:sea` correctly scoped to repo-clone-only

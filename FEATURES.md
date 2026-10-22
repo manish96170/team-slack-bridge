@@ -119,6 +119,30 @@ Turn off: remove `SLACK_USER_TOKEN` from `.env`.
 
 Remote Slackbot MCP never exposes this.
 
+### DM as user / edit as user
+
+Default: off (requires `SLACK_USER_TOKEN`, and currently blocked live by a missing scope — see
+"Known gaps" below).
+
+Use:
+
+```bash
+node cli/dm.js --user U0123ABC --text "from me" --as-user --json
+node cli/update.js --channel C0123ABC --ts "169…" --text "updated" --as-user --json
+```
+
+MCP: `slack_dm_as_user`, `slack_update_message_as_user` — separate, explicitly named local-only tools
+(never an ambiguous `asUser` boolean on `slack_dm`/`slack_update_message`, same reasoning as "Post as
+user" above). `core/dm.js` caches the opened DM channel per **caller identity**
+(`bot:<userId>`/`user:<userId>`) so a bot-opened DM is never reused for an as-user send.
+
+Turn off: remove `SLACK_USER_TOKEN`. Remote Slackbot MCP never exposes this.
+
+**Known gap:** live `conversations.open` with a user token currently fails `missing_scope` until the
+Slack app's user scopes include `im:write` and the app is reinstalled/re-authorized — the manifest
+template and `get-user-token.js` request it, but that is a manual, one-time owner step not yet done
+(see `USER_TOKEN_DM_SUPPORT_PLAN.md`).
+
 ### DMs
 
 Default: available locally when bot token exists.
@@ -159,6 +183,30 @@ node cli/search.js --query "from:@someone deploy" --json
 ```
 
 Turn off: remove `SLACK_USER_TOKEN`. Remote Slackbot MCP never exposes search.
+
+### List my channels
+
+Default: off unless `SLACK_USER_TOKEN` exists.
+
+Use:
+
+```bash
+node cli/channels.js --json
+node cli/channels.js --types "public_channel,private_channel,mpim,im" --json
+```
+
+MCP: `slack_list_channels` (`core/channels.js`'s `listMyChannels`). Uses Slack's
+`users.conversations`, never `conversations.list` — the former only ever returns conversations the
+*token's own user* already belongs to, so it can't be used to enumerate the whole workspace (PLAN D41).
+`types` defaults to `public_channel,private_channel`; pass `mpim`/`im` explicitly to include group DMs
+and 1:1 DMs. Not auto-paginated — pass the returned `response_metadata.next_cursor` back in as
+`--cursor` for the next page.
+
+Turn off: remove `SLACK_USER_TOKEN`. Remote Slackbot MCP never exposes this.
+
+**Known gap:** requires the user token's `channels:read`/`groups:read`/`im:read`/`mpim:read` scopes,
+which the manifest template and `get-user-token.js` now request but which need a manual
+reinstall/re-authorize to take effect live — same outstanding step as "DM as user" above.
 
 ### Scheduling
 

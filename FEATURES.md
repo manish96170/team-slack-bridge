@@ -34,7 +34,7 @@ node cli/doctor.js --json
 | `SLACK_BOT_TOKEN` | bot posts, DMs, reads, listener, HTTP MCP | required for real Slack calls |
 | `SLACK_APP_TOKEN` | Socket Mode listener | optional |
 | `SLACK_SIGNING_SECRET` | signed HTTP Events API, slash commands, Slackbot MCP | optional until those surfaces are enabled |
-| `SLACK_USER_TOKEN` | local `--as-user` post/DM/edit, local search, `slack_list_channels` | optional |
+| `SLACK_USER_TOKEN` | local `--as-user` post/DM/edit/upload, local search, `slack_list_channels` | optional |
 | `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` | one-time user token OAuth helper | optional |
 
 ## Slack app setup
@@ -53,6 +53,7 @@ channels:history
 channels:read
 chat:write
 commands
+files:write
 groups:history
 groups:read
 im:history
@@ -79,6 +80,7 @@ channels:read
 groups:read
 im:read
 mpim:read
+files:write
 ```
 
 `get-user-token.js`/`npm run get-user-token` requests all of the above. Changing this list
@@ -368,6 +370,27 @@ node cli/progress.js finish --channel "#deploys" --ts "123.456" --label "Deploy"
 Text verbosity follows `outputMode`.
 
 Remote Slackbot MCP does not expose progress mutation.
+
+### File/attachment uploads
+
+Default: available locally when the relevant token has `files:write`.
+
+Use:
+
+```bash
+node cli/upload.js --file-path ./screenshot.png --channel "#deploys" --json
+node cli/upload.js --file-path ./recording.mp4 --channel "#deploys" --thread-ts "123.456" --as-user --title "Before/after" --json
+```
+
+MCP: `slack_upload_file` (bot), `slack_upload_file_as_user` (user token). Uses Slack's
+current `files.getUploadURLExternal` → raw `POST` → `files.completeUploadExternal`
+flow — the old `files.upload` is deprecated. `--thread-ts` shares the upload straight
+into a thread, e.g. evidence under an MR announcement posted by the `slack-bridge`
+skill's push-mr-to-slack workflow.
+
+Turn off: remove `files:write` from the relevant token. Local-only for two reasons —
+the usual token-identity one, and because `filePath` reads an arbitrary local file, a
+primitive that must never be exposed remotely. Remote Slackbot MCP never exposes this.
 
 ### App Home
 

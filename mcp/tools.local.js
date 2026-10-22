@@ -2,14 +2,18 @@
 // `slack_post_as_user` is its own tool, separate from `slack_post` — a
 // capability that can't be granted separately can't be gated separately
 // (§6.2) — and it, `slack_dm`, `slack_dm_as_user`, `slack_update_message_as_user`,
-// `slack_search` and `slack_list_channels` are exactly what mcp/tools.remote.js
-// (built in a later step, §11.2) must NOT import.
+// `slack_search`, `slack_list_channels`, `slack_upload_file` and
+// `slack_upload_file_as_user` are exactly what mcp/tools.remote.js (built in a
+// later step, §11.2) must NOT import. The upload tools additionally read an
+// arbitrary local `filePath` — a remote-exposed version would be a
+// local-file-read primitive, independent of the token-identity reasoning.
 
 import { postToChannel, reply, react, updateMessage, deleteMessage } from '../core/post.js'
 import { dm } from '../core/dm.js'
 import { queryMessages, getThread } from '../core/query.js'
 import { search } from '../core/search.js'
 import { listMyChannels } from '../core/channels.js'
+import { uploadFile } from '../core/files.js'
 import { resolveUser } from '../core/identity.js'
 import { doctor } from '../core/doctor.js'
 import { scheduleMessage, deleteScheduledMessage, listScheduledMessages } from '../core/schedule.js'
@@ -156,6 +160,38 @@ export const tools = {
       "List the Slack conversations the locally authorized user is a member of (not the whole workspace). Requires a locally configured user token. Local only.",
     inputSchema: schemas.slack_list_channels,
     handler: (args, ctx) => listMyChannels({ token: ctx.env.SLACK_USER_TOKEN, types: args.types, limit: args.limit, cursor: args.cursor }),
+  },
+  slack_upload_file: {
+    name: 'slack_upload_file',
+    description:
+      'Upload a local file (e.g. a screenshot or video) as the bot, optionally sharing it straight into a channel/thread. Reads from the local filesystem. Local only.',
+    inputSchema: schemas.slack_upload_file,
+    handler: (args, ctx) =>
+      uploadFile({
+        token: ctx.env.SLACK_BOT_TOKEN,
+        filePath: args.filePath,
+        filename: args.filename,
+        title: args.title,
+        channel: args.channel,
+        threadTs: args.threadTs,
+        dryRun: args.dryRun,
+      }),
+  },
+  slack_upload_file_as_user: {
+    name: 'slack_upload_file_as_user',
+    description:
+      'Upload a local file as the authorized user, optionally sharing it straight into a channel/thread — e.g. attaching screenshots/video evidence under an as-user MR announcement. Requires a locally configured user token. Local only.',
+    inputSchema: schemas.slack_upload_file_as_user,
+    handler: (args, ctx) =>
+      uploadFile({
+        token: ctx.env.SLACK_USER_TOKEN,
+        filePath: args.filePath,
+        filename: args.filename,
+        title: args.title,
+        channel: args.channel,
+        threadTs: args.threadTs,
+        dryRun: args.dryRun,
+      }),
   },
   slack_resolve_user: {
     name: 'slack_resolve_user',

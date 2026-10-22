@@ -153,6 +153,32 @@ export const schemas = {
     required: [],
     additionalProperties: false,
   },
+  slack_upload_file: {
+    type: 'object',
+    properties: {
+      filePath: { type: 'string', description: 'Absolute or cwd-relative path to a local file (e.g. a screenshot or video)' },
+      filename: { type: 'string', description: 'Overrides the uploaded filename; defaults to the basename of filePath' },
+      title: { type: 'string' },
+      channel: { type: 'string', description: 'Channel to share the uploaded file into, e.g. for evidence in an MR announcement thread' },
+      threadTs: { type: 'string' },
+      dryRun: { type: 'boolean' },
+    },
+    required: ['filePath'],
+    additionalProperties: false,
+  },
+  slack_upload_file_as_user: {
+    type: 'object',
+    properties: {
+      filePath: { type: 'string', description: 'Absolute or cwd-relative path to a local file (e.g. a screenshot or video)' },
+      filename: { type: 'string', description: 'Overrides the uploaded filename; defaults to the basename of filePath' },
+      title: { type: 'string' },
+      channel: { type: 'string' },
+      threadTs: { type: 'string' },
+      dryRun: { type: 'boolean' },
+    },
+    required: ['filePath'],
+    additionalProperties: false,
+  },
   slack_resolve_user: {
     type: 'object',
     properties: {

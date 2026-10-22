@@ -43,6 +43,7 @@
         "channels:read",
         "chat:write",
         "commands",
+        "files:write",
         "groups:history",
         "groups:read",
         "im:history",
@@ -58,7 +59,8 @@
         "channels:read",
         "groups:read",
         "im:read",
-        "mpim:read"
+        "mpim:read",
+        "files:write"
       ]
     }
   },

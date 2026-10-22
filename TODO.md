@@ -1,11 +1,20 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D44) and architecture; this file is the scannable done/pending list.
+log (D1–D45) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
 ## Done
 
+- [x] **File/attachment uploads (D45, PLAN.md §17)** — `core/files.js`'s `uploadFile()`
+      on Slack's current 3-step flow (`files.getUploadURLExternal` → raw `POST` of the
+      bytes to a non-`slack.com` URL → `files.completeUploadExternal`, which can share
+      straight into a `channel`/`threadTs`). New `slack_upload_file`/
+      `slack_upload_file_as_user` MCP tools + `cli/upload.js`, local-only for two
+      reasons (token identity AND arbitrary local-file-read). New `files:write` scope
+      added to both bot/user token scopes. The `slack-bridge` skill's push-mr-to-slack
+      workflow gained an optional "attach evidence" step using the same identity that
+      posted the announcement.
 - [x] **Local state file permissions hardened (D44, PLAN.md §16, security audit finding)** —
       `.env` was `0644` on a real machine despite the code writing `{ mode: 0o600 }`;
       `writeFileSync`'s `{ mode }` only applies on creation, not on overwriting an
@@ -72,12 +81,13 @@ log (D1–D44) and architecture; this file is the scannable done/pending list.
 
 ## Pending
 
-- [ ] **Manual Slack app reauthorization needed for D41 + D42 to work live** — `config/slack-app-manifest.
+- [ ] **Manual Slack app reauthorization needed for D41 + D42 + D45 to work live** — `config/slack-app-manifest.
       template.json`'s user scopes and `get-user-token.js`'s `USER_SCOPES` now request `channels:read`,
       `groups:read`, `im:read`, `mpim:read` (D41, `slack_list_channels`), `im:write` (D42, as-user DM/edit),
-      and a backfilled `search:read`. None of this is live until the owner manually updates the installed
-      Slack app's manifest, reinstalls, and re-runs `npm run get-user-token` — see
-      `USER_TOKEN_DM_SUPPORT_PLAN.md` for the remaining checklist (its items 2's manual steps, 3, and 5).
+      `files:write` (D45, upload tools), and a backfilled `search:read`. None of this is live until the
+      owner manually updates the installed Slack app's manifest, reinstalls, and re-runs
+      `npm run get-user-token` — see `USER_TOKEN_DM_SUPPORT_PLAN.md` for the remaining checklist (its items
+      2's manual steps, 3, and 5).
 - [ ] **D43's publish workflow ran twice and failed both times with `E404`** — confirmed
       a real, still-open upstream npm/cli OIDC bug, but the local npm auth token being
       invalid at the same time means the workflow itself (not just the npm bug) is still
@@ -110,7 +120,7 @@ log (D1–D44) and architecture; this file is the scannable done/pending list.
       App Home redesign). `0.1.6` added away mode (D34–D40). `0.1.7` adds
       `slack_list_channels` (D41) and the DM-as-user fix (D42) — live on npm, published
       manually (see D43's publish-workflow note above). `0.1.8` fixes local state file
-      permissions (D44).
+      permissions (D44). `0.1.9` adds file/attachment uploads (D45).
 - [x] Fixed npm-distribution-specific bugs: config cold-start path defaulting inside
       the install dir (would get wiped by `npm update`), `bin` path convention,
       `build:sea` correctly scoped to repo-clone-only

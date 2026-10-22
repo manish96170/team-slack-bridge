@@ -131,6 +131,7 @@ the gap away mode fills (PLAN D34).
    Permissions -> Scopes**, add these **Bot Token Scopes**:
    - `chat:write` — post messages as the bot
    - `im:write` — open/send DMs
+   - `files:write` — upload a screenshot/video as the bot (`cli/upload.js`/`slack_upload_file`)
    - `im:read`, `im:history` — only needed if you're also building DM-reading on top
      of this (e.g. a note-to-self pattern) — without these the bot can send a DM but
      not read what comes back. Skip if you only need outbound posting.
@@ -150,6 +151,8 @@ the gap away mode fills (PLAN D34).
      `slack_list_channels`, "which conversations is this person actually in" (uses
      `users.conversations`, scoped to their own membership — never the whole
      workspace)
+   - `files:write` — upload a screenshot/video as the user (`cli/upload.js --as-user`/
+     `slack_upload_file_as_user`), e.g. evidence attached to an MR announcement
 
    `get-user-token.js`/`npm run get-user-token` requests all of the above in one go.
    **Any scope change here requires reinstalling the app and re-running

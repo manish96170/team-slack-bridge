@@ -56,6 +56,7 @@ Slack (so the two do not drift), what to lift from the working sample next door,
 | D42 | **DM-as-user (`slack_dm_as_user`/`slack_update_message_as_user`) found mid-flight from another session, 2026-10-22 — logged here since it was only tracked in a standalone `USER_TOKEN_DM_SUPPORT_PLAN.md`, not in this decisions log.** Root cause of the original bug: `core/dm.js`'s `resolveDmChannel` opened/cached a DM with the bot token even when sending as the user, and a bot↔recipient DM is not a conversation the human user token owns, so Slack correctly refused it. Fixed by caching `dm_channels` rows per **token identity**, never shared, and by opening the conversation with whichever token is actually about to send. A GPT-5.6 Terra review of this pass caught that the first version of the fix only namespaced by caller *type* (`bot:<userId>`/`user:<userId>`), which still collides if `SLACK_BOT_TOKEN`/`SLACK_USER_TOKEN` is later rotated or re-authorized as a different identity against the same local `TSB_HOME` — the cache key now also includes a truncated SHA-256 fingerprint of the token itself (never the token, never logged, just enough to bust the cache on a token change), covered by a new "rotating `SLACK_USER_TOKEN` busts the cache" test. The two new tools are local-only, same posture as `slack_post_as_user` (D-less, pre-existing) — absent from `mcp/tools.remote.js` by construction, asserted by `test/doctor.test.js`/`test/http.test.js`. **Still blocked on a live scope**: `conversations.open` with a user token needs `im:write`, which neither `config/slack-app-manifest.template.json`'s user scopes nor `get-user-token.js`'s `USER_SCOPES` requested before this pass — both fixed here (also added D41's `channels:read`/`groups:read`/`im:read`/`mpim:read`, and backfilled `search:read`, which the manifest listed but `get-user-token.js` never actually requested — a separate pre-existing gap caught while touching the same scope list). The manifest update, reinstall, and `npm run get-user-token` re-run are manual owner steps and remain undone — see `USER_TOKEN_DM_SUPPORT_PLAN.md` for the remaining checklist | `core/dm.js`, `mcp/tools.local.js`, `config/slack-app-manifest.template.json`, `get-user-token.js`, `USER_TOKEN_DM_SUPPORT_PLAN.md` |
 | D43 | **npm publish runs via GitHub Actions + OIDC Trusted Publishing (`.github/workflows/publish.yml`), triggered only by a pushed `v*` tag — never by a push to `main`** (2026-10-22, on request) — the owner already had a Trusted Publisher registered on npmjs.com for this package, keyed to an exact repo + workflow filename, but that file didn't exist in this repo, so nothing could fire. No `NPM_TOKEN` anywhere; `permissions: id-token: write` is what OIDC Trusted Publishing needs instead. The workflow runs `npm ci`/`npm test` before publishing, verifies the pushed tag's version against `package.json`, and publishes with `--provenance`. Pushing a tag to actually exercise this for the first time is a separate, deliberate owner action, not bundled into this change | §15 (new) |
 | D44 | **Every local state file holding real identity/PII (`slack-config.json`, `accounts.json`, `repos.json`) is now written `0600`, with an explicit `chmodSync` on every write — not just `writeFileSync`'s `{ mode }` option** (2026-10-22, found during a security audit of this repo's MCP server, on request). `{ mode }` only takes effect when `writeFileSync` *creates* a file; it is silently ignored when overwriting one that already exists — so a file that predated this protection (or was ever manually edited) stayed world-readable forever, never self-healing on a later write. `.env` already had the `{ mode: 0o600 }` half of this (D-less, pre-existing) but had the exact same latent gap; `slack-config.json`/`accounts.json`/`repos.json` had neither half. All four now get both: `{ mode: 0o600 }` for the create case, `chmodSync(path, 0o600)` immediately after for the overwrite case. Regression tests assert the actual file mode (`stat().mode & 0o777`) both on first creation and after starting from a `0644` file, skipped on `win32` where POSIX file modes don't apply | `cli/setup.js`, `get-user-token.js`, `core/config-write.js`, `core/accounts.js`, `core/repos.js` |
+| D45 | **File/attachment uploads (`slack_upload_file`/`slack_upload_file_as_user`) use Slack's current 3-step flow, never the deprecated `files.upload`** (2026-10-22, on request — attaching screenshots/video evidence under an MR announcement). `files.getUploadURLExternal` (get a URL + file id) → a plain `POST` of the raw bytes to that URL (a different host than `slack.com`, not a Slack API call, so it goes through `fetch` directly rather than `core/slack.js`'s `callSlack`) → `files.completeUploadExternal`, which can also share the finished upload straight into a `channel_id`/`thread_ts` in the same call. Both tools read an arbitrary local `filePath`, so — independent of the usual token-identity reasoning — they are local-only for a second reason too: a remote-exposed version would be a local-file-read primitive, same posture as every other filesystem-touching capability in this repo. New `files:write` scope added to both bot and user token scopes (manifest + `get-user-token.js`). The push-mr-to-slack skill's workflow gained a new optional step: attach evidence in the announcement's own thread, with the same identity (as-user) that posted it | `core/files.js`, `mcp/tools.local.js`, `cli/upload.js` |
 
 ---
 
@@ -1096,12 +1097,78 @@ chmod 600 ~/.team-slack-bridge/.env ~/.team-slack-bridge/slack-config.json \
 
 ---
 
+## 17. File/attachment uploads (D45, 2026-10-22)
+
+Built on request to support attaching evidence (screenshots, video recordings of UI
+changes) under an MR announcement posted by the push-mr-to-slack skill — the same
+pattern applies to any Slack message that needs a real file attached, not just that one
+workflow.
+
+**Slack's old `files.upload` is deprecated.** The current flow is three calls:
+
+1. `files.getUploadURLExternal({ filename, length })` → `{ upload_url, file_id }`.
+2. A plain `POST` of the raw file bytes to `upload_url` — this is **not** a
+   `slack.com` API call (it's a different host Slack hands back dynamically), so
+   `core/files.js` goes through `fetch` directly here, not `core/slack.js`'s
+   `callSlack` (which is scoped to `https://slack.com/api/*`).
+3. `files.completeUploadExternal({ files: [{ id, title }], channel_id?, thread_ts? })`
+   — finalizes the upload and, if `channel_id`/`thread_ts` are given, shares it straight
+   into that channel/thread in the same call, which is what lets evidence land directly
+   under an MR announcement without a separate "post with attachment" step.
+
+**`core/files.js`'s `uploadFile()`** follows the same shape as every other core
+function: structured `{ ok, error, retryable }` results, no thrown strings, `dryRun`
+support (resolves the request shape — filename, title, destination — without touching
+the filesystem or network), and a token as a parameter rather than ambient state.
+Fails clearly and distinctly for a missing `filePath` (`filePath-required`), a path that
+doesn't exist (`file-not-found`, checked via `statSync` before any network call), and a
+missing token (`no-token`) — in that order, so a dry-run never needs a real file or
+token to preview what would be sent.
+
+**Two MCP tools, same split as every other capability here**: `slack_upload_file` (bot
+token) and `slack_upload_file_as_user` (user token, local only). Both are **local-only
+for two independent reasons**, not just the usual token-identity one — they read an
+arbitrary local `filePath`, so even a bot-token version exposed on a remote/hosted
+profile would be a local-file-read primitive, the same class of risk D23's repo-scoped
+`fs/*` boundary exists to prevent elsewhere in this codebase. Asserted absent from
+`mcp/tools.remote.js` in `test/doctor.test.js`/`test/http.test.js`, same as every other
+local-only tool.
+
+**New scope: `files:write`**, added to both bot and user token scopes
+(`config/slack-app-manifest.template.json`, `get-user-token.js`'s `USER_SCOPES`) — joins
+the same "manual reinstall + re-run `npm run get-user-token`" pending step D41/D42 are
+already blocked on; this doesn't add a new manual step, it piggybacks on the existing
+one.
+
+**CLI**: `cli/upload.js --file-path <path> [--channel …] [--thread-ts …] [--title …]
+[--filename …] [--as-user] [--dry-run] [--json]`, following the existing `--as-user`
+convention (`update.js`, `schedule.js`) rather than a separate `_as_user` command name —
+CLI flags and MCP tool names diverge slightly here on purpose, matching the existing
+split for `slack_update_message`/`cli/update.js --as-user`.
+
+**Tests (`test/files.test.js`)**: missing `filePath` short-circuits before any network
+call; dry-run resolves the request shape without touching the filesystem; a missing
+token is caught *after* a real file is confirmed to exist (so `file-not-found` and
+`no-token` are each reachable on their own); the full 3-step flow is exercised against a
+mocked `fetch` that branches on which of the three distinct URLs was hit; and a failed
+`getUploadURLExternal` is confirmed to short-circuit before the POST or complete step
+ever run.
+
+**`slack-bridge` skill updated** (not shipped in this npm package — a separate local
+skill file) with a new, optional "Attach evidence" step in the push-mr-to-slack
+workflow: upload with the **same identity** that posted the announcement, into the
+announcement's own `channel`/`threadTs`, one file at a time, reporting each result
+before moving to the next.
+
+---
+
 TODO PENDING:
 1. Live-verify Slack webhooks and Slackbot MCP through a public HTTPS tunnel.
 1. Revisit OpenACP / ACP once there is a concrete agent/session orchestrator to connect.
-1. Manually reinstall the updated Slack app manifest (D41's four read scopes, D42's `im:write`, backfilled
-   `search:read`) and re-run `npm run get-user-token` — then live-verify both `slack_list_channels` and the
-   as-user DM/edit flow per `USER_TOKEN_DM_SUPPORT_PLAN.md`.
+1. Manually reinstall the updated Slack app manifest (D41's four read scopes, D42's `im:write`, D45's
+   `files:write`, backfilled `search:read`) and re-run `npm run get-user-token` — then live-verify
+   `slack_list_channels`, the as-user DM/edit flow, and a real `slack_upload_file_as_user` call per
+   `USER_TOKEN_DM_SUPPORT_PLAN.md`.
 1. Re-attempt `.github/workflows/publish.yml` on the next version bump to confirm whether the OIDC `E404`
    was purely the stale local npm session, or whether npm's Trusted Publishing has a real bug independent
    of that (both are plausible per the upstream issue reports; only one real attempt with valid

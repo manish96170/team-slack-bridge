@@ -39,6 +39,8 @@ const forbiddenRemoteToolNames = [
   'slack_schedule_message',
   'slack_search',
   'slack_update_message_as_user',
+  'slack_upload_file',
+  'slack_upload_file_as_user',
 ]
 const signingSecret = 'test-signing-secret'
 

@@ -96,3 +96,10 @@ test('slack_list_channels is local-only (user-token-shaped, same posture as slac
   assert.ok(localTools.slack_list_channels)
   assert.equal(remoteTools.slack_list_channels, undefined)
 })
+
+test('slack_upload_file and slack_upload_file_as_user are local-only (local filesystem access, not just a token distinction)', () => {
+  assert.ok(localTools.slack_upload_file)
+  assert.ok(localTools.slack_upload_file_as_user)
+  assert.equal(remoteTools.slack_upload_file, undefined)
+  assert.equal(remoteTools.slack_upload_file_as_user, undefined)
+})

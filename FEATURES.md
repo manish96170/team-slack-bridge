@@ -107,7 +107,10 @@ After changing scopes or manifest settings, reinstall the Slack app.
 
 ### Bot posting
 
-Default: on when `SLACK_BOT_TOKEN` exists.
+Default: on when `SLACK_BOT_TOKEN` exists, **for the CLI only**. The MCP tools
+`slack_post`/`slack_reply`/`slack_dm` default to **off** since D47 (2026-10-25) — see
+"Post as user (default, as of D47)" below; pass `viaBot:true` to those three tools to
+opt back into this bot-sent behavior.
 
 Use:
 
@@ -118,13 +121,22 @@ node cli/react.js --channel "#deploys" --ts "123.456" --emoji eyes --json
 node cli/react.js --channel "#deploys" --ts "123.456" --emoji eyes --remove --json
 ```
 
-Turn off: remove/withhold `SLACK_BOT_TOKEN`, or avoid using the commands.
+Turn off: remove/withhold `SLACK_BOT_TOKEN`, or avoid using the commands/pass `viaBot`
+only when meant.
 
-### Post as user
+### Post as user (default, as of D47)
 
-Default: off.
+Default (MCP `slack_post`/`slack_reply`/`slack_dm`): **on** — these three tools now
+send with `SLACK_USER_TOKEN` unless called with `viaBot:true`, reversed from the
+original bot-only behavior (PLAN §18/D47). The reason: a bot-token send is not a
+message belonging to its human sender — they can't see it in their own history or
+natively Edit/Delete it in Slack, and on a Bot Token shared across a team it carries no
+indication of who sent it. Sending as the user fixes both by construction (it really is
+their message). The CLI (`cli/post.js` etc., below) is unaffected by this and keeps the
+original bot-default — enable with `--as-user` there as before. This asymmetry between
+CLI and MCP defaults is deliberate, not an oversight: see PLAN §18.
 
-Enable:
+Enable (user-token path, either surface):
 
 ```bash
 npm run get-user-token
@@ -138,14 +150,47 @@ node cli/react.js --channel "#deploys" --ts "123.456" --emoji eyes --as-user --j
 node cli/react.js --channel "#deploys" --ts "123.456" --emoji eyes --as-user --remove --json
 ```
 
-Turn off: remove `SLACK_USER_TOKEN` from `.env`.
+Turn off: remove `SLACK_USER_TOKEN` from `.env` (MCP `slack_post`/`slack_reply`/
+`slack_dm` then fail clearly with `user-token-required-pass-viaBot-true-to-send-as-the-bot-instead`
+rather than silently falling back to the bot).
 
-Remote Slackbot MCP never exposes this.
+Remote Slackbot MCP never exposes this (it has no user-token path at all, by design —
+§11).
+
+When sending `viaBot:true` anyway: refused outright
+(`not-authorized-to-send-as-bot-pass-anonymousMessage-true-to-send-anonymously`) unless
+this install can identify its sender (`owner.slackUserId` configured) OR
+`anonymousMessage` resolves to `true` (D48 — closes the gap where an unconfigured
+install could bot-spam anonymously by accident, not just by declared intent).
+`anonymousMessage` is per-call (`true`/`false` always overrides) but also has a
+per-install default — `"botSend": { "anonymousMessageDefault": true }` in
+`slack-config.json` means `viaBot:true` sends are anonymous unless a caller explicitly
+passes `anonymousMessage:false` for that one call (D49). When it
+does send: the text gets a visible attribution footer —
+`<@U...> (Name, @handle) · memberId: U...` — resolved from `slack-config.json`'s
+`owner` (or `_sender withheld_` instead, if resolved anonymous), and the send is
+journaled to a local `local_audit` SQLite table (`core/local-audit.js`/`core/sender.js`).
+This is the local, trust-the-config-file equivalent of what the remote profile already
+does with a signed identity (§11.3); see PLAN §18/§20 for the full reasoning and its
+limits.
+
+**If the sender is identified, they also get a private tracking copy — even in
+anonymous mode** (`anonymousMessage:true` only hides identity from the recipient, never
+from the sender's own record; D48, PLAN §19). The bot DMs them `"You have sent a DM to
+<@user> via Bot"` / `"...a bot message in #channel via Bot"` as a thread parent, with
+the actual sent text as a single threaded reply underneath — one line per send in their
+own DM history, full content one click away. A bot-token `slack_update_message`/
+`slack_delete_message` on the original propagates there too: edit touches only the
+threaded reply, delete removes the whole tracking DM. Turn this specific piece off
+(keep the attribution/audit, drop the DM) with `"botSendTracking": { "enabled": false }`
+in `slack-config.json` — default is `true`. None of it runs on the as-user path above,
+so that path's latency is unaffected either way.
 
 ### DM as user / edit as user
 
-Default: off (requires `SLACK_USER_TOKEN`, and currently blocked live by a missing scope — see
-"Known gaps" below).
+Default: DM/edit **as user** is now the default for `slack_dm` too (D47, same `viaBot`
+flag as "Post as user" above). Requires `SLACK_USER_TOKEN`, and currently blocked live
+by a missing scope — see "Known gaps" below.
 
 Use:
 
@@ -154,9 +199,13 @@ node cli/dm.js --user U0123ABC --text "from me" --as-user --json
 node cli/update.js --channel C0123ABC --ts "169…" --text "updated" --as-user --json
 ```
 
-MCP: `slack_dm_as_user`, `slack_update_message_as_user` — separate, explicitly named local-only tools
-(never an ambiguous `asUser` boolean on `slack_dm`/`slack_update_message`, same reasoning as "Post as
-user" above). `core/dm.js` caches the opened DM channel per **caller identity**
+MCP: `slack_dm_as_user`, `slack_update_message_as_user` — separate, explicitly named
+local-only tools, same reasoning as "Post as user" above for *editing* an existing
+message (identity there is fixed by whichever token originally posted it, not a
+runtime choice). `slack_dm` itself gained the `viaBot` boolean in D47 specifically to
+flip its *default*, which is a different problem (which identity should a *new* send
+default to) — see PLAN §18 for why that one tool broke the "never an ambiguous
+boolean" rule on purpose. `core/dm.js` caches the opened DM channel per **caller identity**
 (`bot:<userId>`/`user:<userId>`) so a bot-opened DM is never reused for an as-user send.
 
 Turn off: remove `SLACK_USER_TOKEN`. Remote Slackbot MCP never exposes this.

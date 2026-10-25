@@ -23,5 +23,7 @@
     "allowedTools": [],
     "rateLimitPerMinute": 30
   },
-  "remote": { "postableChannels": [], "readableChannels": [] }
+  "remote": { "postableChannels": [], "readableChannels": [] },
+  "botSendTracking": { "enabled": true },
+  "botSend": { "anonymousMessageDefault": false }
 }

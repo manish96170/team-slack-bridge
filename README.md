@@ -98,6 +98,18 @@ the gap away mode fills (PLAN D34).
   identity is shared infrastructure: every user of this tool can point at the same Bot
   Token, since the bot always acts as "the bot," never as a specific person. There's no
   conflict in sharing that token across people.
+- **Because the bot token is shared, `slack_post`/`slack_reply`/`slack_dm` default to
+  sending as the local user, not as the bot (D47).** A bot-sent message is invisible to
+  its own sender (no native Slack message of theirs to see or Edit/Delete) and, on a
+  token shared across a team, carries no indication of who sent it. Pass `viaBot:true`
+  to send as the bot anyway — refused outright unless this install can identify its
+  sender or the caller explicitly passes `anonymousMessage:true` (D48). When it does
+  send, the text gets a visible "sent via bot by `<@user>` · memberId: `U...`" footer
+  (or "sender withheld" if anonymous), the send is journaled to a local `local_audit`
+  table, and — if the sender is identified — they privately receive a threaded DM
+  record of exactly what was sent and to whom, even in anonymous mode, unless
+  `botSendTracking.enabled:false` turns that off. See `FEATURES.md`'s "Post as user"
+  section and `PLAN.md` §18/§19.
 - **The user token (for posting *as* a specific person) is inherently per-person and
   can't be shared, by construction of Slack's own OAuth.** Slack's OAuth flow only ever
   produces a token for whoever personally authorizes it — each person who wants the

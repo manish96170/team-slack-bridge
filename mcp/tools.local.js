@@ -2,11 +2,40 @@
 // User-token tools are separate from their bot equivalents because identity
 // capabilities cannot be silently substituted. `slack_post_as_user`,
 // `slack_react_as_user`, `slack_unreact_as_user`, `slack_dm`,
-// `slack_dm_as_user`, `slack_update_message_as_user`, `slack_search`,
-// `slack_list_channels`, `slack_upload_file`, and `slack_upload_file_as_user`
-// are exactly what mcp/tools.remote.js must NOT import. The upload tools
-// additionally read an arbitrary local `filePath`, which would be a local-file
-// read primitive in a remote profile.
+// `slack_dm_as_user`, `slack_update_message_as_user`,
+// `slack_delete_message_as_user`, `slack_search`, `slack_list_channels`,
+// `slack_upload_file`, and `slack_upload_file_as_user` are exactly what
+// mcp/tools.remote.js must NOT import. The upload tools additionally read
+// an arbitrary local `filePath`, which would be a local-file read primitive
+// in a remote profile.
+//
+// D47: `slack_post`/`slack_reply`/`slack_dm` default to sending AS THE
+// LOCAL USER (`viaBot:false`), not as the bot — reversed from the original
+// bot-only behavior, on request, because a bot-token send is invisible to
+// its own sender (no native Slack message of theirs to see/edit/delete)
+// and carries no indication of who triggered it when a bot token is shared
+// across a team. `viaBot:true` opts back into the bot path explicitly, and
+// gets a `core/sender.js` attribution footer plus a `core/local-audit.js`
+// journal entry — see those files for the reasoning. `slack_post_as_user`/
+// `slack_dm_as_user` remain as explicit aliases for the same (now default)
+// behavior.
+//
+// D48: a `viaBot:true` send from an install that cannot identify its own
+// sender (`core/sender.js`'s `isAuthorizedSender`) is REFUSED unless the
+// caller explicitly passes `anonymousMessage:true` — an unidentified
+// install has no business speaking as "the bot" by accident. When the
+// sender IS identified, they get a private tracking DM of every viaBot
+// send (`core/tracking.js`): a "You have sent ... via Bot" parent message
+// with the actual text as a single threaded reply underneath, kept even
+// when `anonymousMessage:true` hid the attribution from the public
+// message — "withheld from the recipient" and "invisible to the sender"
+// are different things, and this only ever relaxes the first. A
+// bot-token edit/delete on the original propagates to that tracking copy
+// (edit touches only the threaded reply; delete removes the whole tracking
+// DM). All of it can be turned off per install via `botSendTracking.enabled:
+// false` (core/identity.js) for anyone who doesn't want a tracking copy at
+// all; it never runs on the (now default) as-user path, so that path's
+// latency is unaffected.
 
 import { postToChannel, reply, react, unreact, updateMessage, deleteMessage } from '../core/post.js'
 import { dm } from '../core/dm.js'
@@ -21,40 +50,113 @@ import { ask } from '../core/ask.js'
 import { startProgress, updateProgress, finishProgress } from '../core/progress.js'
 import { publishHome } from '../core/home.js'
 import { createAgentSession } from '../core/agent-sessions.js'
+import { getSenderInfo, withSenderAttribution, isAuthorizedSender, resolveAnonymousMessage } from '../core/sender.js'
+import { recordLocalAudit } from '../core/local-audit.js'
+import { isTrackingEnabled, echoBotSendToSender, propagateUpdateToTracking, propagateDeleteToTracking } from '../core/tracking.js'
 import { schemas } from './schema.js'
 
 export const tools = {
   slack_post: {
     name: 'slack_post',
-    description: 'Post a message to a Slack channel as the bot. "@handle" in text is resolved to a real Slack mention against slack-config.json.',
+    description:
+      'Post a message to a Slack channel. Defaults (viaBot:false) to sending as the locally authorized human (SLACK_USER_TOKEN) — a real Slack message of yours, visible to you with native edit/delete. Pass viaBot:true to send as the shared bot instead (SLACK_BOT_TOKEN); refused unless this install can identify its sender OR anonymousMessage:true is passed. A viaBot send gets a "sent via bot by" attribution footer (unless anonymousMessage:true) and is journaled to local_audit; if the sender is identified, they also get a private tracking DM of what was sent and where, unless botSendTracking is disabled. "@handle" in text is resolved to a real Slack mention against slack-config.json.',
     inputSchema: schemas.slack_post,
-    handler: (args, ctx) =>
-      postToChannel({
-        token: ctx.env.SLACK_BOT_TOKEN,
+    handler: async (args, ctx) => {
+      const viaBot = !!args.viaBot
+      const anonymousMessage = resolveAnonymousMessage(args.anonymousMessage, ctx.config)
+      const authorized = isAuthorizedSender(ctx.config)
+      const sender = getSenderInfo(ctx.config)
+
+      if (viaBot && !authorized && !anonymousMessage) {
+        return { ok: false, error: 'not-authorized-to-send-as-bot-pass-anonymousMessage-true-to-send-anonymously', retryable: false }
+      }
+      const token = viaBot ? ctx.env.SLACK_BOT_TOKEN : ctx.env.SLACK_USER_TOKEN
+      if (!token && !args.dryRun) {
+        return { ok: false, error: viaBot ? 'bot-token-required' : 'user-token-required-pass-viaBot-true-to-send-as-the-bot-instead', retryable: false }
+      }
+
+      const text = viaBot ? withSenderAttribution(args.text, ctx.config, { anonymous: anonymousMessage }) : args.text
+      const result = await postToChannel({
+        token,
         channel: args.channel,
-        text: args.text,
+        text,
         threadTs: args.threadTs,
         idempotencyKey: args.idempotencyKey,
         ledgerPath: ctx.dbPath,
         config: ctx.config,
         dryRun: args.dryRun,
-      }),
+      })
+
+      if (viaBot && !args.dryRun) {
+        recordLocalAudit({ dbPath: ctx.dbPath, sender, tool: 'slack_post', viaBot, ok: result.ok, error: result.error, channel: result.channel || args.channel, ts: result.ts })
+        if (result.ok && authorized && isTrackingEnabled(ctx.config)) {
+          await echoBotSendToSender({
+            botToken: ctx.env.SLACK_BOT_TOKEN,
+            dbPath: ctx.dbPath,
+            config: ctx.config,
+            senderId: sender.slackUserId,
+            kind: 'channel',
+            channel: args.channel,
+            text,
+            originalChannel: result.channel,
+            originalTs: result.ts,
+            anonymous: anonymousMessage,
+          }).catch(() => {})
+        }
+      }
+      return result
+    },
   },
   slack_reply: {
     name: 'slack_reply',
-    description: 'Reply in a Slack thread as the bot. "@handle" in text is resolved to a real Slack mention against slack-config.json.',
+    description:
+      'Reply in a Slack thread. Defaults (viaBot:false) to replying as the locally authorized human (SLACK_USER_TOKEN). Pass viaBot:true to reply as the shared bot instead; refused unless this install can identify its sender OR anonymousMessage:true is passed. A viaBot reply carries an attribution footer (unless anonymousMessage:true) and is journaled to local_audit; if the sender is identified, they also get a private tracking DM, unless botSendTracking is disabled. "@handle" in text is resolved to a real Slack mention against slack-config.json.',
     inputSchema: schemas.slack_reply,
-    handler: (args, ctx) =>
-      reply({
-        token: ctx.env.SLACK_BOT_TOKEN,
+    handler: async (args, ctx) => {
+      const viaBot = !!args.viaBot
+      const anonymousMessage = resolveAnonymousMessage(args.anonymousMessage, ctx.config)
+      const authorized = isAuthorizedSender(ctx.config)
+      const sender = getSenderInfo(ctx.config)
+
+      if (viaBot && !authorized && !anonymousMessage) {
+        return { ok: false, error: 'not-authorized-to-send-as-bot-pass-anonymousMessage-true-to-send-anonymously', retryable: false }
+      }
+      const token = viaBot ? ctx.env.SLACK_BOT_TOKEN : ctx.env.SLACK_USER_TOKEN
+      if (!token && !args.dryRun) {
+        return { ok: false, error: viaBot ? 'bot-token-required' : 'user-token-required-pass-viaBot-true-to-send-as-the-bot-instead', retryable: false }
+      }
+
+      const text = viaBot ? withSenderAttribution(args.text, ctx.config, { anonymous: anonymousMessage }) : args.text
+      const result = await reply({
+        token,
         channel: args.channel,
         threadTs: args.threadTs,
-        text: args.text,
+        text,
         idempotencyKey: args.idempotencyKey,
         ledgerPath: ctx.dbPath,
         config: ctx.config,
         dryRun: args.dryRun,
-      }),
+      })
+
+      if (viaBot && !args.dryRun) {
+        recordLocalAudit({ dbPath: ctx.dbPath, sender, tool: 'slack_reply', viaBot, ok: result.ok, error: result.error, channel: result.channel || args.channel, ts: result.ts })
+        if (result.ok && authorized && isTrackingEnabled(ctx.config)) {
+          await echoBotSendToSender({
+            botToken: ctx.env.SLACK_BOT_TOKEN,
+            dbPath: ctx.dbPath,
+            config: ctx.config,
+            senderId: sender.slackUserId,
+            kind: 'channel',
+            channel: `${args.channel} (thread ${args.threadTs})`,
+            text,
+            originalChannel: result.channel,
+            originalTs: result.ts,
+            anonymous: anonymousMessage,
+          }).catch(() => {})
+        }
+      }
+      return result
+    },
   },
   slack_react: {
     name: 'slack_react',
@@ -86,10 +188,10 @@ export const tools = {
   },
   slack_update_message: {
     name: 'slack_update_message',
-    description: 'Edit a message previously posted by this install.',
+    description: 'Edit a message previously posted by this install\'s bot token (e.g. a viaBot:true send). If that send had a tracking copy (core/tracking.js), the threaded reply there is edited to match; the "You have sent..." parent label is left alone.',
     inputSchema: schemas.slack_update_message,
-    handler: (args, ctx) =>
-      updateMessage({
+    handler: async (args, ctx) => {
+      const result = await updateMessage({
         token: ctx.env.SLACK_BOT_TOKEN,
         channel: args.channel,
         ts: args.ts,
@@ -97,7 +199,12 @@ export const tools = {
         ledgerPath: ctx.dbPath,
         config: ctx.config,
         dryRun: args.dryRun,
-      }),
+      })
+      if (result.ok && !args.dryRun) {
+        await propagateUpdateToTracking({ botToken: ctx.env.SLACK_BOT_TOKEN, dbPath: ctx.dbPath, config: ctx.config, channel: args.channel, ts: args.ts, text: args.text }).catch(() => {})
+      }
+      return result
+    },
   },
   slack_update_message_as_user: {
     name: 'slack_update_message_as_user',
@@ -115,17 +222,70 @@ export const tools = {
   },
   slack_delete_message: {
     name: 'slack_delete_message',
-    description: 'Delete a message previously posted by this install.',
+    description:
+      'Delete a message previously posted by this install\'s bot token (e.g. a viaBot:true send). If that send had a tracking copy (core/tracking.js), the whole tracking DM (parent label + threaded reply) is deleted too.',
     inputSchema: schemas.slack_delete_message,
-    handler: (args, ctx) =>
-      deleteMessage({ token: ctx.env.SLACK_BOT_TOKEN, channel: args.channel, ts: args.ts, ledgerPath: ctx.dbPath, dryRun: args.dryRun }),
+    handler: async (args, ctx) => {
+      const result = await deleteMessage({ token: ctx.env.SLACK_BOT_TOKEN, channel: args.channel, ts: args.ts, ledgerPath: ctx.dbPath, dryRun: args.dryRun })
+      if (result.ok && !args.dryRun) {
+        await propagateDeleteToTracking({ botToken: ctx.env.SLACK_BOT_TOKEN, dbPath: ctx.dbPath, channel: args.channel, ts: args.ts }).catch(() => {})
+      }
+      return result
+    },
+  },
+  slack_delete_message_as_user: {
+    name: 'slack_delete_message_as_user',
+    description:
+      'Delete a message previously posted by the locally authorized user. Requires a locally configured user token — this is the one you want for messages sent by the new default (viaBot:false) slack_post/slack_dm behavior.',
+    inputSchema: schemas.slack_delete_message_as_user,
+    handler: (args, ctx) => deleteMessage({ token: ctx.env.SLACK_USER_TOKEN, channel: args.channel, ts: args.ts, dryRun: args.dryRun }),
   },
   slack_dm: {
     name: 'slack_dm',
-    description: 'Send a DM to a user as the bot. Local only.',
+    description:
+      'Send a DM. Defaults (viaBot:false) to sending as the locally authorized human (SLACK_USER_TOKEN + user-token DM scope) so the recipient sees a real DM from you. Pass viaBot:true to send as the shared bot instead; refused unless this install can identify its sender OR anonymousMessage:true is passed. A viaBot DM carries an attribution footer (unless anonymousMessage:true) and is journaled to local_audit; if the sender is identified, they also get a private tracking DM of what was sent and to whom, unless botSendTracking is disabled.',
     inputSchema: schemas.slack_dm,
-    handler: (args, ctx) =>
-      dm({ botToken: ctx.env.SLACK_BOT_TOKEN, userId: args.userId, text: args.text, config: ctx.config, dbPath: ctx.dbPath, dryRun: args.dryRun }),
+    handler: async (args, ctx) => {
+      const viaBot = !!args.viaBot
+      const anonymousMessage = resolveAnonymousMessage(args.anonymousMessage, ctx.config)
+      const authorized = isAuthorizedSender(ctx.config)
+      const sender = getSenderInfo(ctx.config)
+
+      if (viaBot && !authorized && !anonymousMessage) {
+        return { ok: false, error: 'not-authorized-to-send-as-bot-pass-anonymousMessage-true-to-send-anonymously', retryable: false }
+      }
+
+      const text = viaBot ? withSenderAttribution(args.text, ctx.config, { anonymous: anonymousMessage }) : args.text
+      const result = await dm({
+        botToken: ctx.env.SLACK_BOT_TOKEN,
+        userToken: ctx.env.SLACK_USER_TOKEN,
+        userId: args.userId,
+        text,
+        asUser: !viaBot,
+        config: ctx.config,
+        dbPath: ctx.dbPath,
+        dryRun: args.dryRun,
+      })
+
+      if (viaBot && !args.dryRun) {
+        recordLocalAudit({ dbPath: ctx.dbPath, sender, tool: 'slack_dm', viaBot, ok: result.ok, error: result.error, channel: result.channel, ts: result.ts })
+        if (result.ok && authorized && isTrackingEnabled(ctx.config)) {
+          await echoBotSendToSender({
+            botToken: ctx.env.SLACK_BOT_TOKEN,
+            dbPath: ctx.dbPath,
+            config: ctx.config,
+            senderId: sender.slackUserId,
+            kind: 'dm',
+            targetUserId: args.userId,
+            text,
+            originalChannel: result.channel,
+            originalTs: result.ts,
+            anonymous: anonymousMessage,
+          }).catch(() => {})
+        }
+      }
+      return result
+    },
   },
   slack_dm_as_user: {
     name: 'slack_dm_as_user',

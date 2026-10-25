@@ -25,6 +25,16 @@ export const schemas = {
       text: { type: 'string' },
       threadTs: { type: 'string' },
       idempotencyKey: { type: 'string' },
+      viaBot: {
+        type: 'boolean',
+        description:
+          'Default false: send as the locally authorized human (SLACK_USER_TOKEN) so it is a real, editable/deletable Slack message of yours. Set true to send as the shared bot instead (SLACK_BOT_TOKEN) — the text then gets a visible "sent via bot by" attribution footer and is journaled to local_audit.',
+      },
+      anonymousMessage: {
+        type: 'boolean',
+        description:
+          'Only meaningful with viaBot:true. Omit to use this install\'s configured default (slack-config.json\'s botSend.anonymousMessageDefault, false unless set); pass true/false explicitly to override that default for this one call. If this install cannot identify its sender (no owner.slackUserId configured), viaBot:true is REFUSED unless the resolved value is true. If true, the public bot-posted text omits the sender attribution footer — but if the sender IS identified, they still privately receive a tracking DM of what was sent and to whom (unless botSendTracking.enabled is false).',
+      },
       dryRun: { type: 'boolean' },
     },
     required: ['channel', 'text'],
@@ -37,6 +47,15 @@ export const schemas = {
       threadTs: { type: 'string' },
       text: { type: 'string' },
       idempotencyKey: { type: 'string' },
+      viaBot: {
+        type: 'boolean',
+        description:
+          'Default false: reply as the locally authorized human (SLACK_USER_TOKEN). Set true to reply as the shared bot instead — carries an attribution footer and is journaled to local_audit.',
+      },
+      anonymousMessage: {
+        type: 'boolean',
+        description: 'Same as slack_post\'s anonymousMessage (including the config-default fallback) — only meaningful with viaBot:true.',
+      },
       dryRun: { type: 'boolean' },
     },
     required: ['channel', 'threadTs', 'text'],
@@ -118,11 +137,30 @@ export const schemas = {
     required: ['channel', 'ts'],
     additionalProperties: false,
   },
+  slack_delete_message_as_user: {
+    type: 'object',
+    properties: {
+      channel: { type: 'string' },
+      ts: { type: 'string' },
+      dryRun: { type: 'boolean' },
+    },
+    required: ['channel', 'ts'],
+    additionalProperties: false,
+  },
   slack_dm: {
     type: 'object',
     properties: {
       userId: { type: 'string' },
       text: { type: 'string' },
+      viaBot: {
+        type: 'boolean',
+        description:
+          'Default false: DM as the locally authorized human (SLACK_USER_TOKEN + user-token DM scope). Set true to DM as the shared bot instead — carries an attribution footer and is journaled to local_audit.',
+      },
+      anonymousMessage: {
+        type: 'boolean',
+        description: 'Same as slack_post\'s anonymousMessage (including the config-default fallback) — only meaningful with viaBot:true.',
+      },
       dryRun: { type: 'boolean' },
     },
     required: ['userId', 'text'],

@@ -37,6 +37,14 @@ export function loadConfig(path) {
       slackbotMcp: normalizeSlackbotMcp(),
       remote: { postableChannels: [], readableChannels: [] },
       localMcpDaemon: { enabled: false, port: 8918, accountMode: 'single' },
+      // D48 — on by default; the echo-DM-with-thread-reply tracking that
+      // lets an authorized sender see what a viaBot send actually said.
+      botSendTracking: { enabled: true },
+      // D49 — per-install default for anonymousMessage, so an install that
+      // always wants viaBot sends anonymous doesn't need every caller to
+      // remember to pass the flag. Off by default: an explicit per-call
+      // `anonymousMessage` (true OR false) always overrides this.
+      botSend: { anonymousMessageDefault: false },
     }
   }
   const raw = JSON.parse(readFileSync(path, 'utf8'))
@@ -113,6 +121,12 @@ export function loadConfig(path) {
       enabled: !!raw.localMcpDaemon?.enabled,
       port: raw.localMcpDaemon?.port || 8918,
       accountMode: raw.localMcpDaemon?.accountMode === 'multi' ? 'multi' : 'single',
+    },
+    botSendTracking: {
+      enabled: raw.botSendTracking?.enabled !== false,
+    },
+    botSend: {
+      anonymousMessageDefault: !!raw.botSend?.anonymousMessageDefault,
     },
   }
 }

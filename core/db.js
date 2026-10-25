@@ -76,10 +76,36 @@ export function getDb(path) {
       channel TEXT,
       ts TEXT
     );
+    CREATE TABLE IF NOT EXISTS local_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT NOT NULL,
+      sender_user_id TEXT,
+      sender_handle TEXT,
+      sender_name TEXT,
+      tool TEXT NOT NULL,
+      via_bot INTEGER NOT NULL,
+      ok INTEGER NOT NULL,
+      error TEXT,
+      channel TEXT,
+      ts TEXT
+    );
+    CREATE TABLE IF NOT EXISTS bot_send_tracking (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT NOT NULL,
+      sender_user_id TEXT NOT NULL,
+      original_channel TEXT NOT NULL,
+      original_ts TEXT NOT NULL,
+      tracking_channel TEXT NOT NULL,
+      tracking_parent_ts TEXT NOT NULL,
+      tracking_reply_ts TEXT,
+      anonymous INTEGER NOT NULL DEFAULT 0
+    );
     CREATE INDEX IF NOT EXISTS idx_asks_thread_pending ON asks(channel, thread_ts, status);
     CREATE INDEX IF NOT EXISTS idx_ledger_status ON ledger(status);
     CREATE INDEX IF NOT EXISTS idx_agent_sessions_slack_thread ON agent_sessions(slack_channel, slack_thread_ts);
     CREATE INDEX IF NOT EXISTS idx_remote_audit_principal ON remote_audit(principal_user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_local_audit_sender ON local_audit(sender_user_id, created_at);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_send_tracking_original ON bot_send_tracking(original_channel, original_ts);
   `)
   dbCache.set(path, db)
   return db

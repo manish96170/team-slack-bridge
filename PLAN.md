@@ -58,6 +58,9 @@ Slack (so the two do not drift), what to lift from the working sample next door,
 | D44 | **Every local state file holding real identity/PII (`slack-config.json`, `accounts.json`, `repos.json`) is now written `0600`, with an explicit `chmodSync` on every write — not just `writeFileSync`'s `{ mode }` option** (2026-10-22, found during a security audit of this repo's MCP server, on request). `{ mode }` only takes effect when `writeFileSync` *creates* a file; it is silently ignored when overwriting one that already exists — so a file that predated this protection (or was ever manually edited) stayed world-readable forever, never self-healing on a later write. `.env` already had the `{ mode: 0o600 }` half of this (D-less, pre-existing) but had the exact same latent gap; `slack-config.json`/`accounts.json`/`repos.json` had neither half. All four now get both: `{ mode: 0o600 }` for the create case, `chmodSync(path, 0o600)` immediately after for the overwrite case. Regression tests assert the actual file mode (`stat().mode & 0o777`) both on first creation and after starting from a `0644` file, skipped on `win32` where POSIX file modes don't apply | `cli/setup.js`, `get-user-token.js`, `core/config-write.js`, `core/accounts.js`, `core/repos.js` |
 | D45 | **File/attachment uploads (`slack_upload_file`/`slack_upload_file_as_user`) use Slack's current 3-step flow, never the deprecated `files.upload`** (2026-10-22, on request — attaching screenshots/video evidence under an MR announcement). `files.getUploadURLExternal` (get a URL + file id) → a plain `POST` of the raw bytes to that URL (a different host than `slack.com`, not a Slack API call, so it goes through `fetch` directly rather than `core/slack.js`'s `callSlack`) → `files.completeUploadExternal`, which can also share the finished upload straight into a `channel_id`/`thread_ts` in the same call. Both tools read an arbitrary local `filePath`, so — independent of the usual token-identity reasoning — they are local-only for a second reason too: a remote-exposed version would be a local-file-read primitive, same posture as every other filesystem-touching capability in this repo. New `files:write` scope added to both bot and user token scopes (manifest + `get-user-token.js`). The push-mr-to-slack skill's workflow gained a new optional step: attach evidence in the announcement's own thread, with the same identity (as-user) that posted it | `core/files.js`, `mcp/tools.local.js`, `cli/upload.js` |
 | D46 | **Reaction removal (`unreact`/`reactions.remove`) and as-user reactions (`slack_react_as_user`/`slack_unreact_as_user`) added, for automatic merge/approval reactions** (2026-10-22, on request). `core/post.js`'s `unreact()` mirrors `react()` exactly — same guard clauses, same dry-run shape, just `reactions.remove` instead of `reactions.add`. `slack_unreact` (bot) joins `slack_react` in **both** registries — bot reactions were already remote-safe (D20's original 9-tool list), so this is the same posture, not a new exception; the remote tool count is now 10, every "9-tool" reference updated to match (`listen/mcp-http.js`, `FEATURES.md`, `test/mcp-http-daemon.test.js`). `slack_react_as_user`/`slack_unreact_as_user` are local-only, same reasoning as every other `_as_user` tool. **Caught before commit**: the new as-user reaction tools needed `reactions:write` on the **user** token scopes too — the manifest/`get-user-token.js` only had it on the bot side (reactions were bot-only until this change), so it was missing entirely from the user scope list. Added, joining the same pending manual-reinstall step every other scope addition this session is already blocked on | `core/post.js`, `mcp/tools.local.js`, `mcp/tools.remote.js`, `cli/react.js` |
+| D47 | **`slack_post`/`slack_reply`/`slack_dm` default flipped to send AS THE LOCAL USER (`viaBot:false`), plus a local attribution-and-audit path for the bot send** (2026-10-25, on request — multiple developers run this install locally against the same shared Bot Token, and a bot-sent message is invisible to its own sender and untraceable to everyone else). Two independent problems, two fixes: (1) a bot-token send is not a Slack message belonging to the human who triggered it, so they can't see/edit/delete it natively — fixed by making `viaBot:false` (the new default) send with `SLACK_USER_TOKEN` instead, identical to the pre-existing `_as_user` tools, so the message really is theirs. (2) when a bot-token send genuinely is wanted (`viaBot:true`), it still carries no Slack-native sender identity on a shared token — fixed by `core/sender.js`'s `withSenderAttribution`, which appends a visible `<@mention> (name, @handle) · memberId: U...` footer resolved from `slack-config.json`'s `owner`, and by `core/local-audit.js`'s `local_audit` SQLite table (mirrors `remote_audit`'s shape), journaled on every `viaBot:true` send. The `memberId:` text is deliberately plain, not just mention markup, so a *different* session reading the message back via `slack_query_messages`/`slack_get_thread` can parse it straight into `slack_dm`/`slack_resolve_user` without guessing. `slack_delete_message_as_user` added for symmetry — without it there was no way to delete a message sent by the new as-user default. `slack_post_as_user`/`slack_dm_as_user` are unchanged and now describe the same behavior the bare tools default to; kept for explicitness. Remote (`mcp/tools.remote.js`) already had this exact pattern (§11.3) — this is porting the same idea to the local stdio/HTTP-daemon registry, not inventing a new one | `core/sender.js`, `core/local-audit.js`, `core/db.js`, `mcp/schema.js`, `mcp/tools.local.js` |
+| D48 | **`viaBot:true` refused from an unidentified sender unless `anonymousMessage:true`; an identified sender gets a private threaded tracking DM of every `viaBot:true` send** (2026-10-25, on request). Closes a gap D47 left open: D47 made `viaBot:true` degrade gracefully with a "no owner configured" footer when a sender couldn't be identified, which is a courteous default for an honest mistake but does nothing to stop a deliberately-unconfigured install from bot-spamming at will. Now `isAuthorizedSender(config)` (owner.slackUserId set) gates the whole `viaBot:true` path on `slack_post`/`slack_reply`/`slack_dm`: unidentified **and** not explicitly `anonymousMessage:true` → refused with `not-authorized-to-send-as-bot-pass-anonymousMessage-true-to-send-anonymously`, forcing a deliberate opt-in to anonymity rather than falling into it by omission. Separately, `anonymousMessage:true` controls only what the **public** message says — it strips `withSenderAttribution`'s identity down to "sender withheld" — and does **not** suppress the sender's own private copy: `core/tracking.js`'s `echoBotSendToSender` DMs the identified sender "You have sent `<a DM to @user / a bot message in #channel>` via Bot" as a thread parent, then the real sent text (attribution included or not, matching what the recipient actually saw) as a single threaded reply underneath — "withheld from the recipient" and "invisible to the sender" are different things, and this only ever relaxes the first, consistent with the request that an authorized sender can "at least see what is sent to whom" even when sending anonymously. The thread-not-flat-DM shape is deliberate: it keeps a sender's own history with the bot to one line per send ("You have sent...") with full content one click away, rather than every bot send cluttering their DM flatly. A new `bot_send_tracking` table (`core/db.js`) maps the original (channel, ts) to the tracking DM's (channel, parent ts, reply ts); `slack_update_message`/`slack_delete_message` (bot-token tools) now look that mapping up and propagate — update edits only the threaded reply (the "You have sent..." label describes the send, not its current text, so it's left alone), delete removes the whole tracking DM (parent + reply) and drops the row. All of it is opt-out per install via `botSendTracking.enabled:false` (new config key, `core/identity.js`, defaults `true`), and never runs on the (still default) as-user path, so that path's latency is unchanged — the two extra Slack calls this adds only happen on the already-exceptional `viaBot:true` branch, and are best-effort (wrapped in `.catch`) so a tracking failure never fails the real send/edit/delete it's attached to | `core/sender.js`, `core/tracking.js`, `core/db.js`, `core/identity.js`, `mcp/schema.js`, `mcp/tools.local.js`, `config/slack-config.example.json` |
+| D49 | **`anonymousMessage` gained a per-install config default (`botSend.anonymousMessageDefault`, off unless set), not just a per-call argument** (2026-10-25, on request — caught immediately after D48 shipped: requiring every caller to remember to pass `anonymousMessage:true` on every single call is exactly the kind of easy-to-forget flag D47/D48 were trying to get away from). `core/sender.js`'s `resolveAnonymousMessage(argValue, config)` is the one place this is decided: an explicit per-call value — `true` **or** `false` — always wins; only an omitted/`undefined` argument falls back to `config.botSend.anonymousMessageDefault`. The `false` case matters as much as the `true` one: an install that sets `anonymousMessageDefault:true` (always anonymous) still needs a caller to be able to say "no, attribute this one" with `anonymousMessage:false`, and the override has to be unambiguous — `arg ?? config-default` would get this backward for `false` (since `false ?? x` is `false`, that part's fine, but naively treating "falsy" as "use the default" would silently ignore an explicit `false`), hence the explicit `typeof argValue === 'boolean'` check rather than a nullish-coalesce shortcut. Every call site (`slack_post`/`slack_reply`/`slack_dm`'s `viaBot:true` branch) now resolves through this function instead of `!!args.anonymousMessage`, so the config default also feeds the D48 authorization gate — an install can set `anonymousMessageDefault:true` specifically to let an otherwise-unidentified install send anonymously by default, with no per-call flag required | `core/sender.js`, `core/identity.js`, `mcp/tools.local.js`, `mcp/schema.js`, `config/slack-config.example.json` |
 
 ---
 
@@ -1165,6 +1168,170 @@ before moving to the next.
 
 ---
 
+## 18. Default-to-user-send + local attribution/audit (D47, 2026-10-25)
+
+Reported by a developer running this install locally, pointed at a Bot Token shared
+across the team ("Eng Team Dashboard"): bot-sent messages weren't visible to/editable
+by the person who triggered them, and nothing in the message said *who* that was — on
+a shared bot token, that's an unaccountable-spam vector, not just a UX gap.
+
+**Two independent fixes, matching the two independent problems:**
+
+1. **The sender couldn't see or natively edit/delete their own send.** A bot-token
+   `chat.postMessage` is not a Slack message belonging to the triggering human — Slack
+   has no concept of "the bot posted this for Manish." Fix: `slack_post`/`slack_reply`/
+   `slack_dm` now default to **`viaBot:false`**, which sends with `SLACK_USER_TOKEN`
+   instead of `SLACK_BOT_TOKEN` — the exact same path the pre-existing `_as_user` tools
+   already used. The message is now really theirs: visible in their own history, with
+   Slack's native Edit/Delete. `viaBot:true` opts back into the bot path explicitly.
+   `slack_delete_message_as_user` was added alongside this — without it there was no
+   way to delete a message the new default just sent.
+
+2. **A bot-sent message (now opt-in via `viaBot:true`) still carries no sender
+   identity on a token shared by multiple people.** Fix: `core/sender.js`'s
+   `withSenderAttribution(text, config)` appends a visible, machine-parseable footer —
+   `<@U...> (Name, @handle) · memberId: U...` — resolved from `slack-config.json`'s
+   `owner` (cross-referenced against `users` for the display name/handle). The
+   `memberId:` segment is deliberately plain text, not just `<@...>` mention markup, so
+   a *different* session reading the message back (`slack_query_messages`/
+   `slack_get_thread`) can extract the ID without depending on mention-rendering, then
+   feed it straight into `slack_resolve_user`/`slack_dm` to reach that person. Every
+   `viaBot:true` send is also journaled to a new `local_audit` SQLite table
+   (`core/local-audit.js`, same shape as `core/remote-audit.js`'s `remote_audit`:
+   sender id/handle/name, tool, ok/error, channel, ts, timestamp) — a local answer to
+   the same question §11.3 already answered for the hosted profile ("attribution on
+   every message" + "an audit log of every action with the principal that caused it"),
+   just without an authenticated remote principal to key it on.
+
+**Deliberately not done:** this does **not** add per-caller auth or rate-limiting —
+there is still no way for a local stdio install to cryptographically distinguish *which*
+developer's machine sent a `viaBot:true` message beyond trusting that install's own
+`slack-config.json`. If the real requirement is "many people, one bot, can't trust each
+install's own config," that is exactly what §11's remote/HTTP profile (`mcp/http.js` +
+`mcp/tools.remote.js`) already solves with signed Slack-identity auth and a per-principal
+quota — this change is the cheap local mitigation, not a replacement for standing that up
+when the trust boundary actually crosses machines.
+
+**Tests (`test/sender-attribution.test.js`)**: `getSenderInfo`/`withSenderAttribution`
+resolve correctly (and degrade without a configured owner); `local_audit` round-trips
+through a temp SQLite file; `slack_post`/`slack_dm` refuse clearly (not silently) when
+the token their new default needs is missing; `viaBot:true` dry-runs confirm the
+attribution footer and that a dry run never writes to `local_audit`; and
+`slack_delete_message_as_user` is exercised for the missing-token case.
+
+---
+
+## 19. Authorization gate on `viaBot:true` + threaded sender tracking (D48, 2026-10-25)
+
+Builds directly on D47 above and lives in the same test file. Reported as the natural
+next question once D47 shipped: D47's attribution footer degraded gracefully for an
+unidentified sender (just said so in the footer), which is fine for an honest
+misconfiguration but does nothing to *stop* a deliberately-unconfigured install from
+sending anonymous bot spam — it only labeled it as anonymous after the fact.
+
+**The gate**: `core/sender.js`'s `isAuthorizedSender(config)` is `true` iff
+`owner.slackUserId` is configured. `slack_post`/`slack_reply`/`slack_dm` now check this
+before doing anything else on the `viaBot:true` path: unidentified and no explicit
+`anonymousMessage:true` → refused, `not-authorized-to-send-as-bot-pass-anonymousMessage-true-to-send-anonymously`.
+Identified, or explicitly anonymous → proceeds. This is a config-trusting check, same
+honesty-dependent posture as the rest of D47/§18 — it stops an *accidental* anonymous
+bot send, not a deliberately falsified `slack-config.json`. If the real requirement is
+"can't trust the config file," that is §11's remote profile's job (signed Slack identity
+auth), not this one's.
+
+**`anonymousMessage` only controls the public-facing text, never the private tracking
+copy.** This was the one subtlety worth getting right: "withheld from the recipient" and
+"invisible to the sender" are two different promises, and conflating them would mean an
+identified sender loses their own record the moment they ask for anonymity toward a
+*recipient*. So `withSenderAttribution(text, config, { anonymous })` strips identity from
+what the recipient/channel sees, but `core/tracking.js`'s `echoBotSendToSender` still
+fires whenever the sender is identified (`isAuthorizedSender`) — it sends them exactly
+what went out, attribution included or not, as their own private copy.
+
+**The tracking shape, and why threaded rather than flat:**
+
+1. A DM to the sender: `"You have sent a DM to <@user> via Bot"` or
+   `"You have sent a bot message in #channel via Bot"` — this is the thread **parent**.
+2. The actual sent text (whatever the recipient/channel actually received, attribution
+   footer included) as a single threaded **reply** underneath it.
+
+Flat (every bot send as its own top-level DM) would make a sender's own history with the
+bot one line of noise per send with no way to tell them apart at a glance. Threaded
+keeps the DM list to one line per send ("You have sent...") with the actual content one
+click away — this was an explicit, deliberate request, not an incidental choice.
+
+**Tracking is itself trackable, for edit/delete.** `core/db.js`'s new `bot_send_tracking`
+table maps `(original_channel, original_ts)` → `(tracking_channel, tracking_parent_ts,
+tracking_reply_ts)`. `slack_update_message`/`slack_delete_message` (the bot-token tools)
+look this up after a successful Slack call and propagate:
+
+- **Update** touches only the threaded reply (`propagateUpdateToTracking`) — the parent
+  "You have sent..." label describes the *act* of sending, not the current text, so it
+  stays as posted.
+- **Delete** removes the **whole** tracking DM, parent and reply both
+  (`propagateDeleteToTracking`), then drops the `bot_send_tracking` row — there is no
+  reason to keep "You have sent..." around once the thing it refers to no longer exists.
+
+**Performance**: zero cost on the (already default, per D47) as-user path — none of this
+code runs there. On `viaBot:true`, it adds up to two extra Slack API calls (open/post the
+tracking DM, then the threaded reply) plus a trivial local SQLite write, and all of it is
+best-effort — wrapped in `.catch` at the call site in `mcp/tools.local.js` — so a tracking
+failure (DM scope missing, network hiccup, whatever) never fails the real send/edit/delete
+it's attached to. The already-sent message, or the already-applied edit/delete, stands
+regardless.
+
+**Opt-out**: `botSendTracking.enabled: false` in `slack-config.json` (new key,
+`core/identity.js`, defaults `true`) turns the whole tracking mechanism off for an install
+that doesn't want a tracking copy at all — `viaBot:true` then behaves exactly like D47 left
+it (attribution footer, `local_audit` journal, no DM).
+
+**Tests (`test/sender-attribution.test.js`, same file as D47)**: the authorization gate
+refuses an unidentified `viaBot:true` sender and accepts one with `anonymousMessage:true`;
+`anonymousMessage:true` strips identity from the public text even when the sender IS
+identified; `isAuthorizedSender`/`isTrackingEnabled` resolve correctly on their own;
+`echoBotSendToSender` is exercised dry-run and for its own missing-token/missing-sender
+guards; `bot_send_tracking` round-trips through `recordBotSendTracking`/
+`findBotSendTracking`/`removeBotSendTracking`; and `propagateUpdateToTracking`/
+`propagateDeleteToTracking` are each exercised both with no tracking row (no-op) and with
+one present (reaches the real Slack call, confirmed by its own no-token guard firing, and
+— for delete — confirmed the row is dropped even when the underlying Slack calls fail,
+since there is nothing further this install can do about a tracking copy it has no token
+to reach).
+
+---
+
+## 20. `anonymousMessage` config default (D49, 2026-10-25)
+
+Immediate follow-up to §19/D48: requiring every single `viaBot:true` call to remember
+`anonymousMessage:true` just moves the "easy to forget" problem D47/D48 were fixing onto
+a different flag. `core/sender.js`'s `resolveAnonymousMessage(argValue, config)` is the
+one place this resolves: an explicit per-call `true` or `false` always wins; an
+omitted/`undefined` argument falls back to `slack-config.json`'s new
+`botSend.anonymousMessageDefault` (off unless set, `core/identity.js`).
+
+**Why `false` needed to be a real override, not just "falsy means use the default":** an
+install with `anonymousMessageDefault:true` still needs a caller able to say "attribute
+this particular one" — so the resolver checks `typeof argValue === 'boolean'`, not
+truthiness, before falling back to config. A naive `argValue ?? config-default` happens
+to get the `false` case right too (`false ?? x` is `false`), but the explicit `typeof`
+check is there so that stays true on purpose rather than by accident of how `??` works,
+and so a future refactor that swaps the operator doesn't quietly break the override.
+
+Every `viaBot:true` call site (`slack_post`/`slack_reply`/`slack_dm`) now resolves
+through this function instead of `!!args.anonymousMessage`, which also means the config
+default feeds §19's authorization gate — an install can set
+`anonymousMessageDefault:true` specifically so an otherwise-unidentified install can send
+anonymously by default, with no per-call flag required at all.
+
+**Tests (`test/sender-attribution.test.js`, same file)**: `resolveAnonymousMessage`
+directly, for both the explicit-override and config-fallback cases; `slack_post` honoring
+an install-wide `anonymousMessageDefault:true` with no per-call argument; an explicit
+`anonymousMessage:false` overriding that same install-wide default; and an unidentified
+install's `viaBot:true` send passing the §19 authorization gate purely off the config
+default, with no `anonymousMessage` argument at all.
+
+---
+
 TODO PENDING:
 1. Live-verify Slack webhooks and Slackbot MCP through a public HTTPS tunnel.
 1. Revisit OpenACP / ACP once there is a concrete agent/session orchestrator to connect.
@@ -1173,6 +1340,15 @@ TODO PENDING:
    `npm run get-user-token` — then live-verify `slack_list_channels`, the as-user DM/edit flow, a real
    `slack_upload_file_as_user` call, and `slack_react_as_user`/`slack_unreact_as_user` per
    `USER_TOKEN_DM_SUPPORT_PLAN.md`.
+1. **D47's new default (`viaBot:false`) needs `SLACK_USER_TOKEN` configured on every developer's
+   machine to work at all** — anyone who hasn't run `get-user-token.js` yet will see `slack_post`/
+   `slack_dm` start failing with `user-token-required-pass-viaBot-true-to-send-as-the-bot-instead`
+   where they used to silently succeed as the bot. This is intentional (that is the whole point) but
+   is a real rollout step, not just a code change — every existing install needs the one-time user-token
+   setup before upgrading, or needs to pass `viaBot:true` explicitly until they do.
+1. **D48's tracking DM needs `im:write`/`chat:write` on the BOT token** (already present in the
+   baseline bot scopes) **and relies on the sender's own `owner.slackUserId` being DMable by the
+   bot** — never live-verified against a real workspace; only unit-tested against fake tokens so far.
 1. Re-attempt `.github/workflows/publish.yml` on the next version bump to confirm whether the OIDC `E404`
    was purely the stale local npm session, or whether npm's Trusted Publishing has a real bug independent
    of that (both are plausible per the upstream issue reports; only one real attempt with valid

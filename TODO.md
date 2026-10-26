@@ -1,11 +1,24 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D58) and architecture; this file is the scannable done/pending list.
+log (D1–D60) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
 ## Done
 
+- [x] **`slack_react`/`slack_unreact`/`slack_update_message`/`slack_delete_message`
+      default to the local user, not the bot; `slack_lookup_user` too (D60)** —
+      same `viaBot:false`-by-default pattern D47 already used for
+      `slack_post`/`slack_reply`/`slack_dm`, extended on request. `viaBot:true`
+      opts back into the bot token; the `_as_user` tools remain as explicit
+      aliases for the now-default behavior. Deliberately not extended to the
+      standalone CLI (`cli/react.js`/`cli/update.js`/`cli/delete.js`/
+      `cli/lookup-user.js` keep `--as-user` meaning "switch to the human, bot is
+      the default") — mirrors D47's own CLI/MCP asymmetry rather than inventing
+      a second one. `mcp/tools.remote.js` untouched (D20: no user tokens exist
+      remotely at all). 11 new tests (`test/viabot-defaults.test.js`), 2 existing
+      `slack_lookup_user` default-isolation tests flipped to match. Full suite:
+      341/341.
 - [x] **D41 + D42 + D45 + D46's user-token scopes confirmed live** (`channels:read`/
       `groups:read`/`im:read`/`mpim:read`, `im:write`, `files:write`,
       `reactions:write`, `search:read`) — the manual Slack app reauthorization this

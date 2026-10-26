@@ -74,11 +74,14 @@ For the feature matrix and exact on/off switches, see `FEATURES.md`.
 | Attribution footer on a bot-sent message | **On** — `<@you> · memberId:U...` | `anonymousMessage:true` → "sender withheld" | D48 |
 | Private tracking DM to the sender of a bot send | **On** — even in anonymous mode | `botSendTracking.enabled:false` | D48 |
 | `anonymousMessage` without a per-call argument | Falls back to config | `botSend.anonymousMessageDefault` | D49 |
-| `slack_lookup_user` — live directory lookup | Bot token | `tokenSource:"user"` | D50/D51 |
+| `slack_react` / `slack_unreact` (MCP) | **As you** (`SLACK_USER_TOKEN`) | `viaBot:true` | D60 |
+| `slack_update_message` / `slack_delete_message` (MCP) | **As you** (`SLACK_USER_TOKEN`) | `viaBot:true` | D60 |
+| `slack_lookup_user` — live directory lookup | **As you** (`SLACK_USER_TOKEN`) | `tokenSource:"bot"` | D50/D51/D60 |
 | Email in a `slack_lookup_user` result | **Hidden** | `includeEmail:true` | D50 |
 | `slack_resolve_user` display-name matching | **On** — fallback after name/handle/ID | configure `displayName` per user | D55 |
 | Remote/hosted `slackbotMcp` multi-tenancy | **Off** (`"single"`, one deployment = one workspace) | `slackbotMcp.tenancy.mode: "multi"` + `cli/tenants.js add` | D53/D54 |
-| CLI post-as identity (`cli/post.js` etc.) | **The bot**, unchanged | `--as-user` | pre-existing, see "Scope note" |
+| CLI post-as identity (`cli/post.js`, `cli/react.js`, `cli/lookup-user.js`, etc.) | **The bot**, unchanged | `--as-user` | pre-existing, see "Scope note" — deliberately NOT flipped alongside D47/D60, see note there |
+| Remote/hosted `mcp/tools.remote.js` (`slack_post`, `slack_react`, `slack_update_message`, etc.) | **Always the bot** — no user tokens exist remotely at all | not configurable, by design | D20 |
 
 ```
 slack_post / slack_reply / slack_dm  (MCP tools)
@@ -155,14 +158,25 @@ the gap away mode fills (PLAN D34).
   work together. Full reasoning: `FEATURES.md`'s "Post as user" section and `PLAN.md`
   §18-§20.
 - **`slack_lookup_user` resolves anyone in the workspace live, via an explicit
-  `tokenSource:"bot"|"user"` (default `"bot"`) — never a silent fallback between the
-  two (D50-D51).** Separate from `slack_resolve_user`, which stays config-file-only and
-  untouched. Ambiguous handle/name matches are refused with every match listed, never
-  guessed; email is hidden from the result unless `includeEmail:true`; and it's
-  local-only regardless of which token is used, same posture as
-  `slack_list_channels`/`slack_search`, since an unrestricted directory search is a
-  workspace-enumeration primitive. See `FEATURES.md`'s "Live directory lookup" section
-  and `PLAN.md` §21/D51.
+  `tokenSource:"bot"|"user"` (default `"user"`, flipped by D60 for the same reason as
+  D47 above) — never a silent fallback between the two (D50/D51/D60).** Separate from
+  `slack_resolve_user`, which stays config-file-only and untouched. Ambiguous
+  handle/name matches are refused with every match listed, never guessed; email is
+  hidden from the result unless `includeEmail:true`; and it's local-only regardless of
+  which token is used, same posture as `slack_list_channels`/`slack_search`, since an
+  unrestricted directory search is a workspace-enumeration primitive. See
+  `FEATURES.md`'s "Live directory lookup" section and `PLAN.md` §21/D51/D60.
+- **`slack_react`/`slack_unreact`/`slack_update_message`/`slack_delete_message` also
+  default to the local user, not the bot (D60)** — same `viaBot` flag and reasoning as
+  D47 above, extended to reactions and edits/deletes once post/reply/dm already
+  defaulted that way. `slack_react_as_user`/`slack_unreact_as_user`/
+  `slack_update_message_as_user`/`slack_delete_message_as_user` remain as explicit
+  aliases for this now-default behavior. Deliberately **not** extended to the
+  standalone CLI (`cli/react.js`/`cli/update.js`/`cli/delete.js`/`cli/lookup-user.js`
+  still default to the bot, `--as-user` switches to the human) — same asymmetry D47
+  already left between the MCP tool layer and the CLI, not a new one. The remote/hosted
+  profile (`mcp/tools.remote.js`) is untouched either way — it has no user tokens at
+  all (D20).
 - **The user token (for posting *as* a specific person) is inherently per-person and
   can't be shared, by construction of Slack's own OAuth.** Slack's OAuth flow only ever
   produces a token for whoever personally authorizes it — each person who wants the

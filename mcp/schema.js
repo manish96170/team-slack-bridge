@@ -67,6 +67,10 @@ export const schemas = {
       channel: { type: 'string' },
       ts: { type: 'string' },
       emoji: { type: 'string', description: 'Emoji name without colons, e.g. "eyes"' },
+      viaBot: {
+        type: 'boolean',
+        description: 'Default false: react as the locally authorized human (SLACK_USER_TOKEN). Set true to react as the shared bot instead (SLACK_BOT_TOKEN).',
+      },
       dryRun: { type: 'boolean' },
     },
     required: ['channel', 'ts', 'emoji'],
@@ -89,6 +93,10 @@ export const schemas = {
       channel: { type: 'string' },
       ts: { type: 'string' },
       emoji: { type: 'string', description: 'Emoji name without colons, e.g. "eyes"' },
+      viaBot: {
+        type: 'boolean',
+        description: 'Default false: remove the locally authorized human\'s reaction (SLACK_USER_TOKEN). Set true to remove the shared bot\'s reaction instead (SLACK_BOT_TOKEN).',
+      },
       dryRun: { type: 'boolean' },
     },
     required: ['channel', 'ts', 'emoji'],
@@ -111,6 +119,11 @@ export const schemas = {
       channel: { type: 'string' },
       ts: { type: 'string' },
       text: { type: 'string' },
+      viaBot: {
+        type: 'boolean',
+        description:
+          'Default false: edit as the locally authorized human (SLACK_USER_TOKEN) — use this for a message created by the (also default) as-user slack_post/slack_reply/slack_dm. Set true to edit a message previously posted by this install\'s bot token instead (SLACK_BOT_TOKEN).',
+      },
       dryRun: { type: 'boolean' },
     },
     required: ['channel', 'ts', 'text'],
@@ -132,6 +145,11 @@ export const schemas = {
     properties: {
       channel: { type: 'string' },
       ts: { type: 'string' },
+      viaBot: {
+        type: 'boolean',
+        description:
+          'Default false: delete as the locally authorized human (SLACK_USER_TOKEN) — use this for a message created by the (also default) as-user slack_post/slack_reply/slack_dm. Set true to delete a message previously posted by this install\'s bot token instead (SLACK_BOT_TOKEN).',
+      },
       dryRun: { type: 'boolean' },
     },
     required: ['channel', 'ts'],
@@ -271,7 +289,7 @@ export const schemas = {
       tokenSource: {
         type: 'string',
         enum: ['bot', 'user'],
-        description: 'Default "bot" — the shared bot token. Pass "user" to use SLACK_USER_TOKEN instead; this is explicit and never a silent fallback, and the resolved tokenSource is always echoed back in the result.',
+        description: 'Default "user" (SLACK_USER_TOKEN, the locally authorized human). Pass "bot" to use the shared bot token instead; this is explicit and never a silent fallback, and the resolved tokenSource is always echoed back in the result.',
       },
     },
     required: ['query'],

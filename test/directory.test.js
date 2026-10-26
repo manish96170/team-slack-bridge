@@ -260,24 +260,24 @@ test('lookupUser/lookupUserById/lookupUserByEmail/searchDirectoryByHandleOrName 
   assert.equal(existsSync(configPath), false)
 })
 
-test('slack_lookup_user tool: tokenSource defaults to "bot" — never silently falls back to an available SLACK_USER_TOKEN', async () => {
+test('slack_lookup_user tool: tokenSource defaults to "user" — never silently falls back to an available SLACK_BOT_TOKEN', async () => {
   const { tools } = await import('../mcp/tools.local.js')
-  // Only SLACK_USER_TOKEN is configured, no SLACK_BOT_TOKEN. If the default
+  // Only SLACK_BOT_TOKEN is configured, no SLACK_USER_TOKEN. If the default
   // silently fell back to whatever token IS available, this would attempt
   // the call instead of refusing with no-token.
-  const ctx = { env: { SLACK_USER_TOKEN: 'xoxp-the-user-token' }, config: {} }
+  const ctx = { env: { SLACK_BOT_TOKEN: 'xoxb-the-bot-token' }, config: {} }
   const result = await tools.slack_lookup_user.handler({ query: 'U0000000X' }, ctx)
   assert.equal(result.ok, false)
   assert.equal(result.error, 'no-token')
 })
 
-test('slack_lookup_user tool: tokenSource:"user" never silently falls back to an available SLACK_BOT_TOKEN', async () => {
+test('slack_lookup_user tool: tokenSource:"bot" never silently falls back to an available SLACK_USER_TOKEN', async () => {
   const { tools } = await import('../mcp/tools.local.js')
-  // Only SLACK_BOT_TOKEN is configured, no SLACK_USER_TOKEN. If "user"
-  // silently fell back to the bot token, this would attempt the call
+  // Only SLACK_USER_TOKEN is configured, no SLACK_BOT_TOKEN. If "bot"
+  // silently fell back to the user token, this would attempt the call
   // instead of refusing with no-token.
-  const ctx = { env: { SLACK_BOT_TOKEN: 'xoxb-the-bot-token' }, config: {} }
-  const result = await tools.slack_lookup_user.handler({ query: 'U0000000X', tokenSource: 'user' }, ctx)
+  const ctx = { env: { SLACK_USER_TOKEN: 'xoxp-the-user-token' }, config: {} }
+  const result = await tools.slack_lookup_user.handler({ query: 'U0000000X', tokenSource: 'bot' }, ctx)
   assert.equal(result.ok, false)
   assert.equal(result.error, 'no-token')
 })

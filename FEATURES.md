@@ -180,7 +180,7 @@ anonymous mode** (`anonymousMessage:true` only hides identity from the recipient
 from the sender's own record; D48, PLAN §19). The bot DMs them `"You have sent a DM to
 <@user> via Bot"` / `"...a bot message in #channel via Bot"` as a thread parent, with
 the actual sent text as a single threaded reply underneath — one line per send in their
-own DM history, full content one click away. A bot-token `slack_update_message`/
+own DM history, full content one click away. A `viaBot:true` `slack_update_message`/
 `slack_delete_message` on the original propagates there too: edit touches only the
 threaded reply, delete removes the whole tracking DM. Turn this specific piece off
 (keep the attribution/audit, drop the DM) with `"botSendTracking": { "enabled": false }`
@@ -189,8 +189,10 @@ so that path's latency is unaffected either way.
 
 ### DM as user / edit as user
 
-Default: DM/edit **as user** is now the default for `slack_dm` too (D47, same `viaBot`
-flag as "Post as user" above). Requires `SLACK_USER_TOKEN`, and currently blocked live
+Default: DM/edit/delete/react **as user** is now the default for `slack_dm`,
+`slack_update_message`, `slack_delete_message`, `slack_react`, and `slack_unreact` too
+(D47 for `slack_dm`; D60 for the other four — same `viaBot` flag as "Post as user"
+above). Requires `SLACK_USER_TOKEN`, and DM specifically is currently blocked live
 by a missing scope — see "Known gaps" below.
 
 Use:
@@ -200,13 +202,16 @@ node cli/dm.js --user U0123ABC --text "from me" --as-user --json
 node cli/update.js --channel C0123ABC --ts "169…" --text "updated" --as-user --json
 ```
 
-MCP: `slack_dm_as_user`, `slack_update_message_as_user` — separate, explicitly named
-local-only tools, same reasoning as "Post as user" above for *editing* an existing
-message (identity there is fixed by whichever token originally posted it, not a
-runtime choice). `slack_dm` itself gained the `viaBot` boolean in D47 specifically to
-flip its *default*, which is a different problem (which identity should a *new* send
-default to) — see PLAN §18 for why that one tool broke the "never an ambiguous
-boolean" rule on purpose. `core/dm.js` caches the opened DM channel per **caller identity**
+MCP: `slack_dm_as_user`, `slack_update_message_as_user`, `slack_delete_message_as_user`,
+`slack_react_as_user`, `slack_unreact_as_user` — explicit aliases for the now-default
+behavior of their bare counterparts, kept for callers who prefer to say it outright
+rather than rely on the default. (Earlier revisions of this doc said editing/deleting a
+message was "fixed by whichever token originally posted it, not a runtime choice" —
+that was true before D60 gave `slack_update_message`/`slack_delete_message` the same
+`viaBot` boolean `slack_dm` already had; it is a runtime choice now, same as every other
+tool in this table. Slack itself still only lets a token edit/delete a message that
+same token posted, so `viaBot` has to match whichever identity actually sent the
+original message.) `core/dm.js` caches the opened DM channel per **caller identity**
 (`bot:<userId>`/`user:<userId>`) so a bot-opened DM is never reused for an as-user send.
 
 Turn off: remove `SLACK_USER_TOKEN`. Remote Slackbot MCP never exposes this.
@@ -320,10 +325,15 @@ node cli/lookup-user.js --query "Manish Sharma" --mode name --include-email --js
 ```
 
 Resolves a workspace member who is **not** necessarily in `slack-config.json`, via a
-live Slack API call. Defaults to the shared **bot token** (`tokenSource:"bot"`); pass
-`tokenSource:"user"` to use `SLACK_USER_TOKEN` instead — always explicit, **never a
-silent fallback** between the two (D51), and every successful result echoes back which
-one actually answered (`tokenSource` in the response). `mode` defaults to `"auto"`: a
+live Slack API call. **The CLI above still defaults to the shared bot token**, `--as-user`
+switches to `SLACK_USER_TOKEN` — unchanged, same posture as every other `--as-user` CLI
+command. **The MCP tool `slack_lookup_user` is different: it defaults to the human
+(`tokenSource:"user"`) since D60**, matching D47's `slack_post`/`slack_reply`/`slack_dm`
+reasoning (a bot-token call is invisible to/untraceable to whoever triggered it on a
+shared install) — pass `tokenSource:"bot"` to use the shared bot token instead. Either
+way it's always explicit, **never a silent fallback** between the two (D51/D60), and
+every successful result echoes back which one actually answered (`tokenSource` in the
+response). `mode` defaults to `"auto"`: a
 `U.../W...`-shaped query goes to `users.info`, an email-shaped query goes to
 `users.lookupByEmail`, and anything else searches the directory for an exact (normalized
 — one leading `@` stripped, trimmed, case-insensitive) match against the Slack handle,

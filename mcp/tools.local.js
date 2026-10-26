@@ -46,10 +46,32 @@
 // enumeration primitive the same way unrestricted `resolveUser` was (D20).
 //
 // D51: `slack_lookup_user` can use EITHER token, via an explicit
-// `tokenSource:"bot"|"user"` argument (default `"bot"`) — never a silent
-// fallback between the two, same principle as every other bot/user split
-// in this registry. The resolved `tokenSource` is always echoed back in
-// the result so a caller never has to infer which identity answered.
+// `tokenSource:"bot"|"user"` argument (originally defaulted `"bot"`, see
+// D60 below for why that default flipped) — never a silent fallback
+// between the two, same principle as every other bot/user split in this
+// registry. The resolved `tokenSource` is always echoed back in the
+// result so a caller never has to infer which identity answered.
+//
+// D60: `slack_react`/`slack_unreact`/`slack_update_message`/
+// `slack_delete_message` now default (`viaBot:false`) to the locally
+// authorized human (SLACK_USER_TOKEN) too, matching D47's slack_post/
+// slack_reply/slack_dm precedent — `viaBot:true` opts back into the
+// shared bot token. `slack_lookup_user`'s default also flipped, from
+// `tokenSource:"bot"` to `tokenSource:"user"`. The `_as_user` tools
+// (`slack_react_as_user`, `slack_unreact_as_user`,
+// `slack_update_message_as_user`, `slack_delete_message_as_user`) remain
+// as explicit aliases for this now-default behavior, same posture D47
+// left `slack_post_as_user`/`slack_dm_as_user` in. Deliberately NOT
+// extended to the standalone CLI scripts (`cli/react.js`, `cli/update.js`,
+// `cli/delete.js`, `cli/lookup-user.js`) — their `--as-user` flag still
+// means "switch to the user token, bot is the default," unchanged. This
+// mirrors D47 itself, which only ever changed the MCP tool layer
+// (`mcp/tools.local.js`) and never touched `cli/post.js`/`cli/dm.js`'s own
+// bot-default `--as-user` flag; following that same precedent here keeps
+// one consistent asymmetry instead of introducing a second, different one.
+// `mcp/tools.remote.js` is untouched by this decision — the hosted profile
+// has no user tokens at all (D20), so there is nothing there to default
+// away from.
 
 import { postToChannel, reply, react, unreact, updateMessage, deleteMessage } from '../core/post.js'
 import { dm } from '../core/dm.js'
@@ -175,39 +197,41 @@ export const tools = {
   },
   slack_react: {
     name: 'slack_react',
-    description: 'Add an emoji reaction to a message.',
+    description: 'Add an emoji reaction. Defaults (viaBot:false) to reacting as the locally authorized human (SLACK_USER_TOKEN). Pass viaBot:true to react as the shared bot instead (SLACK_BOT_TOKEN).',
     inputSchema: schemas.slack_react,
     handler: (args, ctx) =>
-      react({ token: ctx.env.SLACK_BOT_TOKEN, channel: args.channel, ts: args.ts, emoji: args.emoji, dryRun: args.dryRun }),
+      react({ token: args.viaBot ? ctx.env.SLACK_BOT_TOKEN : ctx.env.SLACK_USER_TOKEN, channel: args.channel, ts: args.ts, emoji: args.emoji, dryRun: args.dryRun }),
   },
   slack_react_as_user: {
     name: 'slack_react_as_user',
-    description: 'Add an emoji reaction as the locally authorized user. Requires a locally configured user token.',
+    description: 'Add an emoji reaction as the locally authorized user. Requires a locally configured user token. Explicit alias for slack_react\'s (now default) behavior.',
     inputSchema: schemas.slack_react_as_user,
     handler: (args, ctx) =>
       react({ token: ctx.env.SLACK_USER_TOKEN, channel: args.channel, ts: args.ts, emoji: args.emoji, dryRun: args.dryRun }),
   },
   slack_unreact: {
     name: 'slack_unreact',
-    description: 'Remove this installation bot\'s emoji reaction from a message.',
+    description: 'Remove a reaction. Defaults (viaBot:false) to removing the locally authorized human\'s own reaction (SLACK_USER_TOKEN). Pass viaBot:true to remove this installation\'s bot reaction instead (SLACK_BOT_TOKEN).',
     inputSchema: schemas.slack_unreact,
     handler: (args, ctx) =>
-      unreact({ token: ctx.env.SLACK_BOT_TOKEN, channel: args.channel, ts: args.ts, emoji: args.emoji, dryRun: args.dryRun }),
+      unreact({ token: args.viaBot ? ctx.env.SLACK_BOT_TOKEN : ctx.env.SLACK_USER_TOKEN, channel: args.channel, ts: args.ts, emoji: args.emoji, dryRun: args.dryRun }),
   },
   slack_unreact_as_user: {
     name: 'slack_unreact_as_user',
-    description: 'Remove the locally authorized user\'s emoji reaction from a message. Requires a locally configured user token.',
+    description: 'Remove the locally authorized user\'s emoji reaction from a message. Requires a locally configured user token. Explicit alias for slack_unreact\'s (now default) behavior.',
     inputSchema: schemas.slack_unreact_as_user,
     handler: (args, ctx) =>
       unreact({ token: ctx.env.SLACK_USER_TOKEN, channel: args.channel, ts: args.ts, emoji: args.emoji, dryRun: args.dryRun }),
   },
   slack_update_message: {
     name: 'slack_update_message',
-    description: 'Edit a message previously posted by this install\'s bot token (e.g. a viaBot:true send). If that send had a tracking copy (core/tracking.js), the threaded reply there is edited to match; the "You have sent..." parent label is left alone.',
+    description:
+      'Edit a message. Defaults (viaBot:false) to editing as the locally authorized human (SLACK_USER_TOKEN) — use this for a message created by the (also default) as-user slack_post/slack_reply/slack_dm. Pass viaBot:true to edit a message previously posted by this install\'s bot token instead; if that bot send had a tracking copy (core/tracking.js), the threaded reply there is edited to match.',
     inputSchema: schemas.slack_update_message,
     handler: async (args, ctx) => {
+      const viaBot = !!args.viaBot
       const result = await updateMessage({
-        token: ctx.env.SLACK_BOT_TOKEN,
+        token: viaBot ? ctx.env.SLACK_BOT_TOKEN : ctx.env.SLACK_USER_TOKEN,
         channel: args.channel,
         ts: args.ts,
         text: args.text,
@@ -215,7 +239,7 @@ export const tools = {
         config: ctx.config,
         dryRun: args.dryRun,
       })
-      if (result.ok && !args.dryRun) {
+      if (viaBot && result.ok && !args.dryRun) {
         await propagateUpdateToTracking({ botToken: ctx.env.SLACK_BOT_TOKEN, dbPath: ctx.dbPath, config: ctx.config, channel: args.channel, ts: args.ts, text: args.text }).catch(() => {})
       }
       return result
@@ -223,7 +247,7 @@ export const tools = {
   },
   slack_update_message_as_user: {
     name: 'slack_update_message_as_user',
-    description: 'Edit a message previously posted by the locally authorized user. Requires a locally configured user token.',
+    description: 'Edit a message previously posted by the locally authorized user. Requires a locally configured user token. Explicit alias for slack_update_message\'s (now default) behavior.',
     inputSchema: schemas.slack_update_message_as_user,
     handler: (args, ctx) =>
       updateMessage({
@@ -238,11 +262,12 @@ export const tools = {
   slack_delete_message: {
     name: 'slack_delete_message',
     description:
-      'Delete a message previously posted by this install\'s bot token (e.g. a viaBot:true send). If that send had a tracking copy (core/tracking.js), the whole tracking DM (parent label + threaded reply) is deleted too.',
+      'Delete a message. Defaults (viaBot:false) to deleting as the locally authorized human (SLACK_USER_TOKEN) — use this for a message created by the (also default) as-user slack_post/slack_reply/slack_dm. Pass viaBot:true to delete a message previously posted by this install\'s bot token instead; if that bot send had a tracking copy (core/tracking.js), the whole tracking DM (parent label + threaded reply) is deleted too.',
     inputSchema: schemas.slack_delete_message,
     handler: async (args, ctx) => {
-      const result = await deleteMessage({ token: ctx.env.SLACK_BOT_TOKEN, channel: args.channel, ts: args.ts, ledgerPath: ctx.dbPath, dryRun: args.dryRun })
-      if (result.ok && !args.dryRun) {
+      const viaBot = !!args.viaBot
+      const result = await deleteMessage({ token: viaBot ? ctx.env.SLACK_BOT_TOKEN : ctx.env.SLACK_USER_TOKEN, channel: args.channel, ts: args.ts, ledgerPath: ctx.dbPath, dryRun: args.dryRun })
+      if (viaBot && result.ok && !args.dryRun) {
         await propagateDeleteToTracking({ botToken: ctx.env.SLACK_BOT_TOKEN, dbPath: ctx.dbPath, channel: args.channel, ts: args.ts }).catch(() => {})
       }
       return result
@@ -251,7 +276,7 @@ export const tools = {
   slack_delete_message_as_user: {
     name: 'slack_delete_message_as_user',
     description:
-      'Delete a message previously posted by the locally authorized user. Requires a locally configured user token — this is the one you want for messages sent by the new default (viaBot:false) slack_post/slack_dm behavior.',
+      'Delete a message previously posted by the locally authorized user. Requires a locally configured user token. Explicit alias for slack_delete_message\'s (now default) behavior.',
     inputSchema: schemas.slack_delete_message_as_user,
     handler: (args, ctx) => deleteMessage({ token: ctx.env.SLACK_USER_TOKEN, channel: args.channel, ts: args.ts, dryRun: args.dryRun }),
   },
@@ -398,10 +423,10 @@ export const tools = {
   slack_lookup_user: {
     name: 'slack_lookup_user',
     description:
-      'Look up a Slack workspace member who is NOT necessarily in slack-config.json, via a live Slack API call (users.info / users.lookupByEmail / users.list). Defaults to the shared bot token (tokenSource:"bot"); pass tokenSource:"user" to use SLACK_USER_TOKEN instead — always explicit, never a silent fallback, and the resolved tokenSource is echoed back in the result. mode:"auto" (default) infers id/email/handle from the query shape; "id" forces users.info, "email" forces users.lookupByEmail, and "handle"/"name" both search the (cached) full directory for an exact, normalized match against the Slack handle, display name, and real name. Deleted users and bots are excluded by default. More than one match refuses with error:"ambiguous-user" and lists every match rather than guessing. Email is omitted from the result unless includeEmail:true, to minimize unnecessary PII exposure. This never writes to slack-config.json.',
+      'Look up a Slack workspace member who is NOT necessarily in slack-config.json, via a live Slack API call (users.info / users.lookupByEmail / users.list). Defaults to the locally authorized human (tokenSource:"user"); pass tokenSource:"bot" to use SLACK_BOT_TOKEN instead — always explicit, never a silent fallback, and the resolved tokenSource is echoed back in the result. mode:"auto" (default) infers id/email/handle from the query shape; "id" forces users.info, "email" forces users.lookupByEmail, and "handle"/"name" both search the (cached) full directory for an exact, normalized match against the Slack handle, display name, and real name. Deleted users and bots are excluded by default. More than one match refuses with error:"ambiguous-user" and lists every match rather than guessing. Email is omitted from the result unless includeEmail:true, to minimize unnecessary PII exposure. This never writes to slack-config.json.',
     inputSchema: schemas.slack_lookup_user,
     handler: (args, ctx) => {
-      const tokenSource = args.tokenSource === 'user' ? 'user' : 'bot'
+      const tokenSource = args.tokenSource === 'bot' ? 'bot' : 'user'
       const token = tokenSource === 'user' ? ctx.env.SLACK_USER_TOKEN : ctx.env.SLACK_BOT_TOKEN
       return lookupUser({
         query: args.query,

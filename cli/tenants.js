@@ -10,12 +10,12 @@
 // profile once slackbotMcp.tenancy.mode is "multi" (core/tenancy.js never
 // imports core/accounts.js's local-only registry for this).
 //
-// After `add`, run `TSB_HOME=<home> node cli/setup.js init` against the new
-// home dir to fill in that tenant's own .env/slack-config.json -- same
-// pattern as cli/accounts.js, reusing the existing setup wizard instead of
-// a second one. `add` only registers the home path; it never asks for or
-// stores a token itself, so there is never a secret to protect inside
-// tenants.json in the first place.
+// After `add`, run `TSB_HOME=<home> node cli/setup.js init` (or `TSB_HOME=<home>
+// tsb-setup init` from a global npm install) against the new home dir to fill in
+// that tenant's own .env/slack-config.json -- same pattern as cli/accounts.js,
+// reusing the existing setup wizard instead of a second one. `add` only
+// registers the home path; it never asks for or stores a token itself, so
+// there is never a secret to protect inside tenants.json in the first place.
 
 import { addTenant, defaultTenantHome, listTenants, removeTenant } from '../core/tenant-store.js'
 import { parseFlags, output } from './lib/args.js'
@@ -29,7 +29,7 @@ let result
 if (command === 'add') {
   result = addTenant(teamId, { home: flags.home, enterpriseId: flags['enterprise-id'] })
   if (result.ok) {
-    console.error(`Next: TSB_HOME=${result.home} node cli/setup.js init`)
+    console.error(`Next: TSB_HOME=${result.home} node cli/setup.js init   (or: TSB_HOME=${result.home} tsb-setup init)`)
   }
 } else if (command === 'list') {
   result = listTenants()

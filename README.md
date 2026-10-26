@@ -261,7 +261,8 @@ the gap away mode fills (PLAN D34).
 3. Run the setup wizard — every prompt has a default/skip and a "leave off if unsure"
    hint, so it's safe to just hit enter through anything you're not ready to answer yet:
    ```bash
-   node cli/setup.js init
+   node cli/setup.js init     # from a git clone
+   tsb-setup init             # from a global npm install
    ```
    ```text
    $ node cli/setup.js init

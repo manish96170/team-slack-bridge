@@ -1,6 +1,6 @@
 {
   "name": "team-slack-bridge",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "description": "Post to Slack (as a bot, or explicitly as a specific authorized user) and DM, from any script, agent, or CI job. Standalone — no dependency on any particular orchestration system.",
   "license": "MIT",
   "type": "module",
@@ -11,6 +11,7 @@
   "bin": {
     "team-slack-bridge": "post.js",
     "tsb-hook": "cli/hook.js",
+    "tsb-setup": "cli/setup.js",
     "tsb-tls": "cli/tls.js",
     "tsb-tenants": "cli/tenants.js",
     "tsb-get-user-token": "get-user-token.js",

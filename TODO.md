@@ -1,11 +1,20 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D57) and architecture; this file is the scannable done/pending list.
+log (D1–D58) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
 ## Done
 
+- [x] **`tsb-setup` bin entry added, closing the gap D57 left open (D58)** — the
+      very next command `cli/tenants.js add` tells a global-install user to run
+      had no direct command either. Verified with evidence, not assumed: real
+      `slack-config.json` has no `tenancy` key; `resolveAccount()` against that
+      real config resolves `single` with identical object references, not just
+      equal values; live `node cli/doctor.js --json` against the real Hornblower
+      install still reports working `botAuth`/`userAuth` and
+      `slackbotMcp.enabled:false`, unchanged by D53–D57; `tsb-setup init`
+      exercised from a real packed-and-installed copy, same methodology as D57.
 - [x] **`bin` entries for `tsb-tls`/`tsb-tenants`/`tsb-get-user-token`/
       `tsb-get-workspace-token` (D57)** — caught before publishing: D54/D56 added
       these four scripts but `package.json`'s `bin` still only had

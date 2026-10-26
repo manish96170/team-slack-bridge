@@ -99,9 +99,9 @@ test('matchesMentionKeyword: defaults to "start session" when nothing is configu
 })
 
 test('matchesMentionKeyword: matches any configured alias, case-insensitively', () => {
-  const config = { agentSessions: { mentionKeywords: ['start session', '@etd start session', '@Eng Team Dashboard start session'] } }
+  const config = { agentSessions: { mentionKeywords: ['start session', '@etd start session', '@Example Slack App start session'] } }
   assert.equal(matchesMentionKeyword('@ETD START SESSION fix it', config), ' fix it')
-  assert.equal(matchesMentionKeyword('@Eng Team Dashboard start session fix it', config), ' fix it')
+  assert.equal(matchesMentionKeyword('@Example Slack App start session fix it', config), ' fix it')
   assert.equal(matchesMentionKeyword('start session fix it', config), ' fix it')
   assert.equal(matchesMentionKeyword('just chatting', config), null)
 })

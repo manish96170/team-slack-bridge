@@ -1,22 +1,34 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D61) and architecture; this file is the scannable done/pending list.
+log (D1–D62) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
 ## Done
 
-- [x] **Live multi-tenancy dogfood against two real Slack orgs — Hornblower and
-      Anchor OS (D61)** — closes ROADMAP.md's step 3. Real OAuth install into
-      Anchor OS end to end (Public Distribution's consent screen correctly
-      offering "Anchor OS", the expected self-signed-cert warning, a real bot
+- [x] **Real company/workspace identity scrubbed from every tracked file (D62)** —
+      this is a public repo; real company names, team IDs, app ID, client ID,
+      email domain, and app display name from this session's live dogfooding
+      had leaked into PLAN.md/ROADMAP.md/TODO.md/FEATURES.md and one test
+      fixture. Replaced with generic placeholders ("Company A"/"Company B",
+      `T0123ABC`/`T0456DEF`, etc.), matching this repo's existing example-data
+      convention. **Does not touch git history** — see PLAN.md D62 for why
+      that's a separate, deliberately-not-bundled decision. Confirmed while
+      doing this: no source file ever hardcoded a specific app's identity —
+      the manifest template's display name was already generic, every
+      credential comes from the installer's own `.env`.
+
+- [x] **Live multi-tenancy dogfood against two real Slack orgs — Company A and
+      Company B (D61)** — closes ROADMAP.md's step 3. Real OAuth install into
+      Company B end to end (Public Distribution's consent screen correctly
+      offering "Company B", the expected self-signed-cert warning, a real bot
       token captured by `get-workspace-token.js`). Confirmed distinct real
       identities via `cli/doctor.js --json` per tenant (`botAuth.team`:
-      "Hornblower" vs "Anchor OS"). `scripts/dogfood-multi-tenant.mjs` (written
+      "Company A" vs "Company B"). `scripts/dogfood-multi-tenant.mjs` (written
       earlier, never committed — committed now) proved both team_ids resolve
       through one shared `/mcp` endpoint to a tenant whose own real token
       passes a live `auth.test`; two bugs in that script found by actually
-      running it (missing tenant registration for Hornblower itself; wrong
+      running it (missing tenant registration for Company A itself; wrong
       assumption about `slack_doctor`'s reduced remote-profile shape) fixed
       along the way. Explicitly NOT proven: Slack's own Slackbot MCP Client
       reaching this endpoint over the public internet — still open, see
@@ -54,7 +66,7 @@ log (D1–D61) and architecture; this file is the scannable done/pending list.
       had no direct command either. Verified with evidence, not assumed: real
       `slack-config.json` has no `tenancy` key; `resolveAccount()` against that
       real config resolves `single` with identical object references, not just
-      equal values; live `node cli/doctor.js --json` against the real Hornblower
+      equal values; live `node cli/doctor.js --json` against the real Company A
       install still reports working `botAuth`/`userAuth` and
       `slackbotMcp.enabled:false`, unchanged by D53–D57; `tsb-setup init`
       exercised from a real packed-and-installed copy, same methodology as D57.
@@ -67,9 +79,9 @@ log (D1–D61) and architecture; this file is the scannable done/pending list.
       (`node cli/tls.js ...`) and global-install (`tsb-tls ...`) forms side by
       side everywhere one of these four is mentioned.
 - [x] **Public Distribution activated; self-signed local HTTPS listener for the
-      OAuth redirect callback (D56)** — Hornblower and Anchor OS turned out to be
+      OAuth redirect callback (D56)** — Company A and Company B turned out to be
       genuinely separate Slack orgs (not Enterprise Grid siblings), so installing
-      the shared app into Anchor OS needed Slack's Public Distribution switched
+      the shared app into Company B needed Slack's Public Distribution switched
       on. The only blocker (confirmed live) was the registered
       `http://localhost:8917/callback` redirect URL — Slack's distribution check
       doesn't exempt `localhost` the way Socket Mode exempts every other
@@ -315,7 +327,7 @@ log (D1–D61) and architecture; this file is the scannable done/pending list.
         close-all-in-this-channel option, D31-gated per session
 - [x] **Live-verified on this machine**: Socket Mode listener connected, DM from the
       bot to the owner, an ACP session started against the `dashboard` repo
-      (`/Users/Manish.Sharma/hornblower/UI/dashboard`), one session per thread with
+      (`/Users/Manish.Sharma/company-a/UI/dashboard`), one session per thread with
       working follow-up replies, Claude via Bedrock (`CLAUDE_CODE_USE_BEDROCK=1`) and
       OpenCode (native `AWS_REGION` detection, OpenCode Zen credentials) both
       confirmed reachable as backends

@@ -312,16 +312,16 @@ Use:
 
 ```text
 slack_lookup_user { "query": "U055NFSGF88" }                       -> users.info
-slack_lookup_user { "query": "manish.sharma@cityexperiences.com" } -> users.lookupByEmail
+slack_lookup_user { "query": "jane.doe@example.com" } -> users.lookupByEmail
 slack_lookup_user { "query": "@manish.sharma" }                    -> paginated users.list, matched
-slack_lookup_user { "query": "Manish Sharma", "mode": "name" }     -> same directory search
+slack_lookup_user { "query": "Jane Doe", "mode": "name" }     -> same directory search
 ```
 
 ```bash
 node cli/lookup-user.js --query U055NFSGF88 --json
-node cli/lookup-user.js --query manish.sharma@cityexperiences.com --json
+node cli/lookup-user.js --query jane.doe@example.com --json
 node cli/lookup-user.js --query @manish.sharma --as-user --json   # SLACK_USER_TOKEN instead of the bot token
-node cli/lookup-user.js --query "Manish Sharma" --mode name --include-email --json
+node cli/lookup-user.js --query "Jane Doe" --mode name --include-email --json
 ```
 
 Resolves a workspace member who is **not** necessarily in `slack-config.json`, via a

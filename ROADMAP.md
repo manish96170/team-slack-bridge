@@ -120,15 +120,15 @@ request → resolveAccount(request) → { botToken, config, repoRegistry } → c
      Deliberately deferred until there's a concrete company asking for it.
 3. **[DONE 2026-10-27, PLAN D61] Dogfood internally before offering it to anyone
    external.** Ran multi mode against this org's own real workspaces,
-   hornblowercruises (T2EA75X8X) and anchoros (T0CBER2DJAJ), as the first real
+   company-a (T0123ABC) and company-b (T0456DEF), as the first real
    tenants, provisioned via `cli/tenants.js` (D54). Full install flow exercised
    live, not simulated: Public Distribution's OAuth consent screen (showing
-   "Where do you want to use Eng Team Dashboard?" → "Anchor OS"), the
+   "Where do you want to use Example Slack App?" → "Company B"), the
    self-signed-cert browser warning, `get-workspace-token.js` capturing a real
    bot token, and `scripts/dogfood-multi-tenant.mjs` proving both team_ids
    resolve through one shared `/mcp` endpoint to a tenant whose own real token
    passes a live `auth.test` — confirmed distinct identities (`botAuth.team`:
-   "Hornblower" vs "Anchor OS") via direct `cli/doctor.js --json` runs against
+   "Company A" vs "Company B") via direct `cli/doctor.js --json` runs against
    each tenant's own home dir. Unit-level cross-tenant isolation was already
    covered (`test/tenancy.test.js`'s "two registered tenants never
    cross-resolve" test, PLAN D54) — this closes the live-run gap that test

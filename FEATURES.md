@@ -296,6 +296,13 @@ slack_lookup_user { "query": "@manish.sharma" }                    -> paginated 
 slack_lookup_user { "query": "Manish Sharma", "mode": "name" }     -> same directory search
 ```
 
+```bash
+node cli/lookup-user.js --query U055NFSGF88 --json
+node cli/lookup-user.js --query manish.sharma@cityexperiences.com --json
+node cli/lookup-user.js --query @manish.sharma --as-user --json   # SLACK_USER_TOKEN instead of the bot token
+node cli/lookup-user.js --query "Manish Sharma" --mode name --include-email --json
+```
+
 Resolves a workspace member who is **not** necessarily in `slack-config.json`, via a
 live Slack API call. Defaults to the shared **bot token** (`tokenSource:"bot"`); pass
 `tokenSource:"user"` to use `SLACK_USER_TOKEN` instead — always explicit, **never a

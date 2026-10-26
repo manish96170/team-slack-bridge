@@ -62,6 +62,52 @@ Gemini CLI (see "ACP agent sessions" below).
 
 For the feature matrix and exact on/off switches, see `FEATURES.md`.
 
+## Capabilities at a glance
+
+| Capability | Default | Change it with | Decision |
+|---|---|---|---|
+| `slack_post` / `slack_reply` / `slack_dm` (MCP) | **As you** — a real Slack message, visible to you with native edit/delete | `viaBot:true` | D47 |
+| Sending as the bot without an identified sender | **Refused** | `anonymousMessage:true` | D48 |
+| Attribution footer on a bot-sent message | **On** — `<@you> · memberId:U...` | `anonymousMessage:true` → "sender withheld" | D48 |
+| Private tracking DM to the sender of a bot send | **On** — even in anonymous mode | `botSendTracking.enabled:false` | D48 |
+| `anonymousMessage` without a per-call argument | Falls back to config | `botSend.anonymousMessageDefault` | D49 |
+| `slack_lookup_user` — live directory lookup | Bot token | `tokenSource:"user"` | D50/D51 |
+| Email in a `slack_lookup_user` result | **Hidden** | `includeEmail:true` | D50 |
+| CLI post-as identity (`cli/post.js` etc.) | **The bot**, unchanged | `--as-user` | pre-existing, see "Scope note" |
+
+```
+slack_post / slack_reply / slack_dm  (MCP tools)
+            │
+            ▼
+     viaBot:true? ──no──► SLACK_USER_TOKEN ──► it's really your message:
+            │                                   visible to you, native Slack edit/delete
+           yes
+            │
+            ▼
+  sender identified, OR anonymousMessage           refused:
+  resolves true (per-call or config default)? ──no──► not-authorized-to-send-as-bot-
+            │                                          pass-anonymousMessage-true-...
+           yes
+            │
+            ▼
+     SLACK_BOT_TOKEN ──► public text gets a footer:
+                          "sent via bot by <@you> · memberId:U..."
+                          (or "sender withheld" if anonymous)
+            │
+            ▼
+     sender identified? ──yes──► private DM to the sender:
+            │                     "You have sent ... via Bot"  (parent)
+            no                    + the real text               (thread reply)
+            │
+            ▼
+     (no tracking copy — nobody to send it to)
+```
+
+Every one of these is additive on top of the pre-existing `_as_user` tools
+(`slack_post_as_user`, `slack_dm_as_user`, `slack_update_message_as_user`,
+`slack_delete_message_as_user`) and `slack_resolve_user` (config-file-only, untouched
+by any of this) — nothing above changes what those already did.
+
 ## Two ways to run an agent from Slack
 
 These solve different problems and are easy to confuse, so it is worth being explicit
@@ -99,25 +145,19 @@ the gap away mode fills (PLAN D34).
   Token, since the bot always acts as "the bot," never as a specific person. There's no
   conflict in sharing that token across people.
 - **Because the bot token is shared, `slack_post`/`slack_reply`/`slack_dm` default to
-  sending as the local user, not as the bot (D47).** A bot-sent message is invisible to
-  its own sender (no native Slack message of theirs to see or Edit/Delete) and, on a
-  token shared across a team, carries no indication of who sent it. Pass `viaBot:true`
-  to send as the bot anyway — refused outright unless this install can identify its
-  sender or the caller explicitly passes `anonymousMessage:true` (D48). When it does
-  send, the text gets a visible "sent via bot by `<@user>` · memberId: `U...`" footer
-  (or "sender withheld" if anonymous), the send is journaled to a local `local_audit`
-  table, and — if the sender is identified — they privately receive a threaded DM
-  record of exactly what was sent and to whom, even in anonymous mode, unless
-  `botSendTracking.enabled:false` turns that off. See `FEATURES.md`'s "Post as user"
-  section and `PLAN.md` §18/§19.
-- **`slack_lookup_user` resolves anyone in the workspace live, via the shared bot token
-  only — never a config-file edit, never a fallback to a user token (D50).** Separate
-  from `slack_resolve_user`, which stays config-file-only and untouched. Ambiguous
-  handle/name matches are refused with every match listed, never guessed; email is
-  hidden from the result unless `includeEmail:true`; and it's local-only, same posture
-  as `slack_list_channels`/`slack_search`, since an unrestricted directory search is a
+  sending as the local user, not as the bot (D47-D49)** — see "Capabilities at a glance"
+  above for exactly how the authorization gate, attribution footer, and tracking DM
+  work together. Full reasoning: `FEATURES.md`'s "Post as user" section and `PLAN.md`
+  §18-§20.
+- **`slack_lookup_user` resolves anyone in the workspace live, via an explicit
+  `tokenSource:"bot"|"user"` (default `"bot"`) — never a silent fallback between the
+  two (D50-D51).** Separate from `slack_resolve_user`, which stays config-file-only and
+  untouched. Ambiguous handle/name matches are refused with every match listed, never
+  guessed; email is hidden from the result unless `includeEmail:true`; and it's
+  local-only regardless of which token is used, same posture as
+  `slack_list_channels`/`slack_search`, since an unrestricted directory search is a
   workspace-enumeration primitive. See `FEATURES.md`'s "Live directory lookup" section
-  and `PLAN.md` §21.
+  and `PLAN.md` §21/D51.
 - **The user token (for posting *as* a specific person) is inherently per-person and
   can't be shared, by construction of Slack's own OAuth.** Slack's OAuth flow only ever
   produces a token for whoever personally authorizes it — each person who wants the
@@ -306,7 +346,8 @@ per-person construction):
 node cli/query.js --channel '#x' [--since-minutes 60] [--limit 20] [--json]
 node cli/thread.js --channel '#x' --thread-ts '169…' [--json]
 node cli/search.js --query 'from:@bob deploy' [--json]
-node cli/resolve-user.js --handle @jane [--json]
+node cli/resolve-user.js --handle @jane [--json]  # configured-only, config-file lookup — never a network call
+node cli/lookup-user.js --query U055NFSGF88 [--mode auto|id|email|handle|name] [--as-user] [--include-email] [--json]  # live Slack-directory lookup, for anyone NOT in slack-config.json (D50/D51)
 node cli/channels.js [--types 'public_channel,private_channel'] [--limit 100] [--cursor …] [--json]  # requires a user token — which channels the authorized user is actually in, not the whole workspace
 ```
 
@@ -770,10 +811,19 @@ only if/when Slack + email + something else *all* need unified outbound at once.
 
 ## Scope note
 
-Default post-as identity is always **the bot** — posting "as a specific person"
-requires the explicit `--as-user` flag, never inferred or defaulted. If you build
-anything routing requests to different people's tokens, keep that rule: explicit
-beats inferred, always.
+**CLI** (`cli/*.js`, `post.js`, `get-user-token.js`): default post-as identity is still
+**the bot**, unchanged — posting "as a specific person" requires the explicit
+`--as-user` flag, never inferred or defaulted.
+
+**MCP tools** (`slack_post`/`slack_reply`/`slack_dm`): the default is the opposite —
+**as you** (`viaBot:false`), not the bot — see D47 in "Capabilities at a glance" above.
+This asymmetry between the two surfaces is deliberate (PLAN §18), not an oversight: the
+CLI is typically run by one person who already knows which identity they mean; an MCP
+tool is typically called by a model, where "default to the shared bot" is the riskier
+failure mode on a token used by a whole team.
+
+If you build anything routing requests to different people's tokens on top of either
+surface, keep the underlying rule: explicit beats inferred, always.
 
 ## Releasing
 

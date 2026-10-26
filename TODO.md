@@ -1,10 +1,18 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D62) and architecture; this file is the scannable done/pending list.
+log (D1–D63) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
 ## Done
+
+- [x] **Database retention: `cli/archive.js`/`tsb-archive` (D63)** — exports
+      (gzipped JSON, `0600`) and deletes rows older than a cutoff (default:
+      first day of the current month) from every table in `.ledger.sqlite`
+      that accumulates over time, then `VACUUM`s so the file actually
+      shrinks on disk. Export happens before delete; a failed export never
+      loses data. Idempotent re-run, safe on a cron schedule. 8 new tests
+      (`test/archive.test.js`).
 
 - [x] **Real company/workspace identity scrubbed from every tracked file (D62)** —
       this is a public repo; real company names, team IDs, app ID, client ID,

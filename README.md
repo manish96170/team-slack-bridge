@@ -366,6 +366,33 @@ own header and `ROADMAP.md`'s "Multi-tenancy as a configurable deployment mode" 
 full picture — this covers hand-provisioned installs; a self-serve "Add to Slack" flow
 remains deliberately deferred until an actual company asks for it.
 
+## Database retention (PLAN D63)
+
+`.ledger.sqlite` accumulates rows forever — the idempotency ledger, human-in-the-loop
+asks, agent-session records, remote/local audit logs, bot-send tracking, and the DM
+channel-ID cache all just grow. Nothing prunes them, so a long-running install's
+database only gets bigger. `cli/archive.js`/`tsb-archive` exports (gzipped JSON) and
+deletes anything older than a cutoff — default: the first day of the current month, so
+only the current month's data stays live — then runs `VACUUM` so the `.ledger.sqlite`
+file actually shrinks on disk (plain `DELETE` alone never reclaims SQLite's file size).
+
+```bash
+node cli/archive.js export [--before <ISO date>] [--dry-run] [--json]   # from a git clone
+tsb-archive export [--before <ISO date>] [--dry-run] [--json]           # from a global npm install
+```
+
+Exports happen *before* deletes, and deletes only run if the export actually wrote to
+disk — a failed archive never loses data, worst case is just re-running it later.
+Archives land in `<TSB_HOME>/archives/archive-<cutoff-date>-<export-timestamp>.json.gz`,
+written `0600` like every other local file holding real identifiers (D44's posture).
+Running it twice in a row is a safe no-op the second time — nothing left to archive.
+
+Safe to put on a schedule the same way `cli/daemon.js start` already is — e.g. a monthly
+cron entry:
+```
+0 3 1 * * TSB_HOME=/path/to/home node /path/to/cli/archive.js export --json >> /path/to/archive.log 2>&1
+```
+
 ## Usage
 
 Every command below accepts `--json` (structured `{ ok, ... }` output, non-zero exit

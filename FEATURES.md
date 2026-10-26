@@ -869,6 +869,45 @@ Away mode makes whoever can DM the bot as the owner the permission authority for
 session. It reads `config.owner.slackUserId` only; the `agentSessions` allowlists
 (`allowedUsers` D24, `allowedControllers` D31) deliberately do not grant it.
 
+### Database retention — archive and prune old rows (PLAN D63)
+
+Default: off (nothing prunes `.ledger.sqlite` on its own — this is a manual/scheduled
+command, not an automatic background job).
+
+`.ledger.sqlite` accumulates rows forever across `ledger`, `asks`, `agent_sessions`,
+`remote_audit`, `local_audit`, `bot_send_tracking`, and `dm_channels` — nothing
+previously pruned any of them, so a long-running install's database file only grows.
+
+Use:
+
+```bash
+node cli/archive.js export [--before <ISO date>] [--dry-run] [--json]
+tsb-archive export [--before <ISO date>] [--dry-run] [--json]   # global npm install
+```
+
+`core/archive.js`'s `archiveOldData()`: for every one of those tables, rows older than
+the cutoff (default `startOfCurrentMonth()` — midnight on day 1 of the current month,
+so only the current month's data stays live) are first exported to a gzipped JSON file
+under `<TSB_HOME>/archives/`, written `0600` (same posture as every other local file
+holding real identifiers, D44), and only *then* deleted from the live tables — a failed
+export never deletes anything, worst case is re-running later. After deleting, it runs
+`VACUUM`, since SQLite's `DELETE` alone never shrinks the file on disk; without it the
+database would stay the same size forever even with every old row gone. Running it
+again immediately is a safe no-op (`totalRows: 0`, no file written). `--dry-run` reports
+exactly what would be archived/deleted without touching the database or filesystem.
+
+`--before` overrides the default cutoff with any ISO-8601 timestamp, for a tighter or
+looser retention window than "keep the current month." Safe to put on a schedule the
+same way `cli/daemon.js start` already is — e.g. a monthly cron entry:
+
+```
+0 3 1 * * TSB_HOME=/path/to/home node /path/to/cli/archive.js export --json >> /path/to/archive.log 2>&1
+```
+
+Turn off: don't run it. There is no config flag to disable, since it is not a
+background job in the first place — it only ever runs when something (you, or a cron
+entry you set up) explicitly invokes it.
+
 ## Health checks
 
 Run:

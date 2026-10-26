@@ -268,6 +268,11 @@ export const schemas = {
         description: '"auto" (default) infers id/email/handle from the query shape. "handle" and "name" both search the live directory the same way.',
       },
       includeEmail: { type: 'boolean', description: 'Default false — omit email from the result even when Slack returns it, to minimize unnecessary PII exposure.' },
+      tokenSource: {
+        type: 'string',
+        enum: ['bot', 'user'],
+        description: 'Default "bot" — the shared bot token. Pass "user" to use SLACK_USER_TOKEN instead; this is explicit and never a silent fallback, and the resolved tokenSource is always echoed back in the result.',
+      },
     },
     required: ['query'],
     additionalProperties: false,

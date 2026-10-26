@@ -297,24 +297,27 @@ slack_lookup_user { "query": "Manish Sharma", "mode": "name" }     -> same direc
 ```
 
 Resolves a workspace member who is **not** necessarily in `slack-config.json`, via a
-live Slack API call, using the shared **bot token only** — never a silent fallback to
-`SLACK_USER_TOKEN` (every successful result carries `tokenSource: "bot"` so a caller
-never has to guess). `mode` defaults to `"auto"`: a `U.../W...`-shaped query goes to
-`users.info`, an email-shaped query goes to `users.lookupByEmail`, and anything else
-searches the directory for an exact (normalized — one leading `@` stripped, trimmed,
-case-insensitive) match against the Slack handle, `profile.display_name`, and real
-name. Deleted users and bots are excluded by default. More than one match refuses with
-`error:"ambiguous-user"` and lists every match — it never guesses, since Slack does not
-guarantee a handle is globally unique. Email is omitted from the result unless
-`includeEmail:true`, to minimize unnecessary PII exposure. `core/directory.js`'s
-`users.list` walk is cached in memory per token for `directoryLookup.cacheTtlMs`
-(`slack-config.json`, default 10 minutes) — a failed page is never cached, so a
-`missing_scope` error is visible on the very next call, not silently repeated for the
-whole TTL window.
+live Slack API call. Defaults to the shared **bot token** (`tokenSource:"bot"`); pass
+`tokenSource:"user"` to use `SLACK_USER_TOKEN` instead — always explicit, **never a
+silent fallback** between the two (D51), and every successful result echoes back which
+one actually answered (`tokenSource` in the response). `mode` defaults to `"auto"`: a
+`U.../W...`-shaped query goes to `users.info`, an email-shaped query goes to
+`users.lookupByEmail`, and anything else searches the directory for an exact (normalized
+— one leading `@` stripped, trimmed, case-insensitive) match against the Slack handle,
+`profile.display_name`, and real name. Deleted users and bots are excluded by default.
+More than one match refuses with `error:"ambiguous-user"` and lists every match — it
+never guesses, since Slack does not guarantee a handle is globally unique. Email is
+omitted from the result unless `includeEmail:true`, to minimize unnecessary PII exposure.
+`core/directory.js`'s `users.list` walk is cached in memory **per token** for
+`directoryLookup.cacheTtlMs` (`slack-config.json`, default 10 minutes) — a bot-token
+cache and a user-token cache are naturally independent since the cache key is the token
+itself — and a failed page is never cached, so a `missing_scope` error is visible on the
+very next call, not silently repeated for the whole TTL window.
 
-Turn off: remove `SLACK_BOT_TOKEN`, or avoid calling the tool. `slack_doctor`'s
-`directoryLookup.ready` reports whether the bot token is present (never the scope set —
-that's only discoverable from a real `missing_scope` response at call time).
+Turn off: remove the token the call would use, or avoid calling the tool.
+`slack_doctor`'s `directoryLookup.ready` reports whether the bot token is present (never
+the scope set — that's only discoverable from a real `missing_scope` response at call
+time).
 
 **Local-only**, same posture as `slack_list_channels`/`slack_search` — an unrestricted
 directory search is a workspace-enumeration primitive the same way unrestricted
@@ -327,11 +330,12 @@ entirely (checked by `test/http.test.js`), not just disabled by a flag.
 config" support is added later, it must be a separate, explicit, user-confirmed step
 through the existing secure config-write path — never automatic.
 
-**Known gap:** requires `users:read` (and `users:read.email` for email lookup) on the
-**bot** token's scopes. The manifest template now requests both, but — same outstanding
-step as every other scope addition in this file — needs a manual reinstall to take
-effect against a live workspace; this has not yet been live-verified against a real
-Slack API, only unit-tested against fake tokens.
+**Known gap:** requires `users:read` (and `users:read.email` for email lookup) on
+**whichever token** (`bot` or `user`) is selected for a given call — Slack scopes work
+identically for both token types. The manifest template and `get-user-token.js`'s
+`USER_SCOPES` now request both on **both** scope lists (D51). **Live-verified** (2026-10-26)
+against the real workspace: `users.info`, `users.list`, and `users.lookupByEmail` all
+succeed with both `tokenSource:"bot"` and `tokenSource:"user"`.
 
 ### Scheduling
 

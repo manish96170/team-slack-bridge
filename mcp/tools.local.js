@@ -7,8 +7,9 @@
 // `slack_upload_file`, `slack_upload_file_as_user`, and `slack_lookup_user`
 // are exactly what mcp/tools.remote.js must NOT import. The upload tools
 // additionally read an arbitrary local `filePath`, which would be a local-file
-// read primitive in a remote profile. `slack_lookup_user` is bot-token-based
-// (not user-token) but local-only for a different reason — see D50 below.
+// read primitive in a remote profile. `slack_lookup_user` can use either
+// token (tokenSource:"bot"/"user", explicit, never a silent fallback) but
+// is local-only for a different reason — see D50/D51 below.
 //
 // D47: `slack_post`/`slack_reply`/`slack_dm` default to sending AS THE
 // LOCAL USER (`viaBot:false`), not as the bot — reversed from the original
@@ -41,9 +42,14 @@
 // D50: `slack_lookup_user` is a SEPARATE capability from `slack_resolve_user`
 // above — a live Slack API call (`core/directory.js`), not a config-file
 // lookup, for people who aren't in slack-config.json's `users` list.
-// Bot-token only, by design (no silent bot/user fallback); local-only,
-// since an unrestricted directory search is a workspace-enumeration
-// primitive the same way unrestricted `resolveUser` was (D20).
+// Local-only, since an unrestricted directory search is a workspace-
+// enumeration primitive the same way unrestricted `resolveUser` was (D20).
+//
+// D51: `slack_lookup_user` can use EITHER token, via an explicit
+// `tokenSource:"bot"|"user"` argument (default `"bot"`) — never a silent
+// fallback between the two, same principle as every other bot/user split
+// in this registry. The resolved `tokenSource` is always echoed back in
+// the result so a caller never has to infer which identity answered.
 
 import { postToChannel, reply, react, unreact, updateMessage, deleteMessage } from '../core/post.js'
 import { dm } from '../core/dm.js'
@@ -392,16 +398,20 @@ export const tools = {
   slack_lookup_user: {
     name: 'slack_lookup_user',
     description:
-      'Look up a Slack workspace member who is NOT necessarily in slack-config.json, via a live Slack API call (users.info / users.lookupByEmail / users.list) using the shared bot token — never a silent fallback to a user token. mode:"auto" (default) infers id/email/handle from the query shape; "id" forces users.info, "email" forces users.lookupByEmail, and "handle"/"name" both search the (cached) full directory for an exact, normalized match against the Slack handle, display name, and real name. Deleted users and bots are excluded by default. More than one match refuses with error:"ambiguous-user" and lists every match rather than guessing. Email is omitted from the result unless includeEmail:true, to minimize unnecessary PII exposure. This never writes to slack-config.json.',
+      'Look up a Slack workspace member who is NOT necessarily in slack-config.json, via a live Slack API call (users.info / users.lookupByEmail / users.list). Defaults to the shared bot token (tokenSource:"bot"); pass tokenSource:"user" to use SLACK_USER_TOKEN instead — always explicit, never a silent fallback, and the resolved tokenSource is echoed back in the result. mode:"auto" (default) infers id/email/handle from the query shape; "id" forces users.info, "email" forces users.lookupByEmail, and "handle"/"name" both search the (cached) full directory for an exact, normalized match against the Slack handle, display name, and real name. Deleted users and bots are excluded by default. More than one match refuses with error:"ambiguous-user" and lists every match rather than guessing. Email is omitted from the result unless includeEmail:true, to minimize unnecessary PII exposure. This never writes to slack-config.json.',
     inputSchema: schemas.slack_lookup_user,
-    handler: (args, ctx) =>
-      lookupUser({
+    handler: (args, ctx) => {
+      const tokenSource = args.tokenSource === 'user' ? 'user' : 'bot'
+      const token = tokenSource === 'user' ? ctx.env.SLACK_USER_TOKEN : ctx.env.SLACK_BOT_TOKEN
+      return lookupUser({
         query: args.query,
         mode: args.mode,
         includeEmail: !!args.includeEmail,
-        token: ctx.env.SLACK_BOT_TOKEN,
+        token,
+        tokenSource,
         ttlMs: ctx.config?.directoryLookup?.cacheTtlMs,
-      }),
+      })
+    },
   },
   slack_doctor: {
     name: 'slack_doctor',

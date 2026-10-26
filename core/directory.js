@@ -7,11 +7,12 @@
 // real Slack API round trip (and, for handle/name search, a cached but
 // still real directory walk).
 //
-// Uses the shared BOT token only, on purpose (PLAN §0's "bot is shared
-// infrastructure" principle, same as every other bot-token tool) — never a
-// silent fallback to SLACK_USER_TOKEN. `tokenSource: 'bot'` is stamped on
-// every successful result so a caller never has to guess which identity
-// answered.
+// Uses the shared BOT token by default (PLAN §0's "bot is shared
+// infrastructure" principle, same as every other bot-token tool), with an
+// explicit opt-in to the user token instead — never a silent fallback.
+// `tokenSource` ('bot' or 'user') is a caller-supplied label, not inferred,
+// and is stamped on every successful result so a caller never has to guess
+// which identity actually answered.
 
 import { callSlack } from './slack.js'
 
@@ -79,7 +80,7 @@ async function fetchAllMembers({ token, slackCall, ttlMs }) {
   return { ok: true, members }
 }
 
-export async function lookupUserById({ token, userId, slackCall = callSlack, includeEmail = false }) {
+export async function lookupUserById({ token, userId, slackCall = callSlack, includeEmail = false, tokenSource = 'bot' }) {
   if (!userId || !userId.trim()) return { ok: false, error: 'query-required', retryable: false }
   if (!token) return { ok: false, error: 'no-token', retryable: false }
 
@@ -89,10 +90,10 @@ export async function lookupUserById({ token, userId, slackCall = callSlack, inc
     return mapSlackFailure(result, 'users:read')
   }
   if (!isEligible(result.user)) return { ok: false, error: 'user-not-found', retryable: false }
-  return { ok: true, source: 'slack-directory', tokenSource: 'bot', user: toPublicUser(result.user, { includeEmail }) }
+  return { ok: true, source: 'slack-directory', tokenSource, user: toPublicUser(result.user, { includeEmail }) }
 }
 
-export async function lookupUserByEmail({ token, email, slackCall = callSlack, includeEmail = false }) {
+export async function lookupUserByEmail({ token, email, slackCall = callSlack, includeEmail = false, tokenSource = 'bot' }) {
   if (!email || !email.trim()) return { ok: false, error: 'query-required', retryable: false }
   if (!token) return { ok: false, error: 'no-token', retryable: false }
 
@@ -102,7 +103,7 @@ export async function lookupUserByEmail({ token, email, slackCall = callSlack, i
     return mapSlackFailure(result, 'users:read.email')
   }
   if (!isEligible(result.user)) return { ok: false, error: 'user-not-found', retryable: false }
-  return { ok: true, source: 'slack-directory', tokenSource: 'bot', user: toPublicUser(result.user, { includeEmail }) }
+  return { ok: true, source: 'slack-directory', tokenSource, user: toPublicUser(result.user, { includeEmail }) }
 }
 
 // Handle AND display-name/real-name search share one code path — Slack has
@@ -111,7 +112,7 @@ export async function lookupUserByEmail({ token, email, slackCall = callSlack, i
 // guarantee a handle is globally unique, so more than one eligible match
 // is reported as `ambiguous-user` with every match listed, never resolved
 // to an arbitrary pick.
-export async function searchDirectoryByHandleOrName({ token, query, slackCall = callSlack, includeEmail = false, ttlMs }) {
+export async function searchDirectoryByHandleOrName({ token, query, slackCall = callSlack, includeEmail = false, ttlMs, tokenSource = 'bot' }) {
   if (!query || !query.trim()) return { ok: false, error: 'query-required', retryable: false }
   if (!token) return { ok: false, error: 'no-token', retryable: false }
 
@@ -137,17 +138,17 @@ export async function searchDirectoryByHandleOrName({ token, query, slackCall = 
       })),
     }
   }
-  return { ok: true, source: 'slack-directory', tokenSource: 'bot', user: toPublicUser(matches[0], { includeEmail }) }
+  return { ok: true, source: 'slack-directory', tokenSource, user: toPublicUser(matches[0], { includeEmail }) }
 }
 
-export async function lookupUser({ query, mode = 'auto', token, slackCall = callSlack, includeEmail = false, ttlMs }) {
+export async function lookupUser({ query, mode = 'auto', token, slackCall = callSlack, includeEmail = false, ttlMs, tokenSource = 'bot' }) {
   if (!query || !query.trim()) return { ok: false, error: 'query-required', retryable: false }
   if (!token) return { ok: false, error: 'no-token', retryable: false }
 
   const resolvedMode = mode && mode !== 'auto' ? mode : isSlackUserId(query) ? 'id' : isEmailAddress(query) ? 'email' : 'handle'
 
-  if (resolvedMode === 'id') return lookupUserById({ token, userId: query, slackCall, includeEmail })
-  if (resolvedMode === 'email') return lookupUserByEmail({ token, email: query, slackCall, includeEmail })
+  if (resolvedMode === 'id') return lookupUserById({ token, userId: query, slackCall, includeEmail, tokenSource })
+  if (resolvedMode === 'email') return lookupUserByEmail({ token, email: query, slackCall, includeEmail, tokenSource })
   // 'handle' and 'name' are the same search — see searchDirectoryByHandleOrName.
-  return searchDirectoryByHandleOrName({ token, query, slackCall, includeEmail, ttlMs })
+  return searchDirectoryByHandleOrName({ token, query, slackCall, includeEmail, ttlMs, tokenSource })
 }

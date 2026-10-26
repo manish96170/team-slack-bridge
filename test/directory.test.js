@@ -14,16 +14,20 @@ const DELETED = { id: 'U0GONE001', name: 'ex.employee', deleted: true, profile: 
 const DUP_A = { id: 'U0DUPA001', name: 'alex', real_name: 'Alex Smith', profile: { display_name: 'Alex' } }
 const DUP_B = { id: 'U0DUPB001', name: 'alex', real_name: 'Alex Jones', profile: { display_name: 'Alex' } }
 
-function fakePaginatedList(pages) {
+function fakePaginatedList(pages, expectedToken = 'xoxb-fake') {
   let call = 0
   return async (method, token, body) => {
     assert.equal(method, 'users.list')
-    assert.equal(token, 'xoxb-fake')
+    assert.equal(token, expectedToken)
     const page = pages[call]
     call += 1
     if (!page) return { ok: true, members: [], response_metadata: {} }
     return { ok: true, members: page.members, response_metadata: { next_cursor: page.nextCursor || '' } }
   }
+}
+
+function fakePaginatedListWithToken(pages, expectedToken) {
+  return fakePaginatedList(pages, expectedToken)
 }
 
 test('lookupUser mode:auto routes a Slack ID to users.info', async () => {
@@ -37,6 +41,27 @@ test('lookupUser mode:auto routes a Slack ID to users.info', async () => {
   assert.equal(result.source, 'slack-directory')
   assert.equal(result.tokenSource, 'bot')
   assert.deepEqual(result.user, { id: 'U0JANE001', displayName: 'Jane', realName: 'Jane Doe', handle: 'jane.doe', email: null })
+})
+
+test('lookupUser/lookupUserById/lookupUserByEmail/searchDirectoryByHandleOrName default tokenSource to "bot" but echo back whatever is explicitly passed', async () => {
+  clearDirectoryCache()
+  const slackCall = async () => ({ ok: true, user: JANE })
+  const defaulted = await lookupUserById({ token: 'xoxp-fake-user', userId: 'U0JANE001', slackCall })
+  assert.equal(defaulted.tokenSource, 'bot')
+
+  const explicitUser = await lookupUserById({ token: 'xoxp-fake-user', userId: 'U0JANE001', slackCall, tokenSource: 'user' })
+  assert.equal(explicitUser.tokenSource, 'user')
+
+  const emailAsUser = await lookupUserByEmail({ token: 'xoxp-fake-user', email: 'jane@example.com', slackCall, tokenSource: 'user' })
+  assert.equal(emailAsUser.tokenSource, 'user')
+
+  clearDirectoryCache()
+  const searchAsUser = await searchDirectoryByHandleOrName({ token: 'xoxp-fake-user', query: 'jane.doe', slackCall: fakePaginatedListWithToken([{ members: [JANE] }], 'xoxp-fake-user'), tokenSource: 'user' })
+  assert.equal(searchAsUser.tokenSource, 'user')
+
+  clearDirectoryCache()
+  const autoAsUser = await lookupUser({ query: 'jane.doe', token: 'xoxp-fake-user', slackCall: fakePaginatedListWithToken([{ members: [JANE] }], 'xoxp-fake-user'), tokenSource: 'user' })
+  assert.equal(autoAsUser.tokenSource, 'user')
 })
 
 test('lookupUserById excludes email unless includeEmail:true', async () => {
@@ -233,4 +258,26 @@ test('lookupUser/lookupUserById/lookupUserByEmail/searchDirectoryByHandleOrName 
   // None of the lookup functions accept a configPath at all — this is a
   // belt-and-braces check that nothing was ever created on disk by them.
   assert.equal(existsSync(configPath), false)
+})
+
+test('slack_lookup_user tool: tokenSource defaults to "bot" — never silently falls back to an available SLACK_USER_TOKEN', async () => {
+  const { tools } = await import('../mcp/tools.local.js')
+  // Only SLACK_USER_TOKEN is configured, no SLACK_BOT_TOKEN. If the default
+  // silently fell back to whatever token IS available, this would attempt
+  // the call instead of refusing with no-token.
+  const ctx = { env: { SLACK_USER_TOKEN: 'xoxp-the-user-token' }, config: {} }
+  const result = await tools.slack_lookup_user.handler({ query: 'U0000000X' }, ctx)
+  assert.equal(result.ok, false)
+  assert.equal(result.error, 'no-token')
+})
+
+test('slack_lookup_user tool: tokenSource:"user" never silently falls back to an available SLACK_BOT_TOKEN', async () => {
+  const { tools } = await import('../mcp/tools.local.js')
+  // Only SLACK_BOT_TOKEN is configured, no SLACK_USER_TOKEN. If "user"
+  // silently fell back to the bot token, this would attempt the call
+  // instead of refusing with no-token.
+  const ctx = { env: { SLACK_BOT_TOKEN: 'xoxb-the-bot-token' }, config: {} }
+  const result = await tools.slack_lookup_user.handler({ query: 'U0000000X', tokenSource: 'user' }, ctx)
+  assert.equal(result.ok, false)
+  assert.equal(result.error, 'no-token')
 })

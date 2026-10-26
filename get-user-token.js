@@ -14,7 +14,7 @@ import { loadEnv, ENV_FILE_PATH } from './env.js'
 
 const PORT = 8917
 const REDIRECT_URI = `http://localhost:${PORT}/callback`
-const USER_SCOPES = 'chat:write,search:read,im:write,channels:read,groups:read,im:read,mpim:read,files:write,reactions:write'
+const USER_SCOPES = 'chat:write,search:read,im:write,channels:read,groups:read,im:read,mpim:read,files:write,reactions:write,users:read,users:read.email'
 
 const env = loadEnv()
 if (!env.SLACK_CLIENT_ID || !env.SLACK_CLIENT_SECRET) {

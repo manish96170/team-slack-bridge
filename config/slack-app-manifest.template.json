@@ -62,7 +62,9 @@
         "im:read",
         "mpim:read",
         "files:write",
-        "reactions:write"
+        "reactions:write",
+        "users:read",
+        "users:read.email"
       ]
     }
   },

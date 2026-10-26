@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // One-time helper: runs the Slack OAuth "authorize as user" flow locally,
 // then writes the resulting user token straight into .env — it is never
 // printed to the terminal or sent anywhere else.

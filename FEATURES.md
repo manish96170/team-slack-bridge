@@ -675,6 +675,11 @@ live one.
 node cli/tenants.js add TACME --enterprise-id E0ACME   # prints the home dir to run setup.js init against
 node cli/tenants.js list
 node cli/tenants.js remove TACME
+
+# equivalent from a global npm install (package.json's bin):
+tsb-tenants add TACME --enterprise-id E0ACME
+tsb-tenants list
+tsb-tenants remove TACME
 ```
 
 `tenants.json` (next to `accounts.json`/`repos.json` in `TSB_HOME`) maps each
@@ -693,6 +698,10 @@ orgs are never automatically allowed to share one app install. Once that's on:
 ```bash
 node cli/tenants.js add TACME
 TSB_HOME=~/.team-slack-bridge/tenants/TACME node get-workspace-token.js
+
+# equivalent from a global npm install:
+tsb-tenants add TACME
+TSB_HOME=~/.team-slack-bridge/tenants/TACME tsb-get-workspace-token
 ```
 
 `get-workspace-token.js` is `get-user-token.js`'s bot-token counterpart — same local
@@ -708,12 +717,13 @@ this one.
 Distribution checklist does not exempt a `localhost` redirect URL from its "Use
 HTTPS" requirement the way Socket Mode exempts every other feature's request URL.
 `core/local-tls.js` generates a self-signed cert for `localhost`/`127.0.0.1` on
-first use via the system's own `openssl` (`node cli/tls.js generate`, no new
-dependency) — **not** Let's Encrypt, which can only certify a domain it can verify
-ownership of over the public internet, and `localhost` isn't one. Expect a one-time
-browser "not private" warning for the self-signed cert; set
-`SLACK_LOCAL_TLS_CERT`/`SLACK_LOCAL_TLS_KEY` in `.env` to point at
-[mkcert](https://mkcert.dev)'s output instead if you want to skip it entirely.
+first use via the system's own `openssl` (`node cli/tls.js generate`, or
+`tsb-tls generate` from a global npm install — no new dependency) — **not** Let's
+Encrypt, which can only certify a domain it can verify ownership of over the public
+internet, and `localhost` isn't one. Expect a one-time browser "not private"
+warning for the self-signed cert; set `SLACK_LOCAL_TLS_CERT`/`SLACK_LOCAL_TLS_KEY`
+in `.env` to point at [mkcert](https://mkcert.dev)'s output instead if you want to
+skip it entirely.
 
 ### Local MCP daemon + multi-account (PLAN D21/D22)
 

@@ -1,11 +1,19 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D56) and architecture; this file is the scannable done/pending list.
+log (D1–D57) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
 ## Done
 
+- [x] **`bin` entries for `tsb-tls`/`tsb-tenants`/`tsb-get-user-token`/
+      `tsb-get-workspace-token` (D57)** — caught before publishing: D54/D56 added
+      these four scripts but `package.json`'s `bin` still only had
+      `team-slack-bridge`/`tsb-hook`, so a global `npm install` couldn't run them
+      directly. `get-user-token.js`/`get-workspace-token.js` gained the shebang
+      line `bin` requires. README/FEATURES.md updated to show both the git-clone
+      (`node cli/tls.js ...`) and global-install (`tsb-tls ...`) forms side by
+      side everywhere one of these four is mentioned.
 - [x] **Public Distribution activated; self-signed local HTTPS listener for the
       OAuth redirect callback (D56)** — Hornblower and Anchor OS turned out to be
       genuinely separate Slack orgs (not Enterprise Grid siblings), so installing

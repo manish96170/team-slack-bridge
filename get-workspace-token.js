@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // One-time helper: runs the Slack OAuth "install to a workspace" flow
 // locally, then writes the resulting BOT token (and team_id) into THIS
 // install's .env — never printed to the terminal or sent anywhere else.

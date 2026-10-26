@@ -304,7 +304,8 @@ the gap away mode fills (PLAN D34).
    ```
 4. If you want the "post as me" capability:
    ```
-   npm run get-user-token
+   npm run get-user-token        # from a git clone
+   tsb-get-user-token            # from a global npm install
    ```
    Open the printed URL, approve, and the script writes `SLACK_USER_TOKEN` into `.env`
    itself — the token is never printed to the terminal.
@@ -318,7 +319,12 @@ the gap away mode fills (PLAN D34).
    — expected for a self-signed cert, safe to proceed past. To skip that warning
    entirely, install [mkcert](https://mkcert.dev) (free) and set
    `SLACK_LOCAL_TLS_CERT`/`SLACK_LOCAL_TLS_KEY` in `.env` to its output instead of
-   letting this repo generate its own.
+   letting this repo generate its own. To generate (or just locate) that cert on its
+   own, without running a full OAuth flow:
+   ```
+   node cli/tls.js generate       # from a git clone
+   tsb-tls generate               # from a global npm install
+   ```
 
 ## Installing into another workspace (multi-tenancy, PLAN D54/D56)
 
@@ -328,8 +334,13 @@ into a different workspace — even one in a completely separate Slack org — w
 creating a second app or redoing scopes:
 
 ```bash
+# from a git clone
 node cli/tenants.js add <TEAM_ID>                              # prints a home dir
 TSB_HOME=<printed home> node get-workspace-token.js            # bot-token install flow
+
+# from a global npm install
+tsb-tenants add <TEAM_ID>                                      # prints a home dir
+TSB_HOME=<printed home> tsb-get-workspace-token                # bot-token install flow
 ```
 
 Open the printed authorize URL **while logged into the target workspace** and approve
@@ -345,11 +356,12 @@ remains deliberately deferred until an actual company asks for it.
 Every command below accepts `--json` (structured `{ ok, ... }` output, non-zero exit
 on failure) and, for anything that actually sends to Slack, `--dry-run` (resolve and
 format the call, send nothing). All of them are plain `node cli/<name>.js` invocations
-from a git clone; `npm install -g` only installs the `team-slack-bridge` binary as an
-alias for `post.js` specifically (`package.json`'s `bin`), not a dispatcher for every
-subcommand below — for anything else on a global install, run `node
-$(npm root -g)/team-slack-bridge/cli/<name>.js` (or just work from a git clone instead,
-which is what most of this README assumes).
+from a git clone; `npm install -g` installs six direct commands —
+`team-slack-bridge` (alias for `post.js`), `tsb-hook`, `tsb-tls`, `tsb-tenants`,
+`tsb-get-user-token`, and `tsb-get-workspace-token` (`package.json`'s `bin`) — but is
+not a dispatcher for every subcommand below. For anything else on a global install, run
+`node $(npm root -g)/team-slack-bridge/cli/<name>.js` (or just work from a git clone
+instead, which is what most of this README assumes).
 
 **Post, reply, edit, react, delete:**
 ```bash

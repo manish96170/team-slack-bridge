@@ -86,10 +86,12 @@ request → resolveAccount(request) → { botToken, config, repoRegistry } → c
 
 **Staged build-out, in order — do not skip ahead:**
 
-1. **Refactor only, no new capability.** Introduce `resolveAccount()` and route
-   today's single-tenant path through it. Behavior stays identical; D6's "no"
-   becomes one implementation of the interface instead of the only possible one.
-   Worth doing on its own, independent of whether step 2 ever happens.
+1. **[DONE 2026-10-26, PLAN D53] Refactor only, no new capability.** `core/tenancy.js`'s
+   `resolveAccount()` is now the seam `mcp/http.js` goes through for
+   `{ env, config, dbPath }`; `slackbotMcp.tenancy.mode` (`"single"` default) is
+   byte-identical to pre-refactor behavior, asserted by `test/tenancy.test.js`.
+   `"multi"` is accepted as a config value but refuses every call — see step 2,
+   still not started.
 2. **Build multi mode behind the flag, default off.** Needs a tenant store
    (encrypted at rest — once more than a couple of tenants' secrets live in one
    place, a flat file is not an acceptable posture, unlike today's per-install

@@ -587,7 +587,8 @@ Default:
   "authProviderKey": "",
   "exposeWriteTools": false,
   "allowedTools": [],
-  "rateLimitPerMinute": 30
+  "rateLimitPerMinute": 30,
+  "tenancy": { "mode": "single" }
 }
 ```
 
@@ -640,6 +641,17 @@ Risky local tools cannot be enabled remotely by config.
 Actionable remote calls are audited in `.ledger.sqlite` and rate-limited per Slack
 caller. Remote post/reply require an `idempotencyKey`; remote update/delete only touch
 messages that the same Slack caller created through the remote MCP path.
+
+**Tenancy mode (`slackbotMcp.tenancy.mode`, PLAN D53 — Phase 1 of the multi-tenancy
+roadmap, ROADMAP.md).** `"single"` (default, and the only mode that actually works
+today) behaves exactly as this whole section describes — one deployment, one
+workspace, unchanged. `"multi"` is scaffolded for a future opt-in profile (a shared
+deployment serving several Slack workspaces/companies, each isolated by `team_id`)
+but **deliberately refuses every `/mcp` call right now**, including `initialize` —
+there is no tenant store yet (Phase 2, not built), so a `multi`-flagged install must
+fail loudly rather than silently behave like `single` for whichever tenant happens
+to call it. Leave this at `"single"` (or omit it entirely) until a later release
+actually implements Phase 2.
 
 ### Local MCP daemon + multi-account (PLAN D21/D22)
 

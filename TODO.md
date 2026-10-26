@@ -6,6 +6,15 @@ log (D1–D46) and architecture; this file is the scannable done/pending list.
 
 ## Done
 
+- [x] **Multi-tenancy Phase 1: `resolveAccount()` + `tenancyMode` scaffold (D53,
+      ROADMAP.md's multi-tenancy plan)** — `core/tenancy.js` is now the one seam
+      `mcp/http.js` resolves `{ env, config, dbPath }` through. `single` mode
+      (default) is byte-identical to pre-refactor behavior (same object identity,
+      not just equal values, asserted by test). `multi` mode is a validated config
+      value that refuses every `/mcp` call, including `initialize`, rather than
+      silently acting like `single` — there is no tenant store yet. Phase 2 (tenant
+      store + `cli/tenants.js` + later an OAuth self-serve flow) is next, not
+      started.
 - [x] **Reaction removal + as-user reactions (D46, PLAN.md decisions table)** —
       `core/post.js`'s `unreact()` (mirrors `react()`, `reactions.remove` instead of
       `reactions.add`); `slack_unreact` joins `slack_react` in both local and remote
@@ -89,6 +98,13 @@ log (D1–D46) and architecture; this file is the scannable done/pending list.
 
 ## Pending
 
+- [ ] **Multi-tenancy Phase 2 (tenant store + `cli/tenants.js`) — not started.**
+      `slackbotMcp.tenancy.mode:"multi"` exists as a config value (Phase 1, D53)
+      but is a dead end on its own: every `/mcp` call refuses until an encrypted
+      `team_id → {botToken, config, repoRegistry}` tenant store exists. Build
+      `cli/tenants.js add|list|remove|set-default` first (hand-provisioning, same
+      shape as `cli/accounts.js`); the OAuth self-serve install flow is sequenced
+      after it, only once an actual company asks to self-onboard. See ROADMAP.md.
 - [ ] **Manual Slack app reauthorization needed for D41 + D42 + D45 + D46 to work live** — `config/slack-app-manifest.
       template.json`'s user scopes and `get-user-token.js`'s `USER_SCOPES` now request `channels:read`,
       `groups:read`, `im:read`, `mpim:read` (D41, `slack_list_channels`), `im:write` (D42, as-user DM/edit),

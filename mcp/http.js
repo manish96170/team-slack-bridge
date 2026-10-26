@@ -3,6 +3,7 @@ import { validateArguments } from './validation.js'
 import { findRemoteOwnedByTs, getEntry } from '../core/ledger.js'
 import { recordRemoteAudit, reserveRemoteCall, updateRemoteAudit } from '../core/remote-audit.js'
 import { normalizeSlackbotMcp } from '../core/slackbot-mcp.js'
+import { resolveAccount } from '../core/tenancy.js'
 import { packageVersion } from '../core/version.js'
 
 const PROTOCOL_VERSION = '2024-11-05'
@@ -103,6 +104,17 @@ export function authorizeRemoteToolCall({ name, args, config, dbPath, principal 
 export async function handleMcpMessage({ message, env, config, dbPath }) {
   const { id, method, params } = message || {}
 
+  if (method === 'notifications/initialized' || method === 'notifications/cancelled') return null
+
+  // Multi-tenancy Phase 1 (ROADMAP.md): every method below now goes through
+  // resolveAccount() rather than using the caller's env/config/dbPath
+  // directly. In tenancyMode:'single' (today's only working mode) this is
+  // a no-op -- same references back out -- so nothing below changes
+  // behavior. See core/tenancy.js.
+  const account = resolveAccount({ config, env, dbPath, principal: slackPrincipal(params) })
+  if (!account.ok) return error(id, -32000, account.error)
+  ;({ env, config, dbPath } = account)
+
   if (method === 'initialize') {
     return success(id, {
       protocolVersion: PROTOCOL_VERSION,
@@ -111,7 +123,6 @@ export async function handleMcpMessage({ message, env, config, dbPath }) {
     })
   }
 
-  if (method === 'notifications/initialized' || method === 'notifications/cancelled') return null
   if (method === 'ping') return success(id, {})
 
   if (method === 'tools/list') {

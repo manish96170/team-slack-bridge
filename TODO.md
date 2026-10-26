@@ -1,11 +1,17 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D46) and architecture; this file is the scannable done/pending list.
+log (D1–D55) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
 ## Done
 
+- [x] **Display-name matching in `slack_resolve_user`/`resolveMentions` (D55)** —
+      an optional `displayName` per configured user (e.g. `@PJ`) resolves as a
+      fallback, only when `name`/`slackHandle`/`slackUserId` don't match. Two
+      users sharing a `displayName` refuses as `ambiguous-user`, never picked.
+      Config-only, synchronous, no network call — unchanged from before this.
+      7 new tests (`test/display-name.test.js`).
 - [x] **Multi-tenancy Phase 2, hand-provisioning half: `core/tenant-store.js` +
       `cli/tenants.js` (D54)** — `"multi"` mode now really resolves a Slack
       `team_id` to that tenant's own `env`/`config`/`dbPath` (previously D53's
@@ -24,6 +30,42 @@ log (D1–D46) and architecture; this file is the scannable done/pending list.
       silently acting like `single` — there is no tenant store yet. Phase 2 (tenant
       store + `cli/tenants.js` + later an OAuth self-serve flow) is next, not
       started.
+- [x] **`cli/lookup-user.js` — CLI wrapper for `slack_lookup_user` (D52)** — same
+      `--as-user` convention as every other CLI command: absent selects the bot
+      token, `--as-user` selects `SLACK_USER_TOKEN`/`tokenSource:"user"`.
+      `--mode`/`--include-email` map straight through. Live-verified against the
+      real workspace for both token sources.
+- [x] **`slack_lookup_user` widened to accept either token via explicit
+      `tokenSource:"bot"|"user"` (D51)** — never a silent fallback either
+      direction. `users:read`/`users:read.email` added to the **user** token
+      scope list too (bot side already had them from D50). Live-verified: all
+      six combinations (bot/user × id/email/handle) succeeded against the real
+      workspace.
+- [x] **Live Slack-directory lookup: `slack_lookup_user` (D50)** — a NEW,
+      separate capability from `slack_resolve_user` (which stays config-only,
+      untouched). Resolves anyone in the workspace via `users.info`/
+      `users.lookupByEmail`/paginated `users.list`, matched/normalized the same
+      way as the config resolver. Ambiguous matches refused, never guessed;
+      email hidden unless `includeEmail:true`; `users.list` pages cached
+      in-memory per token (never a failed page); local-only by construction
+      (absent from `mcp/tools.remote.js`'s import graph); never writes to
+      `slack-config.json`.
+- [x] **`anonymousMessage` per-install config default (D49)** — `botSend.
+      anonymousMessageDefault` (off unless set). An explicit per-call `true`
+      *or* `false` always overrides the config default; only an
+      omitted/`undefined` argument falls back to it.
+- [x] **`viaBot:true` authorization gate + threaded sender tracking DM (D48)** —
+      refused from an unidentified sender unless `anonymousMessage` resolves
+      true. An identified sender always gets a private "You have sent... via
+      Bot" tracking DM (thread parent) with the real text as a threaded reply,
+      even in anonymous mode. Bot-token edit/delete propagates to that tracking
+      copy. Opt-out via `botSendTracking.enabled:false`.
+- [x] **`slack_post`/`slack_reply`/`slack_dm` default to sending AS THE LOCAL
+      USER, not the bot (D47)** — `viaBot:false` (new default) sends with
+      `SLACK_USER_TOKEN`, same path as the pre-existing `_as_user` tools, so the
+      message is really the sender's own (visible to them, native Slack
+      edit/delete). `viaBot:true` opts back into the bot path, with a visible
+      attribution footer and a `local_audit` journal entry.
 - [x] **Reaction removal + as-user reactions (D46, PLAN.md decisions table)** —
       `core/post.js`'s `unreact()` (mirrors `react()`, `reactions.remove` instead of
       `reactions.add`); `slack_unreact` joins `slack_react` in both local and remote
@@ -107,6 +149,16 @@ log (D1–D46) and architecture; this file is the scannable done/pending list.
 
 ## Pending
 
+- [ ] **D47's `viaBot:false` default needs `SLACK_USER_TOKEN` configured on every
+      developer's machine to work at all** — anyone who hasn't run `npm run
+      get-user-token` yet will see `slack_post`/`slack_dm` start failing with
+      `user-token-required-pass-viaBot-true-to-send-as-the-bot-instead` where
+      they used to silently succeed as the bot. Intentional (that's the whole
+      point of D47), but a real rollout step for every existing install, not
+      just a code change.
+- [ ] **D48's tracking DM relies on the sender's own `owner.slackUserId` being
+      DMable by the bot** — never live-verified against a real workspace; only
+      unit-tested against fake tokens so far.
 - [ ] **Multi-tenancy: live dogfood against a real public `/mcp` endpoint —
       not started.** `cli/tenants.js` + `core/tenant-store.js` (D54) are
       unit-tested but never exercised against a real deployed HTTPS endpoint

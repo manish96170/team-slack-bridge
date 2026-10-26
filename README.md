@@ -77,6 +77,7 @@ For the feature matrix and exact on/off switches, see `FEATURES.md`.
 | `slack_lookup_user` — live directory lookup | Bot token | `tokenSource:"user"` | D50/D51 |
 | Email in a `slack_lookup_user` result | **Hidden** | `includeEmail:true` | D50 |
 | `slack_resolve_user` display-name matching | **On** — fallback after name/handle/ID | configure `displayName` per user | D55 |
+| Remote/hosted `slackbotMcp` multi-tenancy | **Off** (`"single"`, one deployment = one workspace) | `slackbotMcp.tenancy.mode: "multi"` + `cli/tenants.js add` | D53/D54 |
 | CLI post-as identity (`cli/post.js` etc.) | **The bot**, unchanged | `--as-user` | pre-existing, see "Scope note" |
 
 ```
@@ -775,8 +776,12 @@ to restart**, and none of it lives in a harness-specific file (PLAN D40):
 
 ## Connecting multiple AI coding harnesses / multiple Slack accounts (PLAN D21/D22)
 
-Two independent things, both local-only — the remote/hosted `slackbotMcp` profile above
-is untouched by either (D6 stands: no multi-tenancy there).
+Two independent things, both local-only — the remote/hosted `slackbotMcp` profile is
+untouched by either. D6 still stands as the **default** there (one deployment, one bot,
+one workspace); an opt-in multi-tenant mode now exists for that profile specifically
+(`slackbotMcp.tenancy.mode`, D53-D54 — see "Multi-tenancy" under "Runtime Notes"
+above), but it's a separate axis from the local multi-harness/multi-account setup
+described in this section.
 
 **Multiple harnesses sharing one server**, instead of each spawning its own stdio
 `mcp/server.js` subprocess: enable `localMcpDaemon.enabled`, then

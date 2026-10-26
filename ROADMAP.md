@@ -53,7 +53,7 @@ why; this file is deliberately *not* a decisions log.
   client (not just this session) connected concurrently, confirm account-mode
   behavior end-to-end rather than only via unit tests.
 
-## Multi-tenancy as a configurable deployment mode (not yet started, 2026-10-26)
+## Multi-tenancy as a configurable deployment mode (in progress — Phases 1-2 shipped, 2026-10-26)
 
 Today D6 is a hard "no" for the hosted/remote profile — one deployment, one bot
 install, one workspace, by design (PLAN.md). This does not reopen D6 as a default;
@@ -90,8 +90,8 @@ request → resolveAccount(request) → { botToken, config, repoRegistry } → c
    `resolveAccount()` is now the seam `mcp/http.js` goes through for
    `{ env, config, dbPath }`; `slackbotMcp.tenancy.mode` (`"single"` default) is
    byte-identical to pre-refactor behavior, asserted by `test/tenancy.test.js`.
-   `"multi"` is accepted as a config value but refuses every call — see step 2,
-   still not started.
+   `"multi"` is accepted as a config value but refuses every call at the time of
+   this step — see step 2 below, now shipped (hand-provisioning half, D54).
 2. **[DONE 2026-10-26, PLAN D54 — hand-provisioning half only] Build multi mode
    behind the flag, default off.** `core/tenant-store.js` + `cli/tenants.js`
    shipped; `"multi"` mode now really resolves a Slack `team_id` to that

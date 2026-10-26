@@ -70,15 +70,19 @@ Slack (so the two do not drift), what to lift from the working sample next door,
 
 ---
 
-**Note (2026-10-26, not a decision — tracked in ROADMAP.md):** D6 remains the default
-and is unchanged for every existing single-tenant install. A second, **opt-in**
-multi-tenant profile for the hosted/remote surface — selected by a new
-`tenancyMode: "single"|"multi"` config key, never a fork of this codebase — is now
-tracked as a staged plan in ROADMAP.md's "Multi-tenancy as a configurable deployment
-mode" section. Read it before writing any code that assumes D6's "no" is permanent,
-and before writing any code for the hosted profile that assumes it stays permanent
-either way — the plan is additive, not a replacement, until each of its stages is
-actually built and tested.
+**Note (2026-10-26, updated — see D53-D55 above for what has actually shipped):** D6
+remains the default and is unchanged for every existing single-tenant install. A
+second, **opt-in** multi-tenant profile for the hosted/remote surface — selected by
+`slackbotMcp.tenancy.mode: "single"|"multi"` (not a top-level key; it lives inside the
+existing `slackbotMcp` config block since multi-tenancy only ever applies to that
+hosted profile, never the local stdio one) — is now **partially built**: Phase 1
+(`resolveAccount()`, D53) and Phase 2 (`core/tenant-store.js`/`cli/tenants.js`
+hand-provisioning, D54) have shipped; the OAuth self-serve install flow and internal
+dogfooding (ROADMAP.md's steps 3-4) have not. Read ROADMAP.md's "Multi-tenancy as a
+configurable deployment mode" section for what remains, and D53/D54's table rows
+above for exactly what already exists. This is still additive, never a replacement
+for D6's single-tenant default — see D53's own test asserting `"single"` mode stays
+byte-identical to pre-refactor behavior.
 
 ---
 

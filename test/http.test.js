@@ -203,8 +203,10 @@ test('Slackbot MCP import path does not load the local registry or risky remote-
   assert.ok(!combined.includes('../core/dm.js'))
   assert.ok(!combined.includes('../core/ask.js'))
   assert.ok(!combined.includes('../core/search.js'))
+  assert.ok(!combined.includes('../core/directory.js'))
   assert.ok(!combined.includes('slack_post_as_user'))
   assert.ok(!combined.includes('slack_search'))
+  assert.ok(!combined.includes('slack_lookup_user'))
 })
 
 test('/mcp validates tool arguments before invoking remote-safe tools', async () => {

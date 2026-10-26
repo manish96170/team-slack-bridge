@@ -61,6 +61,7 @@ im:read
 im:write
 reactions:write
 users:read
+users:read.email
 ```
 
 Socket Mode also needs an app-level token with:
@@ -279,6 +280,58 @@ Turn off: remove `SLACK_USER_TOKEN`. Remote Slackbot MCP never exposes this.
 **Known gap:** requires the user token's `channels:read`/`groups:read`/`im:read`/`mpim:read` scopes,
 which the manifest template and `get-user-token.js` now request but which need a manual
 reinstall/re-authorize to take effect live — same outstanding step as "DM as user" above.
+
+### Live directory lookup (PLAN D50)
+
+Default: on whenever `SLACK_BOT_TOKEN` exists — this is a separate capability from
+`slack_resolve_user` (above, under "Configured users"), which stays config-file-only,
+fast, and deterministic, and is unaffected by any of this.
+
+Use:
+
+```text
+slack_lookup_user { "query": "U055NFSGF88" }                       -> users.info
+slack_lookup_user { "query": "manish.sharma@cityexperiences.com" } -> users.lookupByEmail
+slack_lookup_user { "query": "@manish.sharma" }                    -> paginated users.list, matched
+slack_lookup_user { "query": "Manish Sharma", "mode": "name" }     -> same directory search
+```
+
+Resolves a workspace member who is **not** necessarily in `slack-config.json`, via a
+live Slack API call, using the shared **bot token only** — never a silent fallback to
+`SLACK_USER_TOKEN` (every successful result carries `tokenSource: "bot"` so a caller
+never has to guess). `mode` defaults to `"auto"`: a `U.../W...`-shaped query goes to
+`users.info`, an email-shaped query goes to `users.lookupByEmail`, and anything else
+searches the directory for an exact (normalized — one leading `@` stripped, trimmed,
+case-insensitive) match against the Slack handle, `profile.display_name`, and real
+name. Deleted users and bots are excluded by default. More than one match refuses with
+`error:"ambiguous-user"` and lists every match — it never guesses, since Slack does not
+guarantee a handle is globally unique. Email is omitted from the result unless
+`includeEmail:true`, to minimize unnecessary PII exposure. `core/directory.js`'s
+`users.list` walk is cached in memory per token for `directoryLookup.cacheTtlMs`
+(`slack-config.json`, default 10 minutes) — a failed page is never cached, so a
+`missing_scope` error is visible on the very next call, not silently repeated for the
+whole TTL window.
+
+Turn off: remove `SLACK_BOT_TOKEN`, or avoid calling the tool. `slack_doctor`'s
+`directoryLookup.ready` reports whether the bot token is present (never the scope set —
+that's only discoverable from a real `missing_scope` response at call time).
+
+**Local-only**, same posture as `slack_list_channels`/`slack_search` — an unrestricted
+directory search is a workspace-enumeration primitive the same way unrestricted
+`resolveUser` was before D20, so it is absent from `mcp/tools.remote.js`'s import graph
+entirely (checked by `test/http.test.js`), not just disabled by a flag.
+
+**Never writes to `slack-config.json`.** A lookup is read-only by construction —
+`core/directory.js` has no `configPath` parameter at all, and does not import
+`core/config-write.js` (checked by `test/directory.test.js`). If "save this person to my
+config" support is added later, it must be a separate, explicit, user-confirmed step
+through the existing secure config-write path — never automatic.
+
+**Known gap:** requires `users:read` (and `users:read.email` for email lookup) on the
+**bot** token's scopes. The manifest template now requests both, but — same outstanding
+step as every other scope addition in this file — needs a manual reinstall to take
+effect against a live workspace; this has not yet been live-verified against a real
+Slack API, only unit-tested against fake tokens.
 
 ### Scheduling
 

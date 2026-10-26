@@ -45,6 +45,11 @@ export function loadConfig(path) {
       // remember to pass the flag. Off by default: an explicit per-call
       // `anonymousMessage` (true OR false) always overrides this.
       botSend: { anonymousMessageDefault: false },
+      // D50 — live Slack-directory lookup (slack_lookup_user). cacheTtlMs
+      // bounds how long a users.list directory walk is cached in memory
+      // (core/directory.js); 10 minutes by default. Never applies to error
+      // results, which are never cached.
+      directoryLookup: { cacheTtlMs: 10 * 60 * 1000 },
     }
   }
   const raw = JSON.parse(readFileSync(path, 'utf8'))
@@ -127,6 +132,9 @@ export function loadConfig(path) {
     },
     botSend: {
       anonymousMessageDefault: !!raw.botSend?.anonymousMessageDefault,
+    },
+    directoryLookup: {
+      cacheTtlMs: Number.isFinite(raw.directoryLookup?.cacheTtlMs) ? raw.directoryLookup.cacheTtlMs : 10 * 60 * 1000,
     },
   }
 }

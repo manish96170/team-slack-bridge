@@ -258,6 +258,20 @@ export const schemas = {
     required: ['handle'],
     additionalProperties: false,
   },
+  slack_lookup_user: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: 'A Slack member ID (U...), an email address, an @handle, a display name, or a real name' },
+      mode: {
+        type: 'string',
+        enum: ['auto', 'id', 'email', 'handle', 'name'],
+        description: '"auto" (default) infers id/email/handle from the query shape. "handle" and "name" both search the live directory the same way.',
+      },
+      includeEmail: { type: 'boolean', description: 'Default false — omit email from the result even when Slack returns it, to minimize unnecessary PII exposure.' },
+    },
+    required: ['query'],
+    additionalProperties: false,
+  },
   slack_doctor: {
     type: 'object',
     properties: {},

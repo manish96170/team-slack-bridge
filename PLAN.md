@@ -61,6 +61,7 @@ Slack (so the two do not drift), what to lift from the working sample next door,
 | D47 | **`slack_post`/`slack_reply`/`slack_dm` default flipped to send AS THE LOCAL USER (`viaBot:false`), plus a local attribution-and-audit path for the bot send** (2026-10-25, on request — multiple developers run this install locally against the same shared Bot Token, and a bot-sent message is invisible to its own sender and untraceable to everyone else). Two independent problems, two fixes: (1) a bot-token send is not a Slack message belonging to the human who triggered it, so they can't see/edit/delete it natively — fixed by making `viaBot:false` (the new default) send with `SLACK_USER_TOKEN` instead, identical to the pre-existing `_as_user` tools, so the message really is theirs. (2) when a bot-token send genuinely is wanted (`viaBot:true`), it still carries no Slack-native sender identity on a shared token — fixed by `core/sender.js`'s `withSenderAttribution`, which appends a visible `<@mention> (name, @handle) · memberId: U...` footer resolved from `slack-config.json`'s `owner`, and by `core/local-audit.js`'s `local_audit` SQLite table (mirrors `remote_audit`'s shape), journaled on every `viaBot:true` send. The `memberId:` text is deliberately plain, not just mention markup, so a *different* session reading the message back via `slack_query_messages`/`slack_get_thread` can parse it straight into `slack_dm`/`slack_resolve_user` without guessing. `slack_delete_message_as_user` added for symmetry — without it there was no way to delete a message sent by the new as-user default. `slack_post_as_user`/`slack_dm_as_user` are unchanged and now describe the same behavior the bare tools default to; kept for explicitness. Remote (`mcp/tools.remote.js`) already had this exact pattern (§11.3) — this is porting the same idea to the local stdio/HTTP-daemon registry, not inventing a new one | `core/sender.js`, `core/local-audit.js`, `core/db.js`, `mcp/schema.js`, `mcp/tools.local.js` |
 | D48 | **`viaBot:true` refused from an unidentified sender unless `anonymousMessage:true`; an identified sender gets a private threaded tracking DM of every `viaBot:true` send** (2026-10-25, on request). Closes a gap D47 left open: D47 made `viaBot:true` degrade gracefully with a "no owner configured" footer when a sender couldn't be identified, which is a courteous default for an honest mistake but does nothing to stop a deliberately-unconfigured install from bot-spamming at will. Now `isAuthorizedSender(config)` (owner.slackUserId set) gates the whole `viaBot:true` path on `slack_post`/`slack_reply`/`slack_dm`: unidentified **and** not explicitly `anonymousMessage:true` → refused with `not-authorized-to-send-as-bot-pass-anonymousMessage-true-to-send-anonymously`, forcing a deliberate opt-in to anonymity rather than falling into it by omission. Separately, `anonymousMessage:true` controls only what the **public** message says — it strips `withSenderAttribution`'s identity down to "sender withheld" — and does **not** suppress the sender's own private copy: `core/tracking.js`'s `echoBotSendToSender` DMs the identified sender "You have sent `<a DM to @user / a bot message in #channel>` via Bot" as a thread parent, then the real sent text (attribution included or not, matching what the recipient actually saw) as a single threaded reply underneath — "withheld from the recipient" and "invisible to the sender" are different things, and this only ever relaxes the first, consistent with the request that an authorized sender can "at least see what is sent to whom" even when sending anonymously. The thread-not-flat-DM shape is deliberate: it keeps a sender's own history with the bot to one line per send ("You have sent...") with full content one click away, rather than every bot send cluttering their DM flatly. A new `bot_send_tracking` table (`core/db.js`) maps the original (channel, ts) to the tracking DM's (channel, parent ts, reply ts); `slack_update_message`/`slack_delete_message` (bot-token tools) now look that mapping up and propagate — update edits only the threaded reply (the "You have sent..." label describes the send, not its current text, so it's left alone), delete removes the whole tracking DM (parent + reply) and drops the row. All of it is opt-out per install via `botSendTracking.enabled:false` (new config key, `core/identity.js`, defaults `true`), and never runs on the (still default) as-user path, so that path's latency is unchanged — the two extra Slack calls this adds only happen on the already-exceptional `viaBot:true` branch, and are best-effort (wrapped in `.catch`) so a tracking failure never fails the real send/edit/delete it's attached to | `core/sender.js`, `core/tracking.js`, `core/db.js`, `core/identity.js`, `mcp/schema.js`, `mcp/tools.local.js`, `config/slack-config.example.json` |
 | D49 | **`anonymousMessage` gained a per-install config default (`botSend.anonymousMessageDefault`, off unless set), not just a per-call argument** (2026-10-25, on request — caught immediately after D48 shipped: requiring every caller to remember to pass `anonymousMessage:true` on every single call is exactly the kind of easy-to-forget flag D47/D48 were trying to get away from). `core/sender.js`'s `resolveAnonymousMessage(argValue, config)` is the one place this is decided: an explicit per-call value — `true` **or** `false` — always wins; only an omitted/`undefined` argument falls back to `config.botSend.anonymousMessageDefault`. The `false` case matters as much as the `true` one: an install that sets `anonymousMessageDefault:true` (always anonymous) still needs a caller to be able to say "no, attribute this one" with `anonymousMessage:false`, and the override has to be unambiguous — `arg ?? config-default` would get this backward for `false` (since `false ?? x` is `false`, that part's fine, but naively treating "falsy" as "use the default" would silently ignore an explicit `false`), hence the explicit `typeof argValue === 'boolean'` check rather than a nullish-coalesce shortcut. Every call site (`slack_post`/`slack_reply`/`slack_dm`'s `viaBot:true` branch) now resolves through this function instead of `!!args.anonymousMessage`, so the config default also feeds the D48 authorization gate — an install can set `anonymousMessageDefault:true` specifically to let an otherwise-unidentified install send anonymously by default, with no per-call flag required | `core/sender.js`, `core/identity.js`, `mcp/tools.local.js`, `mcp/schema.js`, `config/slack-config.example.json` |
+| D50 | **Live Slack-directory lookup (`slack_lookup_user`) added as a separate capability from `slack_resolve_user`** (2026-10-26, on request). `slack_resolve_user` stays exactly what it was — config-file-only, fast, deterministic, zero network calls — since changing that would have broken every existing caller's assumption about it. The new `core/directory.js` resolves people who are NOT in `slack-config.json`'s `users` list, via three real Slack API shapes behind one function: a `U.../W...`-shaped query → `users.info`; an email-shaped query → `users.lookupByEmail`; anything else (`mode:"handle"` or `"name"`, both the same code path since Slack has no separate endpoint for one vs the other) → a paginated `users.list` walk, matched in-memory against `name`/`profile.display_name`/`real_name`/`profile.real_name`, normalized the same way as `core/identity.js`'s existing handle matching (one leading `@` stripped, trimmed, case-insensitive). Deleted users and bots are excluded by default (`!member.deleted && !member.is_bot && id !== 'USLACKBOT'`). More than one eligible match refuses with `error:"ambiguous-user"` and lists every match (id/displayName/handle) — Slack does not guarantee a handle is globally unique, and D20's "never select an arbitrary person" rule for `resolveUser` applies with equal force here. **Bot-token only, no fallback**: every successful result carries `tokenSource:"bot"` so a caller never has to infer which identity answered, matching the request's "do not silently fall back between bot-token and user-token identity." **Email hidden by default** — `toPublicUser` only includes `profile.email` when `includeEmail:true` is passed, to minimize unnecessary PII exposure on a tool whose whole job is finding people. The `users.list` walk is the expensive part (a full-directory read), so pages are cached in-memory per token (`directoryLookup.cacheTtlMs`, `core/identity.js`, default 10 minutes) — but a **failed** page is never cached, so `missing_scope` or a network hiccup is visible on the very next call rather than silently repeated for the whole TTL window. **Local-only by construction**: absent from `mcp/tools.remote.js`'s import graph entirely (same "fail-closed by omission" posture as every other local-only tool since D5/D20), because an unrestricted directory search is a workspace-enumeration primitive the same shape D20 already refused for unrestricted `resolveUser` — checked by a new assertion in `test/http.test.js`. **Never writes to `slack-config.json`**: `core/directory.js` has no `configPath` parameter at all and does not import `core/config-write.js` (checked directly in `test/directory.test.js`) — "save this person" is explicitly out of scope for this change; if added later it needs its own explicit, user-confirmed step through the existing secure config-write path. New bot scope `users:read.email` added to the manifest template (`users:read` was already present); needs a manual reinstall to take effect live, same outstanding step as every other scope addition in this file — **not yet live-verified against a real workspace**, only unit-tested against fake tokens | `core/directory.js`, `core/identity.js`, `core/doctor.js`, `mcp/schema.js`, `mcp/tools.local.js`, `config/slack-app-manifest.template.json`, `config/slack-config.example.json` |
 
 ---
 
@@ -1332,6 +1333,87 @@ default, with no `anonymousMessage` argument at all.
 
 ---
 
+## 21. Live Slack-directory lookup — `slack_lookup_user` (D50, 2026-10-26)
+
+Everything so far (`slack_resolve_user`, `core/identity.js`) only ever resolves people
+already written into `slack-config.json`'s `users` list — which does not scale to "find
+anyone in the workspace" without hand-maintaining that list forever. D50 adds a second,
+explicitly separate resolver, `core/directory.js`, that calls Slack's own API live.
+
+**Why a separate function/tool rather than extending `resolveUser`:** `resolveUser` is
+load-bearing for callers that expect it to be synchronous-fast, deterministic, and
+network-free (`resolveMentions` runs it inline on every outbound message's text, for
+every `@word`). Making it sometimes hit the network, sometimes not, depending on whether
+a handle happens to be configured, would be a correctness hazard for every existing
+caller. `slack_lookup_user` is additive and `slack_resolve_user` is untouched — unit-
+tests for both now exist side by side to make this explicit.
+
+**Three Slack shapes, one function.** `lookupUser({ query, mode })` infers `mode:"auto"`
+from the query's shape — `U.../W...`-like → `users.info`; an email shape →
+`users.lookupByEmail`; anything else → the directory search. `mode:"handle"` and
+`mode:"name"` are the same code path on purpose: Slack has no separate endpoint for a
+`name` field vs a `display_name` field vs a `real_name` field, and the request explicitly
+wanted all three compared.
+
+**Ambiguity is refused, never guessed.** Slack handles are not guaranteed workspace-
+unique. `searchDirectoryByHandleOrName` collects every eligible match and, if there is
+more than one, returns `error:"ambiguous-user"` with the full list — the same principle
+D20 already established for `resolveUser` ("never select an arbitrary person"), applied
+to a live search instead of a config lookup.
+
+**Bot token, no fallback, ever.** Every tool-level call goes through
+`ctx.env.SLACK_BOT_TOKEN` only; `core/directory.js`'s functions don't even accept a user
+token parameter, so there is no fallback path to accidentally take. Every successful
+result carries `tokenSource: "bot"` so nothing has to be inferred from the response
+shape.
+
+**Caching is scoped to the expensive part only.** `users.info` and `users.lookupByEmail`
+are single calls — nothing to cache. `users.list` is a full-directory walk, so its pages
+are cached per-token with a bounded TTL (`directoryLookup.cacheTtlMs`, default 10
+minutes, `core/identity.js`). The one rule that matters more than the caching itself:
+**a failed page is never cached** — `fetchAllMembers` returns the raw Slack failure
+immediately on any non-ok page, before ever writing to the cache map, so a `missing_scope`
+install sees that error on every call, not just the first one every 10 minutes.
+
+**Local-only, by omission, like every other local-only tool since D5/D20.**
+`mcp/tools.remote.js` does not import `core/directory.js` at all — checked directly
+(`test/http.test.js`'s import-graph assertion), not left to a runtime check that could
+be bypassed. An unrestricted "search the directory" capability is exactly the
+workspace-enumeration shape D20 already refused once for unrestricted `resolveUser`.
+
+**PII minimization**: `email` is stripped from every result (`toPublicUser`) unless the
+caller passes `includeEmail:true` — the tool's whole purpose is finding people, which
+does not require handing back their email by default.
+
+**Zero config mutation.** `core/directory.js` has no `configPath`/`config` write
+parameter anywhere in its API, and does not import `core/config-write.js` — checked
+directly in `test/directory.test.js`, both by source inspection and by exercising every
+exported function and confirming no file appears on disk. "Save this person to
+slack-config.json" was explicitly requested to stay out of scope unless built as its own
+later, explicitly-confirmed step through the existing secure config-write path (D44's
+`0600` writes) — nothing here does that.
+
+**Scope change**: `users:read.email` added to the bot token scopes in
+`config/slack-app-manifest.template.json` (`users:read` was already present from an
+earlier pass). Needs a manual Slack app reinstall to take effect against the live
+workspace — joins the standing list of scope additions in this file still waiting on
+that manual step. **Not yet live-verified** against a real workspace for any of
+`users.info`/`users.list`/`users.lookupByEmail` — everything here is unit-tested against
+fake `slackCall` implementations only.
+
+**Tests (`test/directory.test.js`, 21 tests)**: ID lookup (found, not-found,
+missing_scope); email lookup (found, not-found, missing_scope); exact handle and
+name/display-name/real-name matching, normalized; no match; ambiguous match (every
+match listed, never one picked); deleted-user and bot filtering; multi-page pagination;
+cache hit across two calls within the TTL; a failed page never being served from cache;
+`mode:"auto"` routing for both ID- and email-shaped queries; `mode:"name"` using the same
+path as `mode:"handle"`; missing-token and empty-query guard clauses; and two dedicated
+"never touches slack-config.json" checks (source-level and behavioral). Also added one
+assertion to the existing `test/http.test.js` import-graph check, confirming
+`core/directory.js` and `slack_lookup_user` are absent from the remote profile's source.
+
+---
+
 TODO PENDING:
 1. Live-verify Slack webhooks and Slackbot MCP through a public HTTPS tunnel.
 1. Revisit OpenACP / ACP once there is a concrete agent/session orchestrator to connect.
@@ -1349,6 +1431,11 @@ TODO PENDING:
 1. **D48's tracking DM needs `im:write`/`chat:write` on the BOT token** (already present in the
    baseline bot scopes) **and relies on the sender's own `owner.slackUserId` being DMable by the
    bot** — never live-verified against a real workspace; only unit-tested against fake tokens so far.
+1. **D50's `slack_lookup_user` needs `users:read.email` added to the Slack app's BOT token scopes**
+   (manifest already updated; `users:read` was already present) **and a manual app reinstall to take
+   effect** — until that reinstall happens, email lookup (`users.lookupByEmail`) and possibly ID/handle
+   lookup too will fail live with `missing_scope` even though the code path is correct. Never
+   live-verified against a real workspace.
 1. Re-attempt `.github/workflows/publish.yml` on the next version bump to confirm whether the OIDC `E404`
    was purely the stale local npm session, or whether npm's Trusted Publishing has a real bug independent
    of that (both are plausible per the upstream issue reports; only one real attempt with valid

@@ -97,6 +97,14 @@ export async function doctor({ env, config, profile = 'local', slackCall = callS
       configured: !!(env.SLACK_BOT_TOKEN && env.SLACK_APP_TOKEN && config.owner?.slackUserId),
       hasOwner: !!config.owner?.slackUserId,
     },
+    // D50 — slack_lookup_user needs the bot token and the users:read (plus
+    // users:read.email for email lookup) scopes; doctor can only confirm
+    // the token is present, never the scope set itself (that's only
+    // discoverable from a real missing_scope response at call time).
+    directoryLookup: {
+      ready: !!env.SLACK_BOT_TOKEN,
+      cacheTtlMs: config.directoryLookup?.cacheTtlMs ?? null,
+    },
   }
 
   if (env.SLACK_BOT_TOKEN) {

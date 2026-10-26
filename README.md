@@ -110,6 +110,14 @@ the gap away mode fills (PLAN D34).
   record of exactly what was sent and to whom, even in anonymous mode, unless
   `botSendTracking.enabled:false` turns that off. See `FEATURES.md`'s "Post as user"
   section and `PLAN.md` §18/§19.
+- **`slack_lookup_user` resolves anyone in the workspace live, via the shared bot token
+  only — never a config-file edit, never a fallback to a user token (D50).** Separate
+  from `slack_resolve_user`, which stays config-file-only and untouched. Ambiguous
+  handle/name matches are refused with every match listed, never guessed; email is
+  hidden from the result unless `includeEmail:true`; and it's local-only, same posture
+  as `slack_list_channels`/`slack_search`, since an unrestricted directory search is a
+  workspace-enumeration primitive. See `FEATURES.md`'s "Live directory lookup" section
+  and `PLAN.md` §21.
 - **The user token (for posting *as* a specific person) is inherently per-person and
   can't be shared, by construction of Slack's own OAuth.** Slack's OAuth flow only ever
   produces a token for whoever personally authorizes it — each person who wants the

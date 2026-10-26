@@ -25,5 +25,6 @@
   },
   "remote": { "postableChannels": [], "readableChannels": [] },
   "botSendTracking": { "enabled": true },
-  "botSend": { "anonymousMessageDefault": false }
+  "botSend": { "anonymousMessageDefault": false },
+  "directoryLookup": { "cacheTtlMs": 600000 }
 }

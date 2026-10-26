@@ -219,10 +219,6 @@ log (D1–D58) and architecture; this file is the scannable done/pending list.
       purpose.** `cli/tenants.js` (hand-provisioning) covers onboarding until an
       actual company asks to self-onboard; see ROADMAP.md for why this is
       sequenced after, not dropped.
-- [ ] **D43's publish workflow ran twice and failed both times with `E404`** — confirmed
-      a real, still-open upstream npm/cli OIDC bug, but the local npm auth token being
-      invalid at the same time means the workflow itself (not just the npm bug) is still
-      unproven with valid credentials. Needs a real retry on the next version bump.
 
 - [ ] **Away mode end-to-end verification — never run.** 228 unit tests pass, but no part
       of away mode has been exercised against a live daemon with a human tapping buttons.

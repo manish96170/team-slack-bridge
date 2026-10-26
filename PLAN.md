@@ -1457,7 +1457,3 @@ TODO PENDING:
 1. ~~D50's `slack_lookup_user` needs `users:read.email`...~~ **RESOLVED 2026-10-26** — the
    manual reinstall happened, and D51's live check confirmed `users.info`/`users.list`/
    `users.lookupByEmail` all succeed with both the bot token and the user token.
-1. Re-attempt `.github/workflows/publish.yml` on the next version bump to confirm whether the OIDC `E404`
-   was purely the stale local npm session, or whether npm's Trusted Publishing has a real bug independent
-   of that (both are plausible per the upstream issue reports; only one real attempt with valid
-   credentials has happened so far, and it was manual, not through the workflow).

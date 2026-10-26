@@ -642,16 +642,31 @@ Actionable remote calls are audited in `.ledger.sqlite` and rate-limited per Sla
 caller. Remote post/reply require an `idempotencyKey`; remote update/delete only touch
 messages that the same Slack caller created through the remote MCP path.
 
-**Tenancy mode (`slackbotMcp.tenancy.mode`, PLAN D53 — Phase 1 of the multi-tenancy
-roadmap, ROADMAP.md).** `"single"` (default, and the only mode that actually works
-today) behaves exactly as this whole section describes — one deployment, one
-workspace, unchanged. `"multi"` is scaffolded for a future opt-in profile (a shared
-deployment serving several Slack workspaces/companies, each isolated by `team_id`)
-but **deliberately refuses every `/mcp` call right now**, including `initialize` —
-there is no tenant store yet (Phase 2, not built), so a `multi`-flagged install must
-fail loudly rather than silently behave like `single` for whichever tenant happens
-to call it. Leave this at `"single"` (or omit it entirely) until a later release
-actually implements Phase 2.
+**Tenancy mode (`slackbotMcp.tenancy.mode`, PLAN D53/D54 — the multi-tenancy
+roadmap, ROADMAP.md).** `"single"` (default) behaves exactly as this whole section
+describes — one deployment, one workspace, unchanged. `"multi"` is a real, working
+opt-in profile now: a Slack-signed `team_id` resolves to that tenant's own
+isolated `env`/`config`/`dbPath` (`core/tenant-store.js`), never any other
+tenant's — provision one with `node cli/tenants.js add <teamId>`, then run
+`cli/setup.js init` against the printed home directory, same two-step pattern as
+the local-only account registry (D21). An unregistered `team_id` refuses clearly
+rather than silently falling back to anything. Still outstanding: a live run
+against a real public `/mcp` endpoint with two real companies' workspaces
+(ROADMAP.md's step 3) — covered by unit/adversarial tests today, not yet by a
+live one.
+
+```bash
+node cli/tenants.js add TACME --enterprise-id E0ACME   # prints the home dir to run setup.js init against
+node cli/tenants.js list
+node cli/tenants.js remove TACME
+```
+
+`tenants.json` (next to `accounts.json`/`repos.json` in `TSB_HOME`) maps each
+`team_id` to a home directory only — never a token or any other secret. Each
+tenant's own `.env`/`slack-config.json` inside that home dir is what actually
+holds its credentials and `slackbotMcp.allowedTools`/`remote.*` settings,
+written `0600` and self-healing (D44) exactly like today's single-tenant
+`TSB_HOME`.
 
 ### Local MCP daemon + multi-account (PLAN D21/D22)
 

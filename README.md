@@ -58,10 +58,10 @@ Built for local/team use now: outbound posting, DMs, channel/thread reads, sched
 human approval/questions over DM, Socket Mode listening, listener daemon control,
 progress-message updates, a locked-down Slackbot remote MCP surface, and ACP-driven
 agent sessions where a Slack thread *is* a live session with Claude/Codex/OpenCode/
-Gemini CLI (see "ACP agent sessions" below). A configurable multi-tenancy mode for
-that remote MCP surface — single Slack workspace today, an opt-in shared/multi-company
-profile staged next — is tracked in `ROADMAP.md` and underway; see "Dormant surfaces"
-below for where it stands.
+Gemini CLI (see "ACP agent sessions" below). That remote MCP surface now also
+supports an opt-in multi-tenant mode — one shared deployment serving several Slack
+workspaces/companies, each isolated by `team_id`, provisioned with `cli/tenants.js`
+— alongside today's single-workspace default; see "Dormant surfaces" below.
 
 For the feature matrix and exact on/off switches, see `FEATURES.md`.
 
@@ -484,17 +484,20 @@ are additionally restricted by `remote.readableChannels` and `remote.postableCha
 DMs, human ask/approval, post-as-user, search, App Home publishing, scheduling, progress
 mutation, and agent-session creation are absent from the remote registry by construction.
 
-**Multi-tenancy (`slackbotMcp.tenancy.mode`, new, PLAN D53).** Still single-tenant by
-default and in practice — `"single"` (the default, and the only mode that does
-anything) is byte-identical to every description above: one deployment, one Slack
-workspace. `"multi"` exists as a config value already, as the first step of a staged,
-opt-in plan (see ROADMAP.md's "Multi-tenancy as a configurable deployment mode") for
-later offering this same codebase as either a self-hosted single-tenant instance per
-company (today's behavior) or one shared deployment serving several companies'
-workspaces at once, isolated by Slack `team_id`. It is **not usable yet** — setting
-`tenancy.mode:"multi"` makes `/mcp` refuse every call, deliberately, because the
-tenant store that would make isolation real hasn't been built. Leave this at
-`"single"` (or omit it) until a release note says otherwise.
+**Multi-tenancy (`slackbotMcp.tenancy.mode`, PLAN D53/D54).** `"single"` (the
+default) is byte-identical to every description above: one deployment, one Slack
+workspace. `"multi"` really works now, not just as a config value: a registered
+Slack `team_id` resolves to that tenant's own `env`/`config`/`dbPath`, isolated
+from every other tenant on this same deployment — provision one with `node
+cli/tenants.js add <teamId> [--home <path>]`, then `TSB_HOME=<home> node
+cli/setup.js init` against the printed home dir, same two-step pattern as the
+local-only account registry (`cli/accounts.js`, D21). An unregistered `team_id`,
+or a `multi`-flagged request with no Slack-signed `team_id` at all, refuses
+clearly rather than falling back to any tenant's data — there is deliberately no
+"default" tenant. Still outstanding before this is production-ready for more
+than one real company: a live dogfood run against a real public `/mcp` endpoint
+(ROADMAP.md's step 3) — today this is unit-tested, not yet exercised against two
+real Slack workspaces.
 
 ## ACP agent sessions — a Slack thread is a live session (PLAN D23–D27)
 

@@ -106,11 +106,14 @@ export async function handleMcpMessage({ message, env, config, dbPath }) {
 
   if (method === 'notifications/initialized' || method === 'notifications/cancelled') return null
 
-  // Multi-tenancy Phase 1 (ROADMAP.md): every method below now goes through
-  // resolveAccount() rather than using the caller's env/config/dbPath
-  // directly. In tenancyMode:'single' (today's only working mode) this is
-  // a no-op -- same references back out -- so nothing below changes
-  // behavior. See core/tenancy.js.
+  // Multi-tenancy (ROADMAP.md's staged plan; PLAN D53/D54): every method
+  // below goes through resolveAccount() rather than using the caller's
+  // env/config/dbPath directly. In tenancyMode:'single' (every existing
+  // deployment, still the default) this is a no-op -- same references back
+  // out, so nothing below changes behavior. In tenancyMode:'multi', the
+  // resolved env/config/dbPath belong to whichever tenant the already
+  // Slack-signature-verified team_id names -- see core/tenancy.js and
+  // core/tenant-store.js.
   const account = resolveAccount({ config, env, dbPath, principal: slackPrincipal(params) })
   if (!account.ok) return error(id, -32000, account.error)
   ;({ env, config, dbPath } = account)

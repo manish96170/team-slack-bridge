@@ -6,6 +6,15 @@ log (D1–D46) and architecture; this file is the scannable done/pending list.
 
 ## Done
 
+- [x] **Multi-tenancy Phase 2, hand-provisioning half: `core/tenant-store.js` +
+      `cli/tenants.js` (D54)** — `"multi"` mode now really resolves a Slack
+      `team_id` to that tenant's own `env`/`config`/`dbPath` (previously D53's
+      placeholder refused everything). Store maps `team_id → home directory`,
+      same shape as the local account registry (D21), reusing
+      `loadContextForHome()` — no tenant secret ever enters `tenants.json`
+      itself. `cli/tenants.js add|list|remove` mirrors `cli/accounts.js`.
+      Adversarial cross-tenant test added (`test/tenancy.test.js`). OAuth
+      self-serve install flow remains deferred, unstarted, on purpose.
 - [x] **Multi-tenancy Phase 1: `resolveAccount()` + `tenancyMode` scaffold (D53,
       ROADMAP.md's multi-tenancy plan)** — `core/tenancy.js` is now the one seam
       `mcp/http.js` resolves `{ env, config, dbPath }` through. `single` mode
@@ -98,13 +107,16 @@ log (D1–D46) and architecture; this file is the scannable done/pending list.
 
 ## Pending
 
-- [ ] **Multi-tenancy Phase 2 (tenant store + `cli/tenants.js`) — not started.**
-      `slackbotMcp.tenancy.mode:"multi"` exists as a config value (Phase 1, D53)
-      but is a dead end on its own: every `/mcp` call refuses until an encrypted
-      `team_id → {botToken, config, repoRegistry}` tenant store exists. Build
-      `cli/tenants.js add|list|remove|set-default` first (hand-provisioning, same
-      shape as `cli/accounts.js`); the OAuth self-serve install flow is sequenced
-      after it, only once an actual company asks to self-onboard. See ROADMAP.md.
+- [ ] **Multi-tenancy: live dogfood against a real public `/mcp` endpoint —
+      not started.** `cli/tenants.js` + `core/tenant-store.js` (D54) are
+      unit-tested but never exercised against a real deployed HTTPS endpoint
+      with two real Slack workspaces' signed requests. This is step 3 of
+      ROADMAP.md's plan, and the self-host/managed-shared offering (step 4)
+      is deliberately blocked on it.
+- [ ] **Multi-tenancy: OAuth self-serve install flow — not started, deferred on
+      purpose.** `cli/tenants.js` (hand-provisioning) covers onboarding until an
+      actual company asks to self-onboard; see ROADMAP.md for why this is
+      sequenced after, not dropped.
 - [ ] **Manual Slack app reauthorization needed for D41 + D42 + D45 + D46 to work live** — `config/slack-app-manifest.
       template.json`'s user scopes and `get-user-token.js`'s `USER_SCOPES` now request `channels:read`,
       `groups:read`, `im:read`, `mpim:read` (D41, `slack_list_channels`), `im:write` (D42, as-user DM/edit),

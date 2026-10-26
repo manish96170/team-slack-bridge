@@ -92,42 +92,43 @@ request → resolveAccount(request) → { botToken, config, repoRegistry } → c
    byte-identical to pre-refactor behavior, asserted by `test/tenancy.test.js`.
    `"multi"` is accepted as a config value but refuses every call — see step 2,
    still not started.
-2. **Build multi mode behind the flag, default off.** Needs a tenant store
-   (encrypted at rest — once more than a couple of tenants' secrets live in one
-   place, a flat file is not an acceptable posture, unlike today's per-install
-   `slack-config.json`/`accounts.json`); per-tenant `allowedTools`/`repoAccess`/
-   rate limits enforced from that row instead of a static config file; and
-   per-tenant audit logging, since multiple companies' calls now interleave in
-   one process's logs and support/incident response needs to filter cleanly by
-   `team_id`. **Provisioning is two separate pieces, built in this order, both
-   eventually needed rather than one chosen instead of the other:**
-   - **`cli/tenants.js add|list|remove|set-default`** (build first, low effort) —
-     same shape as `core/accounts.js`/`cli/accounts.js` (D21), just writing a
-     tenant row (team_id/enterprise_id → botToken/config/repoRegistry) into the
-     tenant store instead of a `TSB_HOME` directory. Enough to onboard any known
-     company by hand (one command per company), with zero self-serve UX to
-     build. This unblocks step 3's dogfooding and step 4's "we host it for you"
-     tier on its own — no OAuth flow required to get there.
-   - **A real OAuth self-serve install flow** (build later, materially more
-     effort, only once self-onboarding is an actual requirement rather than a
-     hypothetical) — a public "Add to Slack" install endpoint that completes
-     Slack's OAuth handshake, resolves/validates the resulting `team_id`, and
-     calls the same tenant-row-write `cli/tenants.js add` already uses under the
-     hood, so a company can onboard itself with no manual step on this side.
-     Deliberately deferred until there's a concrete company asking for it —
-     building it speculatively means maintaining a public-facing OAuth surface
-     (redirect URIs, token exchange, CSRF/state handling) for an audience that
-     may never need it.
-3. **Dogfood internally before offering it to anyone external.** Run multi mode
-   in staging with this org's own workspaces (hornblowercruises, anchoros) as the
-   first tenants. Write adversarial tests aimed specifically at the one failure
-   mode that actually matters: a request carrying tenant A's `team_id` must never
-   resolve tenant B's token/config/repo, under any malformed or edge-case input.
-   This is the highest-stakes code in the whole feature and deserves
-   disproportionate test investment relative to its size — the equivalent of
-   D23's `assertInsideRepo`/D32's symlink-escape fix, but for tenants instead of
-   filesystem paths.
-4. **Offer both tiers once step 3 is clean, not before.** Self-host (today's
+2. **[DONE 2026-10-26, PLAN D54 — hand-provisioning half only] Build multi mode
+   behind the flag, default off.** `core/tenant-store.js` + `cli/tenants.js`
+   shipped; `"multi"` mode now really resolves a Slack `team_id` to that
+   tenant's own `env`/`config`/`dbPath` instead of refusing everything (D53's
+   placeholder). **Refined from the original wording below**: the store maps
+   `team_id → home directory` (same shape as the local account registry,
+   D21) rather than an encrypted blob — no tenant secret ever enters
+   `tenants.json`, so there is no blob to encrypt. Still open from this
+   step's original scope: per-tenant `allowedTools`/`repoAccess`/rate limits
+   today come from whatever that tenant's own `slack-config.json` already
+   supports (same keys every single-tenant install already has — nothing
+   tenant-specific needed there), but there is still no dedicated
+   cross-tenant audit view (today's `.ledger.sqlite`/`remote_audit` table is
+   per-tenant, inside that tenant's own home dir, which is arguably the
+   right call for isolation but means "show me every tenant's recent calls"
+   needs its own aggregation tool, not yet built). Original scope, for
+   reference:
+   - **[DONE] `cli/tenants.js add|list|remove`** — same shape as
+     `core/accounts.js`/`cli/accounts.js` (D21), writing a `team_id → home`
+     row. Enough to onboard any known company by hand, no self-serve UX.
+     Unblocks step 3 and step 4's "we host it for you" tier on its own.
+   - **A real OAuth self-serve install flow** (still not started, deferred
+     on purpose) — a public "Add to Slack" install endpoint that completes
+     Slack's OAuth handshake, resolves the resulting `team_id`, and calls
+     the same `addTenant()` `cli/tenants.js` already uses under the hood.
+     Deliberately deferred until there's a concrete company asking for it.
+3. **Not started. Dogfood internally before offering it to anyone external.**
+   Run multi mode in staging with this org's own workspaces (hornblowercruises,
+   anchoros) as the first real tenants, provisioned via `cli/tenants.js` (D54).
+   Unit-level cross-tenant isolation is already covered (`test/tenancy.test.js`'s
+   "two registered tenants never cross-resolve" test, PLAN D54) — what's still
+   missing is a *live* run: a real public `/mcp` endpoint, real Slack-signed
+   requests from two real workspaces, confirmed end to end. This is the
+   highest-stakes step in the whole feature and deserves disproportionate care
+   relative to its size — the equivalent of D23's `assertInsideRepo`/D32's
+   symlink-escape fix, but for tenants instead of filesystem paths.
+4. **Not started. Offer both tiers once step 3 is clean, not before.** Self-host (today's
    single-tenant profile — hand over the codebase + manifest, they run their own
    instance, nothing shared with anyone) or managed/shared (they install the one
    shared Slack app, get added as a tenant row, run nothing themselves). Same

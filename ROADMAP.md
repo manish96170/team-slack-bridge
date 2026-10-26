@@ -121,13 +121,20 @@ request → resolveAccount(request) → { botToken, config, repoRegistry } → c
 3. **Not started. Dogfood internally before offering it to anyone external.**
    Run multi mode in staging with this org's own workspaces (hornblowercruises,
    anchoros) as the first real tenants, provisioned via `cli/tenants.js` (D54).
-   Unit-level cross-tenant isolation is already covered (`test/tenancy.test.js`'s
-   "two registered tenants never cross-resolve" test, PLAN D54) — what's still
-   missing is a *live* run: a real public `/mcp` endpoint, real Slack-signed
-   requests from two real workspaces, confirmed end to end. This is the
-   highest-stakes step in the whole feature and deserves disproportionate care
-   relative to its size — the equivalent of D23's `assertInsideRepo`/D32's
-   symlink-escape fix, but for tenants instead of filesystem paths.
+   **Unblocked 2026-10-26 (PLAN D56)**: hornblowercruises and anchoros turned out
+   to be genuinely separate Slack orgs, not Enterprise Grid siblings, so
+   installing the one shared app into anchoros at all required activating Slack's
+   Public Distribution first — done, via a self-signed-cert local HTTPS listener
+   (`core/local-tls.js`) replacing the `http://localhost:8917/callback` redirect
+   URL that was blocking it. `get-workspace-token.js` now exists to actually
+   capture anchoros's bot token once distribution is on. Unit-level cross-tenant
+   isolation is already covered (`test/tenancy.test.js`'s "two registered tenants
+   never cross-resolve" test, PLAN D54) — what's still missing is a *live* run: a
+   real public `/mcp` endpoint, real Slack-signed requests from two real
+   workspaces, confirmed end to end. This is the highest-stakes step in the whole
+   feature and deserves disproportionate care relative to its size — the
+   equivalent of D23's `assertInsideRepo`/D32's symlink-escape fix, but for
+   tenants instead of filesystem paths.
 4. **Not started. Offer both tiers once step 3 is clean, not before.** Self-host (today's
    single-tenant profile — hand over the codebase + manifest, they run their own
    instance, nothing shared with anyone) or managed/shared (they install the one

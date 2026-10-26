@@ -684,6 +684,37 @@ holds its credentials and `slackbotMcp.allowedTools`/`remote.*` settings,
 written `0600` and self-healing (D44) exactly like today's single-tenant
 `TSB_HOME`.
 
+**Installing the app into a brand-new workspace (PLAN D56).** `cli/tenants.js add`
+only registers a home directory — getting a real bot token into it for a workspace
+this install has never touched before needs Slack's Public Distribution switched on
+for the app (`api.slack.com/apps` → Manage Distribution), since two unrelated Slack
+orgs are never automatically allowed to share one app install. Once that's on:
+
+```bash
+node cli/tenants.js add TACME
+TSB_HOME=~/.team-slack-bridge/tenants/TACME node get-workspace-token.js
+```
+
+`get-workspace-token.js` is `get-user-token.js`'s bot-token counterpart — same local
+HTTPS listener (`core/local-tls.js`, below), reads the requested bot scopes straight
+from `config/slack-app-manifest.template.json` so there's one source of truth, and
+writes `SLACK_BOT_TOKEN` into whichever `.env` the current `TSB_HOME` points at.
+Open the printed authorize URL in a browser logged into the *target* workspace, not
+this one.
+
+**Local HTTPS for the OAuth callback (PLAN D56).** Both `get-user-token.js` and
+`get-workspace-token.js` run their one-time local OAuth-redirect listener over
+`https://localhost:8917/callback`, not `http://`, because Slack's Public
+Distribution checklist does not exempt a `localhost` redirect URL from its "Use
+HTTPS" requirement the way Socket Mode exempts every other feature's request URL.
+`core/local-tls.js` generates a self-signed cert for `localhost`/`127.0.0.1` on
+first use via the system's own `openssl` (`node cli/tls.js generate`, no new
+dependency) — **not** Let's Encrypt, which can only certify a domain it can verify
+ownership of over the public internet, and `localhost` isn't one. Expect a one-time
+browser "not private" warning for the self-signed cert; set
+`SLACK_LOCAL_TLS_CERT`/`SLACK_LOCAL_TLS_KEY` in `.env` to point at
+[mkcert](https://mkcert.dev)'s output instead if you want to skip it entirely.
+
 ### Local MCP daemon + multi-account (PLAN D21/D22)
 
 Local-only, separate from `slackbotMcp` above — not signature-gated, not restricted to

@@ -1,11 +1,25 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D55) and architecture; this file is the scannable done/pending list.
+log (D1–D56) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
 ## Done
 
+- [x] **Public Distribution activated; self-signed local HTTPS listener for the
+      OAuth redirect callback (D56)** — Hornblower and Anchor OS turned out to be
+      genuinely separate Slack orgs (not Enterprise Grid siblings), so installing
+      the shared app into Anchor OS needed Slack's Public Distribution switched
+      on. The only blocker (confirmed live) was the registered
+      `http://localhost:8917/callback` redirect URL — Slack's distribution check
+      doesn't exempt `localhost` the way Socket Mode exempts every other
+      feature's Request URL. Fixed with `core/local-tls.js` (self-signed cert via
+      the system's `openssl`, no new dependency; Let's Encrypt ruled out — it
+      can't certify `localhost` at all) and moving `get-user-token.js` to
+      `node:https`. New `get-workspace-token.js` captures a **bot** token for
+      installing into a brand-new workspace, pairing with `cli/tenants.js add`.
+      `cli/tls.js generate|path` wraps it. 6 new tests
+      (`test/local-tls.test.js`), full suite still green.
 - [x] **Display-name matching in `slack_resolve_user`/`resolveMentions` (D55)** —
       an optional `displayName` per configured user (e.g. `@PJ`) resolves as a
       fallback, only when `name`/`slackHandle`/`slackUserId` don't match. Two
@@ -159,12 +173,16 @@ log (D1–D55) and architecture; this file is the scannable done/pending list.
 - [ ] **D48's tracking DM relies on the sender's own `owner.slackUserId` being
       DMable by the bot** — never live-verified against a real workspace; only
       unit-tested against fake tokens so far.
-- [ ] **Multi-tenancy: live dogfood against a real public `/mcp` endpoint —
-      not started.** `cli/tenants.js` + `core/tenant-store.js` (D54) are
-      unit-tested but never exercised against a real deployed HTTPS endpoint
-      with two real Slack workspaces' signed requests. This is step 3 of
-      ROADMAP.md's plan, and the self-host/managed-shared offering (step 4)
-      is deliberately blocked on it.
+- [ ] **Multi-tenancy: actually install into Anchor OS, then live dogfood against
+      a real public `/mcp` endpoint — not started.** Public Distribution is now
+      active (D56), so the install itself is unblocked: run
+      `node cli/tenants.js add <ANCHOR_OS_TEAM_ID>`, then
+      `TSB_HOME=<printed home> node get-workspace-token.js`, approve the
+      authorize URL while logged into anchoros.slack.com. `cli/tenants.js` +
+      `core/tenant-store.js` (D54) are unit-tested but never exercised against a
+      real deployed HTTPS endpoint with two real Slack workspaces' signed
+      requests. This is step 3 of ROADMAP.md's plan, and the self-host/
+      managed-shared offering (step 4) is deliberately blocked on it.
 - [ ] **Multi-tenancy: OAuth self-serve install flow — not started, deferred on
       purpose.** `cli/tenants.js` (hand-provisioning) covers onboarding until an
       actual company asks to self-onboard; see ROADMAP.md for why this is

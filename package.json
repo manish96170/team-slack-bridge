@@ -1,6 +1,6 @@
 {
   "name": "team-slack-bridge",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "description": "Post to Slack (as a bot, or explicitly as a specific authorized user) and DM, from any script, agent, or CI job. Standalone — no dependency on any particular orchestration system.",
   "license": "MIT",
   "type": "module",
@@ -14,6 +14,8 @@
   },
   "scripts": {
     "get-user-token": "node get-user-token.js",
+    "get-workspace-token": "node get-workspace-token.js",
+    "tls": "node cli/tls.js",
     "post": "node post.js",
     "verify-dm": "node verify-dm.js",
     "doctor": "node cli/doctor.js",
@@ -21,6 +23,7 @@
     "mcp-daemon": "node cli/mcp-daemon.js",
     "accounts": "node cli/accounts.js",
     "tenants": "node cli/tenants.js",
+    "dogfood:multi-tenant": "node scripts/dogfood-multi-tenant.mjs",
     "repos": "node cli/repos.js",
     "agent-sessions": "node cli/agent-session.js",
     "build:sea": "node scripts/build-sea.mjs",
@@ -35,6 +38,7 @@
   "files": [
     "post.js",
     "get-user-token.js",
+    "get-workspace-token.js",
     "verify-dm.js",
     "env.js",
     "core",

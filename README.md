@@ -309,6 +309,37 @@ the gap away mode fills (PLAN D34).
    Open the printed URL, approve, and the script writes `SLACK_USER_TOKEN` into `.env`
    itself — the token is never printed to the terminal.
 
+   This (and the multi-workspace flow below) runs over **local HTTPS**, not HTTP (PLAN
+   D56): a self-signed cert for `localhost`/`127.0.0.1` is generated on first use
+   (`core/local-tls.js`, via your system's own `openssl` — no new dependency, and
+   Let's Encrypt genuinely cannot help here since it only certifies domains it can
+   verify over the public internet, which `localhost` isn't). Your browser will show a
+   one-time "not private" warning the first time it hits `https://localhost:8917/callback`
+   — expected for a self-signed cert, safe to proceed past. To skip that warning
+   entirely, install [mkcert](https://mkcert.dev) (free) and set
+   `SLACK_LOCAL_TLS_CERT`/`SLACK_LOCAL_TLS_KEY` in `.env` to its output instead of
+   letting this repo generate its own.
+
+## Installing into another workspace (multi-tenancy, PLAN D54/D56)
+
+If this app's Slack install already has [Public Distribution](https://api.slack.com/apps)
+activated (Manage Distribution → Public Distribution), you can install the *same* app
+into a different workspace — even one in a completely separate Slack org — without
+creating a second app or redoing scopes:
+
+```bash
+node cli/tenants.js add <TEAM_ID>                              # prints a home dir
+TSB_HOME=<printed home> node get-workspace-token.js            # bot-token install flow
+```
+
+Open the printed authorize URL **while logged into the target workspace** and approve
+— `get-workspace-token.js` captures the resulting bot token straight into that tenant's
+own `.env` (same local-HTTPS pattern as `get-user-token.js` above), ready for
+`core/tenancy.js`'s `tenancyMode:"multi"` to resolve by `team_id`. See `cli/tenants.js`'s
+own header and `ROADMAP.md`'s "Multi-tenancy as a configurable deployment mode" for the
+full picture — this covers hand-provisioned installs; a self-serve "Add to Slack" flow
+remains deliberately deferred until an actual company asks for it.
+
 ## Usage
 
 Every command below accepts `--json` (structured `{ ok, ... }` output, non-zero exit

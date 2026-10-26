@@ -66,6 +66,16 @@ Slack (so the two do not drift), what to lift from the working sample next door,
 
 ---
 
+**Note (2026-10-26, not a decision — tracked in ROADMAP.md):** D6 remains the default
+and is unchanged for every existing single-tenant install. A second, **opt-in**
+multi-tenant profile for the hosted/remote surface — selected by a new
+`tenancyMode: "single"|"multi"` config key, never a fork of this codebase — is now
+tracked as a staged plan in ROADMAP.md's "Multi-tenancy as a configurable deployment
+mode" section. Read it before writing any code that assumes D6's "no" is permanent,
+and before writing any code for the hosted profile that assumes it stays permanent
+either way — the plan is additive, not a replacement, until each of its stages is
+actually built and tested.
+
 ---
 
 ## 0. The one architectural decision everything else follows

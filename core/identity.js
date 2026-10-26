@@ -139,13 +139,28 @@ export function loadConfig(path) {
   }
 }
 
+const normalizeHandle = value => value?.toLowerCase().replace(/^@/, '')
+
 function matchesUser(user, handleOrName) {
-  const needle = handleOrName.toLowerCase().replace(/^@/, '')
+  const needle = normalizeHandle(handleOrName)
   return (
     user.name?.toLowerCase() === needle ||
-    user.slackHandle?.toLowerCase().replace(/^@/, '') === needle ||
+    normalizeHandle(user.slackHandle) === needle ||
     user.slackUserId === handleOrName
   )
+}
+
+// `displayName` (Slack's short/display name, e.g. "@PJ") is a fallback,
+// checked only when no `name`/`slackHandle`/`slackUserId` matches. Slack does
+// not keep display names unique, so more than one match is `ambiguous-user`,
+// never an arbitrary pick (same rule as D50's directory search).
+function findConfiguredUser(users, handleOrName) {
+  const found = users.find(user => matchesUser(user, handleOrName))
+  if (found) return { found }
+  const needle = normalizeHandle(handleOrName)
+  const byDisplayName = users.filter(user => normalizeHandle(user.displayName) === needle)
+  if (byDisplayName.length > 1) return { ambiguous: byDisplayName }
+  return { found: byDisplayName[0] }
 }
 
 // `configuredOnly` is the remote-profile limit (§11.6 #4): only handles
@@ -163,7 +178,17 @@ export function resolveUser(handleOrName, config) {
   const cacheKey = handleOrName.toLowerCase()
   if (cache.has(cacheKey)) return cache.get(cacheKey)
 
-  const found = (config.users || []).find(user => matchesUser(user, handleOrName))
+  const { found, ambiguous } = findConfiguredUser(config.users || [], handleOrName)
+  if (ambiguous) {
+    const result = {
+      ok: false,
+      error: 'ambiguous-user',
+      retryable: false,
+      matches: ambiguous.map(user => ({ userId: user.slackUserId, name: user.name, displayName: user.displayName })),
+    }
+    cache.set(cacheKey, result)
+    return result
+  }
   if (!found) {
     const result = { ok: false, error: 'user-not-configured', retryable: false }
     cache.set(cacheKey, result)

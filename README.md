@@ -118,6 +118,11 @@ the gap away mode fills (PLAN D34).
   as `slack_list_channels`/`slack_search`, since an unrestricted directory search is a
   workspace-enumeration primitive. See `FEATURES.md`'s "Live directory lookup" section
   and `PLAN.md` §21.
+- **`slack_resolve_user` and `@mention` expansion also match a user's optional
+  `displayName` in `slack-config.json` (D51)** — e.g. `@PJ` alongside `name: "Pulkit Jain"`
+  and `slackHandle: "@pulkit.jain"`. It's a fallback after `name`/`slackHandle`/ID, and a
+  display name shared by two configured users is refused as `ambiguous-user`, never
+  guessed. See `PLAN.md` §22.
 - **The user token (for posting *as* a specific person) is inherently per-person and
   can't be shared, by construction of Slack's own OAuth.** Slack's OAuth flow only ever
   produces a token for whoever personally authorizes it — each person who wants the

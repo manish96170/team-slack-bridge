@@ -6,6 +6,21 @@ log (D1–D58) and architecture; this file is the scannable done/pending list.
 
 ## Done
 
+- [x] **D41 + D42 + D45 + D46's user-token scopes confirmed live** (`channels:read`/
+      `groups:read`/`im:read`/`mpim:read`, `im:write`, `files:write`,
+      `reactions:write`, `search:read`) — the manual Slack app reauthorization this
+      item had been waiting on had evidently already happened (likely alongside
+      D56's Public Distribution reinstall). Live-verified 2026-10-26 with real,
+      cleaned-up-after-itself calls: `users.conversations` (D41),
+      `conversations.open`/a real `cli/dm.js --as-user` send + `cli/update.js
+      --as-user` edit, both deleted after (D42), `files.getUploadURLExternal`
+      (D45), `reactions.add`/`reactions.remove` on a disposable self-DM test
+      message (D46), and `search.messages` (backfilled `search:read`). Also
+      confirmed a bot-token edit of the user-authored test message correctly
+      fails (`cant_update_message`) — Slack's same-author protection working as
+      documented. **Found and fixed a real gap while verifying**: `cli/delete.js`
+      had no `--as-user` flag at all, unlike every other CLI command — added.
+      `USER_TOKEN_DM_SUPPORT_PLAN.md`'s remaining checklist items are now closed.
 - [x] **`tsb-setup` bin entry added, closing the gap D57 left open (D58)** — the
       very next command `cli/tenants.js add` tells a global-install user to run
       had no direct command either. Verified with evidence, not assumed: real
@@ -204,13 +219,6 @@ log (D1–D58) and architecture; this file is the scannable done/pending list.
       purpose.** `cli/tenants.js` (hand-provisioning) covers onboarding until an
       actual company asks to self-onboard; see ROADMAP.md for why this is
       sequenced after, not dropped.
-- [ ] **Manual Slack app reauthorization needed for D41 + D42 + D45 + D46 to work live** — `config/slack-app-manifest.
-      template.json`'s user scopes and `get-user-token.js`'s `USER_SCOPES` now request `channels:read`,
-      `groups:read`, `im:read`, `mpim:read` (D41, `slack_list_channels`), `im:write` (D42, as-user DM/edit),
-      `files:write` (D45, upload tools), `reactions:write` (D46, as-user reactions), and a backfilled
-      `search:read`. None of this is live until the owner manually updates the installed Slack app's
-      manifest, reinstalls, and re-runs `npm run get-user-token` — see `USER_TOKEN_DM_SUPPORT_PLAN.md` for
-      the remaining checklist (its items 2's manual steps, 3, and 5).
 - [ ] **D43's publish workflow ran twice and failed both times with `E404`** — confirmed
       a real, still-open upstream npm/cli OIDC bug, but the local npm auth token being
       invalid at the same time means the workflow itself (not just the npm bug) is still

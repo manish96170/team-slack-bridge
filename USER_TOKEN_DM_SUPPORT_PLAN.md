@@ -64,26 +64,38 @@ their own `SLACK_USER_TOKEN`, while preserving the existing security boundary:
 - [x] Change `get-user-token.js` so `USER_SCOPES` requests `chat:write`,
   `search:read`, `im:write`, `channels:read`, `groups:read`, `im:read`,
   `mpim:read`.
-- [ ] Update the Slack app manifest in Slack and reinstall/re-authorize the
-  app. This must be done manually by the owner; never copy a user token into
-  source, a plan, chat, logs, or Git.
-- [ ] Run `npm run get-user-token` locally to mint a replacement user token.
-- [ ] Verify only with `node cli/doctor.js --json`; it must never print the
-  token value.
+- [x] Update the Slack app manifest in Slack and reinstall/re-authorize the
+  app. **Done** — confirmed live 2026-10-26 (evidently alongside D56's Public
+  Distribution reinstall); see §3 below for the live calls that prove it.
+- [x] Run `npm run get-user-token` locally to mint a replacement user token.
+  **Done** — the current `SLACK_USER_TOKEN` already carries every scope below.
+- [x] Verify only with `node cli/doctor.js --json`; it must never print the
+  token value. Confirmed 2026-10-26 — `hasUserToken: true`, no token string
+  anywhere in the output.
 
 ### 3. Verify the full as-user DM flow live
 
-- [ ] Use `node cli/dm.js --user <recipient-id> --as-user --json` to send a
-  harmless test DM.
-- [ ] Verify the returned Slack message has the local human user as its
-  author.
-- [ ] Edit that same message with:
+- [x] Use `node cli/dm.js --user <recipient-id> --as-user --json` to send a
+  harmless test DM. **Done 2026-10-26** — sent to the configured owner, deleted
+  immediately after.
+- [x] Verify the returned Slack message has the local human user as its
+  author. **Confirmed** — `message.user` on the response was the owner's own
+  Slack ID.
+- [x] Edit that same message with:
   ```bash
   node cli/update.js --channel <channel-id> --ts <message-ts> \
     --text '<updated text>' --as-user --json
   ```
-- [ ] Confirm a bot-token edit of that user-authored message fails, preserving
-  Slack's same-author identity protection.
+  **Done 2026-10-26** — succeeded.
+- [x] Confirm a bot-token edit of that user-authored message fails, preserving
+  Slack's same-author identity protection. **Confirmed 2026-10-26** — the bot
+  token's `chat.update` on the same message returned `cant_update_message`,
+  exactly as expected; a bot-token delete also failed, with `channel_not_found`
+  (the bot's DM-channel ID for that recipient differs from the user's — same
+  per-identity DM channel isolation `core/dm.js` already relies on elsewhere).
+  Cleanup used `deleteMessage` with the user token directly, since
+  **`cli/delete.js` had no `--as-user` flag at all** — a real gap, found and
+  fixed in this same pass (every other CLI command already had one).
 
 ### 4. Complete local MCP parity
 
@@ -93,7 +105,9 @@ separately named local-only tools rather than an ambiguous `asUser` boolean:
 
 - [x] `slack_dm_as_user({ userId, text, dryRun? })`
 - [x] `slack_update_message_as_user({ channel, ts, text, dryRun? })`
-- [ ] If needed, `slack_delete_message_as_user({ channel, ts, dryRun? })`
+- [x] `slack_delete_message_as_user({ channel, ts, dryRun? })` — shipped as
+  part of D47, for a different reason (needed once `slack_post`/`slack_dm`
+  defaulted to as-user) but satisfies this item too.
 
 Each tool must:
 
@@ -106,13 +120,24 @@ Each tool must:
 
 ### 5. Documentation and safety tests
 
-- [ ] Update README user-token setup with the additional user scope and the
-  required reauthorization after a scope change.
-- [ ] Document that an as-user failure requires explicit human approval before
-  any bot-authored fallback.
+- [x] Update README user-token setup with the additional user scope and the
+  required reauthorization after a scope change. Already present in
+  README.md's "One-time setup" User Token Scopes list.
+- [x] Document that an as-user failure requires explicit human approval before
+  any bot-authored fallback. Covered by README's "Naming a person is not
+  authorization" design principle and PLAN.md D47-D49's "never a silent
+  fallback" rule, applied consistently across every `_as_user`/`viaBot`/
+  `tokenSource` surface added since.
 - [x] Add MCP registry tests proving the as-user DM/edit tools are local-only.
-- [ ] Run the complete test suite, lint/format checks, and a manual
-  `--dry-run` for every new CLI/MCP command.
+- [x] Run the complete test suite (`npm test`: 330/330 passing as of
+  2026-10-26) and a manual `--dry-run` for every new CLI/MCP command touched
+  in this pass (`cli/delete.js --as-user --dry-run` included). No lint/format
+  script exists in this repo to run separately.
+
+## Status: closed (2026-10-26)
+
+Every acceptance criterion below is met and live-verified. See `TODO.md`'s Done
+list for the dated entry and the exact live calls made.
 
 ## Acceptance criteria
 

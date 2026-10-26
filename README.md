@@ -369,7 +369,7 @@ instead, which is what most of this README assumes).
 node post.js --channel '#x' --text 'hi' [--thread-ts …] [--as-user] [--idempotency-key …] [--dry-run] [--json]
 node cli/reply.js --channel '#x' --thread-ts '169…' --text 'hi' [--idempotency-key …] [--dry-run] [--json]
 node cli/update.js --channel '#x' --ts '169…' --text 'new text' [--as-user] [--dry-run] [--json]  # --as-user required if the original was posted as-user
-node cli/delete.js --channel '#x' --ts '169…' [--dry-run] [--json]
+node cli/delete.js --channel '#x' --ts '169…' [--as-user] [--dry-run] [--json]  # --as-user required if the original was posted as-user
 node cli/react.js --channel '#x' --ts '169…' --emoji eyes [--remove] [--as-user] [--dry-run] [--json]  # --as-user adds/removes only the authorized user's reaction
 ```
 

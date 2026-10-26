@@ -76,6 +76,7 @@ For the feature matrix and exact on/off switches, see `FEATURES.md`.
 | `anonymousMessage` without a per-call argument | Falls back to config | `botSend.anonymousMessageDefault` | D49 |
 | `slack_lookup_user` — live directory lookup | Bot token | `tokenSource:"user"` | D50/D51 |
 | Email in a `slack_lookup_user` result | **Hidden** | `includeEmail:true` | D50 |
+| `slack_resolve_user` display-name matching | **On** — fallback after name/handle/ID | configure `displayName` per user | D55 |
 | CLI post-as identity (`cli/post.js` etc.) | **The bot**, unchanged | `--as-user` | pre-existing, see "Scope note" |
 
 ```

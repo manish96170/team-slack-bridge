@@ -116,7 +116,7 @@ export const tools = {
   },
   slack_resolve_user: {
     name: 'slack_resolve_user',
-    description: 'Resolve a configured handle or name to a Slack user ID.',
+    description: 'Resolve a configured handle, name, or display name to a Slack user ID.',
     inputSchema: schemas.slack_resolve_user,
     handler: (args, ctx) => resolveUser(args.handle, ctx.config),
   },

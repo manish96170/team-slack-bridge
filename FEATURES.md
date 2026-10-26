@@ -281,6 +281,22 @@ Turn off: remove `SLACK_USER_TOKEN`. Remote Slackbot MCP never exposes this.
 which the manifest template and `get-user-token.js` now request but which need a manual
 reinstall/re-authorize to take effect live — same outstanding step as "DM as user" above.
 
+### Configured users — `slack_resolve_user` display names (PLAN D55)
+
+Default: on. A `slack-config.json` user entry may carry an optional `displayName`
+(Slack's short/display name, e.g. `@PJ`) next to `name` and `slackHandle`:
+
+```json
+{ "name": "Jane Doe", "slackHandle": "@jane.doe", "displayName": "@JD", "slackUserId": "U0123ABC" }
+```
+
+`slack_resolve_user`/`@mention` expansion (`resolveMentions`) match `name`/`slackHandle`/
+`slackUserId` first, unchanged — `displayName` is only consulted as a **fallback**, so a
+person can never be shadowed by a colleague whose display name happens to match. Two
+configured users sharing a `displayName` refuses with `error:"ambiguous-user"` and lists
+both, same "never guess" rule as D20/D50/D51 — it never picks one. Still config-file-only,
+synchronous, zero network calls, same as before this.
+
 ### Live directory lookup (PLAN D50)
 
 Default: on whenever `SLACK_BOT_TOKEN` exists — this is a separate capability from

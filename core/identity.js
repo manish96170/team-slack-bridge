@@ -139,13 +139,36 @@ export function loadConfig(path) {
   }
 }
 
+function normalizeHandle(value) {
+  return value?.toLowerCase().replace(/^@/, '')
+}
+
 function matchesUser(user, handleOrName) {
-  const needle = handleOrName.toLowerCase().replace(/^@/, '')
+  const needle = normalizeHandle(handleOrName)
   return (
     user.name?.toLowerCase() === needle ||
-    user.slackHandle?.toLowerCase().replace(/^@/, '') === needle ||
+    normalizeHandle(user.slackHandle) === needle ||
     user.slackUserId === handleOrName
   )
+}
+
+// `displayName` (Slack's short/display name, e.g. "@PJ") is a FALLBACK,
+// consulted only when no `name`/`slackHandle`/`slackUserId` matches —
+// D55, 2026-10-26, on request: teams configure a person's full name, full
+// username, AND display name side by side, and people refer to each other
+// by whichever one is shortest, which until now silently failed to resolve
+// if that was the display name. A primary match always wins over somebody
+// else's identical displayName, so a person can't be shadowed by a
+// colleague who happens to share their display name. Slack does not keep
+// display names unique, so more than one match is `ambiguous-user` — same
+// "never select an arbitrary person" rule as D20/D50/D51.
+function findConfiguredUser(users, handleOrName) {
+  const found = users.find(user => matchesUser(user, handleOrName))
+  if (found) return { found }
+  const needle = normalizeHandle(handleOrName)
+  const byDisplayName = users.filter(user => normalizeHandle(user.displayName) === needle)
+  if (byDisplayName.length > 1) return { ambiguous: byDisplayName }
+  return { found: byDisplayName[0] }
 }
 
 // `configuredOnly` is the remote-profile limit (§11.6 #4): only handles
@@ -163,7 +186,17 @@ export function resolveUser(handleOrName, config) {
   const cacheKey = handleOrName.toLowerCase()
   if (cache.has(cacheKey)) return cache.get(cacheKey)
 
-  const found = (config.users || []).find(user => matchesUser(user, handleOrName))
+  const { found, ambiguous } = findConfiguredUser(config.users || [], handleOrName)
+  if (ambiguous) {
+    const result = {
+      ok: false,
+      error: 'ambiguous-user',
+      retryable: false,
+      matches: ambiguous.map(user => ({ userId: user.slackUserId, name: user.name, displayName: user.displayName })),
+    }
+    cache.set(cacheKey, result)
+    return result
+  }
   if (!found) {
     const result = { ok: false, error: 'user-not-configured', retryable: false }
     cache.set(cacheKey, result)

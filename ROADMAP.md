@@ -118,23 +118,28 @@ request → resolveAccount(request) → { botToken, config, repoRegistry } → c
      Slack's OAuth handshake, resolves the resulting `team_id`, and calls
      the same `addTenant()` `cli/tenants.js` already uses under the hood.
      Deliberately deferred until there's a concrete company asking for it.
-3. **Not started. Dogfood internally before offering it to anyone external.**
-   Run multi mode in staging with this org's own workspaces (hornblowercruises,
-   anchoros) as the first real tenants, provisioned via `cli/tenants.js` (D54).
-   **Unblocked 2026-10-26 (PLAN D56)**: hornblowercruises and anchoros turned out
-   to be genuinely separate Slack orgs, not Enterprise Grid siblings, so
-   installing the one shared app into anchoros at all required activating Slack's
-   Public Distribution first — done, via a self-signed-cert local HTTPS listener
-   (`core/local-tls.js`) replacing the `http://localhost:8917/callback` redirect
-   URL that was blocking it. `get-workspace-token.js` now exists to actually
-   capture anchoros's bot token once distribution is on. Unit-level cross-tenant
-   isolation is already covered (`test/tenancy.test.js`'s "two registered tenants
-   never cross-resolve" test, PLAN D54) — what's still missing is a *live* run: a
-   real public `/mcp` endpoint, real Slack-signed requests from two real
-   workspaces, confirmed end to end. This is the highest-stakes step in the whole
-   feature and deserves disproportionate care relative to its size — the
-   equivalent of D23's `assertInsideRepo`/D32's symlink-escape fix, but for
-   tenants instead of filesystem paths.
+3. **[DONE 2026-10-27, PLAN D61] Dogfood internally before offering it to anyone
+   external.** Ran multi mode against this org's own real workspaces,
+   hornblowercruises (T2EA75X8X) and anchoros (T0CBER2DJAJ), as the first real
+   tenants, provisioned via `cli/tenants.js` (D54). Full install flow exercised
+   live, not simulated: Public Distribution's OAuth consent screen (showing
+   "Where do you want to use Eng Team Dashboard?" → "Anchor OS"), the
+   self-signed-cert browser warning, `get-workspace-token.js` capturing a real
+   bot token, and `scripts/dogfood-multi-tenant.mjs` proving both team_ids
+   resolve through one shared `/mcp` endpoint to a tenant whose own real token
+   passes a live `auth.test` — confirmed distinct identities (`botAuth.team`:
+   "Hornblower" vs "Anchor OS") via direct `cli/doctor.js --json` runs against
+   each tenant's own home dir. Unit-level cross-tenant isolation was already
+   covered (`test/tenancy.test.js`'s "two registered tenants never
+   cross-resolve" test, PLAN D54) — this closes the live-run gap that test
+   couldn't reach on its own. **One real gap still open, deliberately not
+   claimed as closed here**: this ran the `/mcp` HTTP layer directly over
+   `127.0.0.1` with real HMAC-signed requests — proving the signature check,
+   `resolveAccount()`, and live Slack connectivity are all correct with real
+   credentials. It does **not** prove Slack's own Slackbot MCP Client can
+   reach this endpoint over the public internet, which needs an actual public
+   HTTPS URL plus a workspace admin approving the MCP connector in each
+   workspace — a separate, larger, still-not-attempted step.
 4. **Not started. Offer both tiers once step 3 is clean, not before.** Self-host (today's
    single-tenant profile — hand over the codebase + manifest, they run their own
    instance, nothing shared with anyone) or managed/shared (they install the one

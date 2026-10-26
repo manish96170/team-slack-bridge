@@ -1,11 +1,26 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D60) and architecture; this file is the scannable done/pending list.
+log (D1–D61) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
 ## Done
 
+- [x] **Live multi-tenancy dogfood against two real Slack orgs — Hornblower and
+      Anchor OS (D61)** — closes ROADMAP.md's step 3. Real OAuth install into
+      Anchor OS end to end (Public Distribution's consent screen correctly
+      offering "Anchor OS", the expected self-signed-cert warning, a real bot
+      token captured by `get-workspace-token.js`). Confirmed distinct real
+      identities via `cli/doctor.js --json` per tenant (`botAuth.team`:
+      "Hornblower" vs "Anchor OS"). `scripts/dogfood-multi-tenant.mjs` (written
+      earlier, never committed — committed now) proved both team_ids resolve
+      through one shared `/mcp` endpoint to a tenant whose own real token
+      passes a live `auth.test`; two bugs in that script found by actually
+      running it (missing tenant registration for Hornblower itself; wrong
+      assumption about `slack_doctor`'s reduced remote-profile shape) fixed
+      along the way. Explicitly NOT proven: Slack's own Slackbot MCP Client
+      reaching this endpoint over the public internet — still open, see
+      ROADMAP.md step 4.
 - [x] **`slack_react`/`slack_unreact`/`slack_update_message`/`slack_delete_message`
       default to the local user, not the bot; `slack_lookup_user` too (D60)** —
       same `viaBot:false`-by-default pattern D47 already used for
@@ -218,16 +233,14 @@ log (D1–D60) and architecture; this file is the scannable done/pending list.
 - [ ] **D48's tracking DM relies on the sender's own `owner.slackUserId` being
       DMable by the bot** — never live-verified against a real workspace; only
       unit-tested against fake tokens so far.
-- [ ] **Multi-tenancy: actually install into Anchor OS, then live dogfood against
-      a real public `/mcp` endpoint — not started.** Public Distribution is now
-      active (D56), so the install itself is unblocked: run
-      `node cli/tenants.js add <ANCHOR_OS_TEAM_ID>`, then
-      `TSB_HOME=<printed home> node get-workspace-token.js`, approve the
-      authorize URL while logged into anchoros.slack.com. `cli/tenants.js` +
-      `core/tenant-store.js` (D54) are unit-tested but never exercised against a
-      real deployed HTTPS endpoint with two real Slack workspaces' signed
-      requests. This is step 3 of ROADMAP.md's plan, and the self-host/
-      managed-shared offering (step 4) is deliberately blocked on it.
+- [ ] **Multi-tenancy: a real public, internet-reachable `/mcp` endpoint — not
+      started.** D61's dogfood proved the HTTP layer + signatures +
+      per-tenant resolution with real credentials, but drove it directly over
+      `127.0.0.1`. Slack's own Slackbot MCP Client actually reaching this
+      endpoint needs a real public HTTPS URL plus a workspace admin approving
+      the MCP connector in each workspace — separate from everything D61
+      covered, and ROADMAP.md step 4 (offering self-host/managed-shared
+      tiers) is still blocked on it.
 - [ ] **Multi-tenancy: OAuth self-serve install flow — not started, deferred on
       purpose.** `cli/tenants.js` (hand-provisioning) covers onboarding until an
       actual company asks to self-onboard; see ROADMAP.md for why this is

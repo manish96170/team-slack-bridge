@@ -19,10 +19,21 @@
 // Required env vars (never pass real secrets as CLI args -- they end up in
 // shell history):
 //   DOGFOOD_TEAM_A=<team_id already added via cli/tenants.js>
-//   DOGFOOD_TEAM_B=<a second, different team_id, also already added>
+//   DOGFOOD_TEAM_B=<a second, different team_id, also added, with its own
+//                   working SLACK_BOT_TOKEN>
 // Everything else (SLACK_SIGNING_SECRET, each tenant's own bot token) is
 // read from .env files already on disk, never typed into this script or any
 // chat.
+//
+// The remote-safe slack_doctor shape this script calls through /mcp
+// deliberately does NOT return team/user identity (D20's "reduced doctor"
+// -- the remote profile never leaks who it's talking to, by design). So
+// this script proves routing + live Slack connectivity per tenant (each
+// team_id's own real SLACK_BOT_TOKEN successfully calls auth.test); it
+// does not, and structurally cannot, prove the two tenants are DIFFERENT
+// identities from the HTTP response alone. For that, compare each
+// tenant's own `TSB_HOME=<home> node cli/doctor.js --json`'s real
+// `botAuth.team` directly (outside /mcp) before relying on this script.
 
 import { createHmac } from 'node:crypto'
 import { createHttpServer } from '../listen/http.js'
@@ -86,17 +97,17 @@ async function main() {
     const resultA = await callDoctor(port, teamA)
     const resultB = await callDoctor(port, teamB)
 
-    console.log(`Team A (${teamA}): ${JSON.stringify(resultA.botAuth || resultA)}`)
-    console.log(`Team B (${teamB}): ${JSON.stringify(resultB.botAuth || resultB)}`)
+    console.log(`Team A (${teamA}): ${JSON.stringify(resultA)}`)
+    console.log(`Team B (${teamB}): ${JSON.stringify(resultB)}`)
 
     if (!resultA.ok) fail(`Team A call failed: ${JSON.stringify(resultA)}`)
     if (!resultB.ok) fail(`Team B call failed: ${JSON.stringify(resultB)}`)
-    if (!resultA.botAuth?.ok || !resultB.botAuth?.ok) fail('one tenant has no working SLACK_BOT_TOKEN -- re-run cli/setup.js init for that tenant\'s home dir')
-    if (resultA.botAuth.team === resultB.botAuth.team && resultA.botAuth.user === resultB.botAuth.user) {
-      fail('both team_ids resolved to the SAME real Slack identity -- tenant isolation is broken, do not ship this')
-    }
+    if (!resultA.connected) fail('Team A resolved but its SLACK_BOT_TOKEN did not pass a live auth.test -- re-run cli/doctor.js --json against that tenant\'s home dir')
+    if (!resultB.connected) fail('Team B resolved but its SLACK_BOT_TOKEN did not pass a live auth.test -- re-run cli/doctor.js --json against that tenant\'s home dir')
 
-    console.log('\nPASS: two different team_ids resolved to two different real Slack identities through one shared /mcp endpoint.')
+    console.log('\nPASS: two different team_ids each resolved through one shared /mcp endpoint to a tenant whose own real bot token passed a live Slack auth.test.')
+    console.log('(This proves correct per-tenant routing + live connectivity. To confirm the two tenants are genuinely different Slack identities -- not')
+    console.log(' just two configs pointing at the same workspace -- compare each one\'s own `TSB_HOME=<home> node cli/doctor.js --json` botAuth.team directly.)')
   } finally {
     await new Promise(resolve => server.close(resolve))
   }

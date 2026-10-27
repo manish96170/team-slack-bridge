@@ -187,3 +187,77 @@ never be able to tell the difference from the inside.
   structured data; a small local-only web UI (reusing the existing `listen/http.js`
   HTTP surface) could visualize active sessions instead of only `cli/agent-session.js
   list`/Slack threads.
+
+## Plain-English cross-company messaging — "DM <person> in <company>" (not started, 2026-10-27)
+
+Today, sending a DM to someone requires knowing two things no human carries around in
+their head: their raw Slack user ID (different per workspace — confirmed live, the
+same person has a different ID in each of this install's two companies) and either the
+right `TSB_HOME` path or a `--account <name>` argument. Goal: let a human (or the
+`skill/SKILL.md` natural-language skill) say "DM pulkit.jain in anchor: hi" or, using a
+configured default, just "DM pulkit.jain: hi" — no path, no ID, no `TSB_HOME` in sight.
+
+**Most of the needed mapping infrastructure already exists — this is mostly wiring, not
+new state.** `core/accounts.js` (D21) already does exactly "human-chosen name → home
+directory, with one of them markable as the default" via `addAccount`/
+`setDefaultAccount`/`resolveAccountHome` (which already falls back to the registered
+default when no name is given, and already fails clearly — `account-not-found` — when
+one is given but unregistered). That registry is the right place for "company alias" to
+live — it is a **different, deliberately separate** registry from `core/tenant-store.js`
+(D54)'s `team_id → home` mapping, which exists to resolve an *incoming signed webhook*,
+not a *human-typed name*. Keep them separate; don't merge "which real workspace sent
+this request" with "which account does a human mean by a short name."
+
+**What's actually new:**
+
+1. **A combined resolve-and-send primitive**, e.g. `core/people.js`'s
+   `dmByName({ accountName, personName, text, asUser, dryRun })`:
+   - Resolve the account via `resolveAccountHome(accountName)` — `accountName` omitted
+     uses the registered default; if **no default is configured either**, refuse with a
+     specific, distinct error (e.g. `no-company-specified-and-no-default-configured`) —
+     never guess which company. This specific error code is what lets the skill layer
+     (not application code) decide to ask a clarifying question instead of failing
+     silently or picking one.
+   - Load that account's `env`/`config` (`loadAccountContext`, already exists).
+   - Resolve `personName` via `core/directory.js`'s `lookupUser` (live Slack search,
+     already handles ambiguous-match refusal — reuse that, don't reinvent it).
+   - Send via `core/dm.js`'s `dm()` using the resolved account's token.
+   - Return one combined result carrying both the resolved account name and the
+     resolved person, so a single log line (if logged) explains the whole action
+     instead of two disjoint ones — this was the main real argument from the earlier
+     "two calls vs one tool" discussion (account-context mismatch between the lookup
+     and the send becomes structurally impossible once one call does both with the
+     same resolved account).
+2. **`cli/dm-by-name.js`** (and a `tsb-dm` bin entry, same pattern as every other
+   command added this cycle): `--to "<name>" [--company <alias>] --text "<text>"
+   [--as-user] [--dry-run] [--json]`. `--company` omitted uses the registered default;
+   its total absence (no default either) must surface the same specific refusal code
+   above, in `--json` output, for the skill to catch.
+3. **`skill/SKILL.md` update**: document the natural-language pattern ("DM/message
+   `<person>` in `<company>`: `<text>`" and, using the default, "DM/message `<person>`:
+   `<text>`") and an explicit instruction for the agent reading the skill: **if the
+   underlying command refuses with `no-company-specified-and-no-default-configured`,
+   ask the user which company before doing anything else — never pick one.** This is a
+   prompt-level instruction, not new application code; the CLI stays non-interactive
+   like every other command in this repo, consistent with D3's "a proposal, never an
+   instruction that executes itself" posture — the *skill* is where asking happens, not
+   the tool.
+4. **One-time setup note, not new code**: for an existing install where a company is
+   only registered in `tenants.json` (team_id-keyed, D54) and not yet in `accounts.json`
+   under a friendly name, a human has to register it there too —
+   `node cli/accounts.js add anchor --home <that tenant's home>` — before "in anchor"
+   means anything. Document this in the feature's own usage text, not a new migration.
+
+**Deliberately generic, not hardcoded to any company name** — "anchor" above is only an
+example alias one install's owner chose for themselves via `setDefaultAccount`/
+`addAccount`; nothing in `core/accounts.js` or the new `dmByName()` ever hardcodes a
+specific company. Any install picks its own aliases and its own default, or configures
+no default at all and lets the skill ask every time.
+
+**Open question before implementation starts**: should `dmByName` try the config-file
+`resolveUser` (fast, no network, but only knows people already in `slack-config.json`'s
+`users` list) before falling back to the live `lookupUser` search, or always go straight
+to the live search (slower, but complete, and what's already been used successfully in
+this session)? Leaning live-first for completeness, but worth deciding deliberately
+rather than defaulting silently either way.
+

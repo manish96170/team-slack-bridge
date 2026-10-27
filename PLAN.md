@@ -78,6 +78,17 @@ Slack (so the two do not drift), what to lift from the working sample next door,
 
 ---
 
+**Note (2026-10-27, not a decision — tracked in ROADMAP.md):** a plain-English,
+cross-company DM feature ("DM `<person>` in `<company>`: `<text>`", with a
+configurable default company and a skill-level "ask if no default" fallback) is
+planned in ROADMAP.md's "Plain-English cross-company messaging" section. Not started.
+Reuses `core/accounts.js` (D21)'s existing name→home registry as the company-alias
+store — deliberately kept separate from `core/tenant-store.js` (D54)'s team_id-keyed
+registry, which resolves incoming signed requests, not human-typed names. Read that
+ROADMAP.md section before starting; it has the full design, not just this pointer.
+
+---
+
 **Note (2026-10-26, updated — see D53-D55 above for what has actually shipped):** D6
 remains the default and is unchanged for every existing single-tenant install. A
 second, **opt-in** multi-tenant profile for the hosted/remote surface — selected by

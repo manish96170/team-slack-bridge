@@ -243,6 +243,17 @@ log (D1–D63) and architecture; this file is the scannable done/pending list.
 
 ## Pending
 
+- [ ] **Plain-English cross-company messaging ("DM `<person>` in `<company>`:
+      `<text>`") — not started, design in ROADMAP.md.** Reuses `core/accounts.js`
+      (D21)'s name→home registry as the company-alias store (deliberately
+      separate from `core/tenant-store.js`'s team_id-keyed one, D54). Needs: a
+      combined `core/people.js` resolve-and-send primitive, `cli/dm-by-name.js`/
+      `tsb-dm`, and a `skill/SKILL.md` update instructing the agent to ask which
+      company when the underlying call refuses with
+      `no-company-specified-and-no-default-configured` rather than guessing.
+      Open question before starting: live directory lookup first, or try the
+      config-file `resolveUser` first and fall back — see ROADMAP.md for the
+      full design.
 - [ ] **D47's `viaBot:false` default needs `SLACK_USER_TOKEN` configured on every
       developer's machine to work at all** — anyone who hasn't run `npm run
       get-user-token` yet will see `slack_post`/`slack_dm` start failing with

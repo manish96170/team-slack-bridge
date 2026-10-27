@@ -1,10 +1,21 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D63) and architecture; this file is the scannable done/pending list.
+log (D1–D64) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
 ## Done
+
+- [x] **Plain-English cross-company messaging (D64)** — `core/people.js`'s
+      `dmByName()` + `cli/dm-by-name.js`/`tsb-dm`. Reuses `core/accounts.js`
+      (D21)'s name→home registry as the company-alias store, resolves the
+      person via `core/directory.js`'s live `lookupUser` (live-first,
+      decided), sends via `core/dm.js`'s `dm()`. Omitted `--company` with no
+      usable default refuses with
+      `no-company-specified-and-no-default-configured`; `skill/SKILL.md`
+      instructs the agent to ask which company on that refusal rather than
+      guess. Verified via a real `npm pack` → clean `--prefix` install →
+      `tsb-dm`.
 
 - [x] **Database retention: `cli/archive.js`/`tsb-archive` (D63)** — exports
       (gzipped JSON, `0600`) and deletes rows older than a cutoff (default:
@@ -240,14 +251,6 @@ log (D1–D63) and architecture; this file is the scannable done/pending list.
       that concurrent asks require.
   - `PreCompact` is announce-only (D38) — "block autocompact until I approve" is not
     achievable with hooks.
-- [x] Plain-English cross-company messaging (D64) — `core/people.js`'s `dmByName()` +
-      `cli/dm-by-name.js`/`tsb-dm`. Reuses `core/accounts.js` (D21)'s name→home registry
-      as the company-alias store, resolves the person via `core/directory.js`'s live
-      `lookupUser` (live-first, decided), sends via `core/dm.js`'s `dm()`. Omitted
-      `--company` with no usable default refuses with
-      `no-company-specified-and-no-default-configured`; `skill/SKILL.md` instructs the
-      agent to ask which company on that refusal rather than guess. Verified via a real
-      `npm pack` → clean `--prefix` install → `tsb-dm`.
 
 ## Pending
 
@@ -287,6 +290,9 @@ log (D1–D63) and architecture; this file is the scannable done/pending list.
 - [ ] Codex and Gemini adapters — `failMode` already classifies them (deny), and
       `core/acp-backends.js` already supports them on the ACP axis, but no hook/plugin
       adapter exists.
+
+## Done (historical baseline — predates this file's Done/Pending split above)
+
 - [x] Core posting/DM/scheduling/reactions/progress-messages, CLI + local MCP server
       (stdio, full tool set) + Slack `skill/SKILL.md`
 - [x] Human-in-the-loop `ask`/approve primitive (DM-based, button + free-text capture)

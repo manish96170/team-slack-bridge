@@ -7,10 +7,13 @@ orchestration system, AI agent framework, or dashboard.
 Runtime: **Node >=26** (`package.json`'s `engines`). `.nvmrc` pins `26` for local dev on
 this machine so the bridge stays on the current Node line rather than LTS.
 
-**Install**: `npm install team-slack-bridge` (or `-g` for the `team-slack-bridge` and
-`tsb-hook` binaries) for normal use. `npm run build:sea` (standalone-binary packaging) and
-`npm test` only work from a git clone with `devDependencies` installed — they bundle
-this repo's own source/tests, which aren't part of the published package.
+**Install**: `npm install team-slack-bridge` (or `-g` for direct binaries — nine of
+them, see `package.json`'s `bin`: `team-slack-bridge`, `tsb-hook`, `tsb-setup`,
+`tsb-tls`, `tsb-tenants`, `tsb-get-user-token`, `tsb-get-workspace-token`,
+`tsb-archive`, `tsb-dm`) for normal use. `npm run build:sea` (standalone-binary
+packaging) and `npm test` only work from a git clone with `devDependencies`
+installed — they bundle this repo's own source/tests, which aren't part of the
+published package.
 
 ## Four surfaces, one core
 
@@ -61,11 +64,50 @@ agent sessions where a Slack thread *is* a live session with Claude/Codex/OpenCo
 Gemini CLI (see "ACP agent sessions" below). That remote MCP surface now also
 supports an opt-in multi-tenant mode — one shared deployment serving several Slack
 workspaces/companies, each isolated by `team_id`, provisioned with `cli/tenants.js`
-— alongside today's single-workspace default; see "Dormant surfaces" below.
+— alongside today's single-workspace default; see "Runtime Notes" below.
 
 For the feature matrix and exact on/off switches, see `FEATURES.md`.
 
+## What this repo can do
+
+Every row below is a real, shipped capability — not a roadmap item (see `ROADMAP.md`
+for those). `cli/*.js` and the matching MCP tool share one `core/` implementation
+(§"Four surfaces, one core" above), so anything listed here works the same way from a
+terminal, an MCP client, or `skill/SKILL.md`.
+
+| Area | What it does | Start here | `FEATURES.md` section |
+|---|---|---|---|
+| **Post / reply / edit / delete / react** | As the shared bot, or explicitly as the authorized human (`--as-user`, MCP default since D47/D60) | `cli/post.js`, `cli/reply.js`, `cli/update.js`, `cli/delete.js`, `cli/react.js` | Bot posting, Post as user, DM as user / edit as user |
+| **DM someone by raw Slack ID** | One-to-one message, bot or as-user, cached DM-channel lookup | `cli/dm.js` | DMs |
+| **DM someone by name, across companies** | "DM `<person>` in `<company>`: `<text>`" — resolves a company alias and a live Slack-directory match, no raw ID or `TSB_HOME` path needed (PLAN D64) | `cli/dm-by-name.js` / `tsb-dm` | Plain-English cross-company messaging |
+| **Upload a file** | Screenshot/video/any local file, optionally shared straight into a channel/thread | `cli/upload.js` | File/attachment uploads |
+| **Read channels and threads** | History for a channel or a specific thread, bot-token scoped to channels the bot is in | `cli/query.js`, `cli/thread.js` | Channel and thread reads |
+| **Search** | Full-text Slack search — user-token-only, Slack has no bot equivalent | `cli/search.js` | Search |
+| **List "my" channels** | Every conversation the authorized human is actually in (`users.conversations`), never the whole workspace | `cli/channels.js` | List my channels |
+| **Resolve a configured person** | Config-file-only, zero network calls — name/handle/ID/display-name → Slack user ID | `cli/resolve-user.js` | Configured users |
+| **Look up anyone in the workspace** | Live Slack-directory search (ID, email, handle, or name), ambiguous matches refused and listed rather than guessed | `cli/lookup-user.js` | Live directory lookup |
+| **Schedule a message** | Post at a future time, list/cancel what's scheduled | `cli/schedule.js`, `cli/scheduled.js`, `cli/unschedule.js` | Scheduling |
+| **Human-in-the-loop ask/approval** | DM a question or an Approve/Deny prompt, block until answered (buttons need the listener; free-text works via listener or poll) | `cli/ask.js` | Human ask and approval |
+| **Progress messages** | One message, edited in place across start/update/finish instead of a new post per update | `cli/progress.js` | Progress updates |
+| **App Home tab** | Publish/refresh a per-user App Home view | `cli/home.js` | App Home |
+| **Output mode** | Low/medium/high verbosity, settable locally or via a Slack slash command | `cli/output-mode.js` | Output mode |
+| **Socket Mode listener** | Real-time events (approvals, free-text answers, ACP triggers) — foreground (`cli/listen.js`) or a managed daemon (`cli/daemon.js`) | `cli/daemon.js start` | Socket Mode listener |
+| **HTTP Events API / slash commands** | An alternative to Socket Mode for webhook-style delivery, off by default | `cli/http.js` | HTTP Events API and slash commands |
+| **ACP agent sessions** | A Slack thread becomes a live coding-agent session (Claude/Codex/OpenCode/Gemini CLI) — start, converse, hand off at the context limit, close, reopen | `/agent-session start`, `cli/agent-session.js` | Agent sessions |
+| **Away mode** | Route a *local* coding session's permission prompts to a Slack DM so you can step away | `cli/away.js`, `cli/hooks-install.js` | Away mode |
+| **Named repo registry** | ACP sessions' filesystem/terminal access is scoped to one of these, never a raw path typed into Slack | `cli/repos.js` | Agent sessions |
+| **Multi-account (local)** | Several Slack workspaces/companies from one install, each with its own `.env`/config/DB, addressed by a short alias | `cli/accounts.js` | Local MCP daemon + multi-account |
+| **Local MCP daemon** | One shared local MCP server (HTTP, loopback-only) for multiple harnesses instead of one stdio subprocess each | `cli/mcp-daemon.js` | Local MCP daemon + multi-account |
+| **Multi-tenancy (hosted/remote)** | One hosted `/mcp` deployment serving several real Slack orgs, each isolated by signed `team_id` | `cli/tenants.js` | Slackbot MCP Client |
+| **Slackbot MCP Client (remote)** | A locked-down, channel-post-first tool registry exposed over public HTTPS `/mcp`, no user tokens or DMs ever reachable | `cli/http.js` + `slackbotMcp.enabled` | Slackbot MCP Client |
+| **Database retention** | Export-then-prune old `.ledger.sqlite` rows on a schedule so the DB doesn't grow forever | `cli/archive.js` / `tsb-archive` | Database retention |
+| **Local HTTPS for OAuth callbacks** | Self-signed cert for `localhost`, generated on demand — required by Slack's Public Distribution checklist | `cli/tls.js` | (setup step, "One-time setup" above) |
+| **Install health** | Reports token presence/validity and feature status without ever printing a secret | `cli/doctor.js` | Health checks |
+
 ## Capabilities at a glance
+
+Finer-grained defaults for the capabilities above — which identity sends by default,
+and the exact flag/config key that changes it:
 
 | Capability | Default | Change it with | Decision |
 |---|---|---|---|
@@ -429,10 +471,11 @@ either way.
 Every command below accepts `--json` (structured `{ ok, ... }` output, non-zero exit
 on failure) and, for anything that actually sends to Slack, `--dry-run` (resolve and
 format the call, send nothing). All of them are plain `node cli/<name>.js` invocations
-from a git clone; `npm install -g` installs six direct commands —
-`team-slack-bridge` (alias for `post.js`), `tsb-hook`, `tsb-tls`, `tsb-tenants`,
-`tsb-get-user-token`, and `tsb-get-workspace-token` (`package.json`'s `bin`) — but is
-not a dispatcher for every subcommand below. For anything else on a global install, run
+from a git clone; `npm install -g` installs nine direct commands —
+`team-slack-bridge` (alias for `post.js`), `tsb-hook`, `tsb-setup`, `tsb-tls`,
+`tsb-tenants`, `tsb-get-user-token`, `tsb-get-workspace-token`, `tsb-archive`, and
+`tsb-dm` (`package.json`'s `bin`) — but is not a dispatcher for every subcommand
+below. For anything else on a global install, run
 `node $(npm root -g)/team-slack-bridge/cli/<name>.js` (or just work from a git clone
 instead, which is what most of this README assumes).
 
@@ -443,6 +486,11 @@ node cli/reply.js --channel '#x' --thread-ts '169…' --text 'hi' [--idempotency
 node cli/update.js --channel '#x' --ts '169…' --text 'new text' [--as-user] [--dry-run] [--json]  # --as-user required if the original was posted as-user
 node cli/delete.js --channel '#x' --ts '169…' [--as-user] [--dry-run] [--json]  # --as-user required if the original was posted as-user
 node cli/react.js --channel '#x' --ts '169…' --emoji eyes [--remove] [--as-user] [--dry-run] [--json]  # --as-user adds/removes only the authorized user's reaction
+```
+
+**Upload a file/screenshot/video** (Slack's 3-step upload flow, never the deprecated `files.upload`):
+```bash
+node cli/upload.js --file-path ./screenshot.png [--channel '#x'] [--thread-ts …] [--title t] [--filename name] [--as-user] [--dry-run] [--json]
 ```
 
 **DM someone** (find their Slack member ID via their profile → "Copy member ID"):
@@ -529,6 +577,13 @@ node cli/daemon.js status --json
 node cli/daemon.js logs --lines 80
 node cli/daemon.js restart --json
 node cli/daemon.js stop --json
+```
+
+Foreground alternative (no daemon/PID-file management, blocks the terminal — useful
+for a one-off dev run or when something managing it already, e.g. the dashboard's own
+supervisor via `createListener()`):
+```bash
+node cli/listen.js
 ```
 
 **Named repo registry** (D23 — an ACP session's fs/terminal access is scoped to one

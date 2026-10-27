@@ -17,8 +17,11 @@ Minimum runtime is Node `>=26`; `.nvmrc` pins `26`.
 
 Required files:
 
-- `.env` — local credentials, never committed.
-- `slack-config.json` — local/team routing config, never committed.
+- `.env` — local credentials, never committed. Reference shape: `.env.example`.
+- `slack-config.json` — local/team routing config, never committed. Reference shape
+  (every optional key, with safe placeholder values): `config/slack-config.example.json`.
+  Normally written for you by `cli/setup.js init` below — reach for the example file
+  directly only when hand-editing a key the wizard doesn't prompt for yet.
 
 Bootstrap:
 

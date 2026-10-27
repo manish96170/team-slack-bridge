@@ -140,6 +140,16 @@ their message). The CLI (`cli/post.js` etc., below) is unaffected by this and ke
 original bot-default — enable with `--as-user` there as before. This asymmetry between
 CLI and MCP defaults is deliberate, not an oversight: see PLAN §18.
 
+**`viaBot`/`anonymousMessage` are opt-in only for a human-requested bot-branded/anonymous
+message — never set by a calling agent on its own initiative (PLAN D67).** Found live: a
+calling agent set both unprompted on a plain status DM. The default itself was already
+correct (D47); D67 strengthens every description a model reads before deciding tool-call
+arguments — `slack_post`/`slack_reply`/`slack_dm`'s own descriptions, their `viaBot`/
+`anonymousMessage` schema fields, and (the strongest lever) a new `instructions` field on
+the local MCP `initialize` response (both `mcp/server.js` and `listen/mcp-http.js`),
+read once per connection before any tool call. All of this is advisory — nothing here
+can force a non-compliant client/model to read or obey it.
+
 Enable (user-token path, either surface):
 
 ```bash

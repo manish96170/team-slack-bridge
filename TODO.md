@@ -1,10 +1,21 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D66) and architecture; this file is the scannable done/pending list.
+log (D1–D67) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
 ## Done
+
+- [x] **MCP `initialize` now warns against unprompted `viaBot`/`anonymousMessage`
+      (D67)** — found live: a calling agent set both explicitly, unprompted, on a
+      plain status DM. Not a defect in `slack_dm`'s defaults (D47); nothing here
+      can force a different agent's own tool-call arguments. `mcp/tools.local.js`
+      exports `MCP_INSTRUCTIONS`, surfaced in `initialize`'s `instructions` field
+      by both local MCP transports (`mcp/server.js`, `listen/mcp-http.js`) — read
+      once per connection, before any tool call. `slack_post`/`slack_reply`/
+      `slack_dm`'s own descriptions and `viaBot`/`anonymousMessage` schema fields
+      also hardened with an explicit "do not set this unless asked" line.
+      Honestly scoped as advisory, not enforcement.
 
 - [x] **`cli/context.js` now resolves through `core/accounts.js`'s registered default,
       not just a raw `TSB_HOME` read (D66)** — found live: `cli/accounts.js

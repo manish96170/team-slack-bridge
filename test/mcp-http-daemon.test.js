@@ -48,6 +48,20 @@ test('single-account daemon exposes the full local tool set, unlike the 10-tool 
     })
   }))
 
+// D67 — found live: a calling agent set viaBot:true/anonymousMessage:true on
+// a plain DM unprompted. Per-tool/per-field descriptions are only read once
+// a model is already considering that tool; `initialize`'s `instructions`
+// field is read once, before any tool call — the strongest lever available,
+// even though it's still advisory, not an enforcement mechanism.
+test('initialize response carries instructions warning against unprompted viaBot/anonymousMessage', () =>
+  withTempHome(async () => {
+    await withServer({ accountMode: 'single', port: 0 }, async port => {
+      const response = await rpc(port, { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+      assert.match(response.result.instructions, /viaBot/)
+      assert.match(response.result.instructions, /never set either on your own initiative/)
+    })
+  }))
+
 test('single-account daemon rejects an account argument naming a different account', () =>
   withTempHome(async dir => {
     addAccount('work', join(dir, 'work'))

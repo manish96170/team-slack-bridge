@@ -8,7 +8,7 @@
 // 0.0.0.0, by the same "absent by omission" principle as D5.
 
 import http from 'node:http'
-import { tools } from '../mcp/tools.local.js'
+import { tools, MCP_INSTRUCTIONS } from '../mcp/tools.local.js'
 import { validateArguments } from '../mcp/validation.js'
 import { withAccountField } from '../mcp/schema.js'
 import { loadAccountContext, listAccounts } from '../core/accounts.js'
@@ -56,7 +56,12 @@ export function createLocalMcpServer({ accountMode = 'single', port = 8918 } = {
     const { id, method, params } = message || {}
 
     if (method === 'initialize') {
-      return respond(id, { protocolVersion: PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: 'team-slack-bridge-local-daemon', version: packageVersion() || '0.0.0' } })
+      return respond(id, {
+        protocolVersion: PROTOCOL_VERSION,
+        capabilities: { tools: {} },
+        serverInfo: { name: 'team-slack-bridge-local-daemon', version: packageVersion() || '0.0.0' },
+        instructions: MCP_INSTRUCTIONS,
+      })
     }
     if (method === 'notifications/initialized' || method === 'notifications/cancelled') return null
     if (method === 'ping') return respond(id, {})

@@ -92,11 +92,29 @@ import { recordLocalAudit } from '../core/local-audit.js'
 import { isTrackingEnabled, echoBotSendToSender, propagateUpdateToTracking, propagateDeleteToTracking } from '../core/tracking.js'
 import { schemas } from './schema.js'
 
+// Surfaced in the MCP `initialize` response's `instructions` field (D67, on
+// request — found live: a calling agent explicitly set viaBot:true and
+// anonymousMessage:true on a plain "send a status update" DM, unprompted,
+// even though both are opt-in and documented as such in every affected
+// tool/field description). Per-tool descriptions are read only when a model
+// is already considering that specific tool/field; `instructions` is read
+// once, before any tool call, by MCP clients that support it — the
+// strongest lever available here, though still advisory, not an
+// enforcement mechanism (there is no way to force a client to read or obey
+// it).
+export const MCP_INSTRUCTIONS =
+  'slack_post/slack_reply/slack_dm default to sending AS THE LOCALLY AUTHORIZED HUMAN, not the shared bot. ' +
+  'viaBot:true and anonymousMessage:true are opt-in for when a human explicitly asks for a bot-branded or ' +
+  'anonymous message in THIS request — never set either on your own initiative, including for routine status ' +
+  'updates, completion notices, or production/approval messages. If a viaBot send is refused as unauthorized ' +
+  '(not-authorized-to-send-as-bot-...), report that refusal back to the human and let them decide; do not retry ' +
+  'with anonymousMessage:true yourself.'
+
 export const tools = {
   slack_post: {
     name: 'slack_post',
     description:
-      'Post a message to a Slack channel. Defaults (viaBot:false) to sending as the locally authorized human (SLACK_USER_TOKEN) — a real Slack message of yours, visible to you with native edit/delete. Pass viaBot:true to send as the shared bot instead (SLACK_BOT_TOKEN); refused unless this install can identify its sender OR anonymousMessage:true is passed. A viaBot send gets a "sent via bot by" attribution footer (unless anonymousMessage:true) and is journaled to local_audit; if the sender is identified, they also get a private tracking DM of what was sent and where, unless botSendTracking is disabled. "@handle" in text is resolved to a real Slack mention against slack-config.json.',
+      'Post a message to a Slack channel. Defaults (viaBot:false) to sending as the locally authorized human (SLACK_USER_TOKEN) — a real Slack message of yours, visible to you with native edit/delete. Pass viaBot:true to send as the shared bot instead (SLACK_BOT_TOKEN); refused unless this install can identify its sender OR anonymousMessage:true is passed. A viaBot send gets a "sent via bot by" attribution footer (unless anonymousMessage:true) and is journaled to local_audit; if the sender is identified, they also get a private tracking DM of what was sent and where, unless botSendTracking is disabled. "@handle" in text is resolved to a real Slack mention against slack-config.json. IMPORTANT: viaBot/anonymousMessage are opt-in for when a human explicitly asks for a bot-branded or anonymous message — never set them on your own initiative, including for routine status updates, completion notices, or production/approval messages. If a viaBot send is refused as unauthorized, report the refusal back to the human; do not retry with anonymousMessage:true yourself.',
     inputSchema: schemas.slack_post,
     handler: async (args, ctx) => {
       const viaBot = !!args.viaBot
@@ -147,7 +165,7 @@ export const tools = {
   slack_reply: {
     name: 'slack_reply',
     description:
-      'Reply in a Slack thread. Defaults (viaBot:false) to replying as the locally authorized human (SLACK_USER_TOKEN). Pass viaBot:true to reply as the shared bot instead; refused unless this install can identify its sender OR anonymousMessage:true is passed. A viaBot reply carries an attribution footer (unless anonymousMessage:true) and is journaled to local_audit; if the sender is identified, they also get a private tracking DM, unless botSendTracking is disabled. "@handle" in text is resolved to a real Slack mention against slack-config.json.',
+      'Reply in a Slack thread. Defaults (viaBot:false) to replying as the locally authorized human (SLACK_USER_TOKEN). Pass viaBot:true to reply as the shared bot instead; refused unless this install can identify its sender OR anonymousMessage:true is passed. A viaBot reply carries an attribution footer (unless anonymousMessage:true) and is journaled to local_audit; if the sender is identified, they also get a private tracking DM, unless botSendTracking is disabled. "@handle" in text is resolved to a real Slack mention against slack-config.json. IMPORTANT: viaBot/anonymousMessage are opt-in for when a human explicitly asks for a bot-branded or anonymous message — never set them on your own initiative. If a viaBot reply is refused as unauthorized, report the refusal back to the human; do not retry with anonymousMessage:true yourself.',
     inputSchema: schemas.slack_reply,
     handler: async (args, ctx) => {
       const viaBot = !!args.viaBot
@@ -283,7 +301,7 @@ export const tools = {
   slack_dm: {
     name: 'slack_dm',
     description:
-      'Send a DM. Defaults (viaBot:false) to sending as the locally authorized human (SLACK_USER_TOKEN + user-token DM scope) so the recipient sees a real DM from you. Pass viaBot:true to send as the shared bot instead; refused unless this install can identify its sender OR anonymousMessage:true is passed. A viaBot DM carries an attribution footer (unless anonymousMessage:true) and is journaled to local_audit; if the sender is identified, they also get a private tracking DM of what was sent and to whom, unless botSendTracking is disabled.',
+      'Send a DM. Defaults (viaBot:false) to sending as the locally authorized human (SLACK_USER_TOKEN + user-token DM scope) so the recipient sees a real DM from you. Pass viaBot:true to send as the shared bot instead; refused unless this install can identify its sender OR anonymousMessage:true is passed. A viaBot DM carries an attribution footer (unless anonymousMessage:true) and is journaled to local_audit; if the sender is identified, they also get a private tracking DM of what was sent and to whom, unless botSendTracking is disabled. IMPORTANT: viaBot/anonymousMessage are opt-in for when a human explicitly asks for a bot-branded or anonymous DM — never set them on your own initiative, including for routine status updates, completion notices, or production/approval messages; a plain "send/DM X" request should go as the human by default. If a viaBot send is refused as unauthorized, report the refusal back to the human; do not retry with anonymousMessage:true yourself.',
     inputSchema: schemas.slack_dm,
     handler: async (args, ctx) => {
       const viaBot = !!args.viaBot

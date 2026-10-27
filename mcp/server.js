@@ -12,7 +12,7 @@
 // corrupt the stream (§0, §6.3).
 
 import { createInterface } from 'node:readline'
-import { tools } from './tools.local.js'
+import { tools, MCP_INSTRUCTIONS } from './tools.local.js'
 import { validateArguments } from './validation.js'
 import { loadContext } from '../cli/context.js'
 import { packageVersion } from '../core/version.js'
@@ -42,6 +42,7 @@ async function handle(message) {
       protocolVersion: PROTOCOL_VERSION,
       capabilities: { tools: {} },
       serverInfo: { name: 'team-slack-bridge', version: packageVersion() || '0.0.0' },
+      instructions: MCP_INSTRUCTIONS,
     })
     return
   }

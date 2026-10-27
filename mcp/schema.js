@@ -28,12 +28,12 @@ export const schemas = {
       viaBot: {
         type: 'boolean',
         description:
-          'Default false: send as the locally authorized human (SLACK_USER_TOKEN) so it is a real, editable/deletable Slack message of yours. Set true to send as the shared bot instead (SLACK_BOT_TOKEN) — the text then gets a visible "sent via bot by" attribution footer and is journaled to local_audit.',
+          'Default false: send as the locally authorized human (SLACK_USER_TOKEN) so it is a real, editable/deletable Slack message of yours. Set true to send as the shared bot instead (SLACK_BOT_TOKEN) — the text then gets a visible "sent via bot by" attribution footer and is journaled to local_audit. DO NOT set this to true unless the human explicitly asked for a bot-branded or anonymous message in THIS request — a routine status update, completion notice, or production/approval message should still go as the human by default; omit this field rather than guessing it should be true.',
       },
       anonymousMessage: {
         type: 'boolean',
         description:
-          'Only meaningful with viaBot:true. Omit to use this install\'s configured default (slack-config.json\'s botSend.anonymousMessageDefault, false unless set); pass true/false explicitly to override that default for this one call. If this install cannot identify its sender (no owner.slackUserId configured), viaBot:true is REFUSED unless the resolved value is true. If true, the public bot-posted text omits the sender attribution footer — but if the sender IS identified, they still privately receive a tracking DM of what was sent and to whom (unless botSendTracking.enabled is false).',
+          'Only meaningful with viaBot:true. Omit to use this install\'s configured default (slack-config.json\'s botSend.anonymousMessageDefault, false unless set); pass true/false explicitly to override that default for this one call. If this install cannot identify its sender (no owner.slackUserId configured), viaBot:true is REFUSED unless the resolved value is true. If true, the public bot-posted text omits the sender attribution footer — but if the sender IS identified, they still privately receive a tracking DM of what was sent and to whom (unless botSendTracking.enabled is false). DO NOT set this to true to work around a viaBot refusal — that refusal exists specifically to stop an anonymous send nobody asked for; surface the refusal to the human and let THEM decide, never retry with anonymousMessage:true on your own.',
       },
       dryRun: { type: 'boolean' },
     },
@@ -50,11 +50,12 @@ export const schemas = {
       viaBot: {
         type: 'boolean',
         description:
-          'Default false: reply as the locally authorized human (SLACK_USER_TOKEN). Set true to reply as the shared bot instead — carries an attribution footer and is journaled to local_audit.',
+          'Default false: reply as the locally authorized human (SLACK_USER_TOKEN). Set true to reply as the shared bot instead — carries an attribution footer and is journaled to local_audit. DO NOT set this to true unless the human explicitly asked for a bot-branded or anonymous message in THIS request; omit this field rather than guessing it should be true.',
       },
       anonymousMessage: {
         type: 'boolean',
-        description: 'Same as slack_post\'s anonymousMessage (including the config-default fallback) — only meaningful with viaBot:true.',
+        description:
+          'Same as slack_post\'s anonymousMessage (including the config-default fallback) — only meaningful with viaBot:true. DO NOT set this to true to work around a viaBot refusal; surface the refusal to the human instead.',
       },
       dryRun: { type: 'boolean' },
     },
@@ -173,11 +174,12 @@ export const schemas = {
       viaBot: {
         type: 'boolean',
         description:
-          'Default false: DM as the locally authorized human (SLACK_USER_TOKEN + user-token DM scope). Set true to DM as the shared bot instead — carries an attribution footer and is journaled to local_audit.',
+          'Default false: DM as the locally authorized human (SLACK_USER_TOKEN + user-token DM scope). Set true to DM as the shared bot instead — carries an attribution footer and is journaled to local_audit. DO NOT set this to true unless the human explicitly asked for a bot-branded or anonymous DM in THIS request — a routine status update, completion notice, or production/approval message should still go as the human by default; omit this field rather than guessing it should be true.',
       },
       anonymousMessage: {
         type: 'boolean',
-        description: 'Same as slack_post\'s anonymousMessage (including the config-default fallback) — only meaningful with viaBot:true.',
+        description:
+          'Same as slack_post\'s anonymousMessage (including the config-default fallback) — only meaningful with viaBot:true. DO NOT set this to true to work around a viaBot refusal; surface the refusal to the human instead of retrying anonymously on your own.',
       },
       dryRun: { type: 'boolean' },
     },

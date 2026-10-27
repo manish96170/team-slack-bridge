@@ -181,7 +181,7 @@ per-install default — `"botSend": { "anonymousMessageDefault": true }` in
 `slack-config.json` means `viaBot:true` sends are anonymous unless a caller explicitly
 passes `anonymousMessage:false` for that one call (D49). When it
 does send: the text gets a visible attribution footer —
-`Name (@handle, U...) *no-reply*` — resolved from `slack-config.json`'s
+`Name (@handle, U...) *no-reply*` (D65) — resolved from `slack-config.json`'s
 `owner` (or `_sender withheld_` instead, if resolved anonymous), and the send is
 journaled to a local `local_audit` SQLite table (`core/local-audit.js`/`core/sender.js`).
 This is the local, trust-the-config-file equivalent of what the remote profile already
@@ -828,6 +828,16 @@ Each account is its own home directory with its own `.env`/`slack-config.json`/
 populate it). Absent `accounts.json` entirely, every account-aware code path
 synthesizes a single `"default"` account pointing at today's `TSB_HOME` — this feature
 is fully opt-in and changes nothing for an existing single-account install.
+
+**`cli/accounts.js set-default <name>` applies to the plain stdio `mcp/server.js` and
+every `cli/*.js` command too, not just this daemon's `"multi"` mode (PLAN D66).**
+Before D66, only this daemon's `"multi"` mode and the account-aware functions
+(`cli/accounts.js`, `cli/dm-by-name.js`) consulted the registered default — a bare
+`mcp/server.js`/CLI command read raw `TSB_HOME` directly, with no knowledge of
+`accounts.json` at all. `cli/context.js` (shared by both) now resolves through the same
+registry, so one default applies everywhere. A long-running `mcp/server.js` process
+resolves its account once at startup — switching the default needs that connection
+restarted to take effect.
 
 ### Away mode — approve your own local session from Slack (PLAN D34–D40)
 

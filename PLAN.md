@@ -1222,9 +1222,10 @@ a shared bot token, that's an unaccountable-spam vector, not just a UX gap.
 2. **A bot-sent message (now opt-in via `viaBot:true`) still carries no sender
    identity on a token shared by multiple people.** Fix: `core/sender.js`'s
    `withSenderAttribution(text, config)` appends a visible, machine-parseable footer —
-   `<@U...> (Name, @handle) · memberId: U...` — resolved from `slack-config.json`'s
-   `owner` (cross-referenced against `users` for the display name/handle). The
-   `memberId:` segment is deliberately plain text, not just `<@...>` mention markup, so
+   `Name (@handle, U...) *no-reply*` (reworded by D65 — originally
+   `<@U...> (Name, @handle) · memberId: U...`, see D65 for why) — resolved from
+   `slack-config.json`'s `owner` (cross-referenced against `users` for the display
+   name/handle). The Slack ID stays plain text in the parens, so
    a *different* session reading the message back (`slack_query_messages`/
    `slack_get_thread`) can extract the ID without depending on mention-rendering, then
    feed it straight into `slack_resolve_user`/`slack_dm` to reach that person. Every

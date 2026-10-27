@@ -5,9 +5,17 @@ import { setOutputModeInConfig } from '../core/config-write.js'
 import { verifySlackSignature } from '../core/signing.js'
 import { handleMcpMessage } from '../mcp/http.js'
 
+const MAX_REQUEST_BYTES = 1024 * 1024
+
 async function readBody(req) {
   const chunks = []
-  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+  let size = 0
+  for await (const chunk of req) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    size += bytes.length
+    if (size > MAX_REQUEST_BYTES) throw new Error('request-body-too-large')
+    chunks.push(bytes)
+  }
   return Buffer.concat(chunks).toString('utf8')
 }
 
@@ -142,7 +150,7 @@ export async function handleHttpRequest({ req, res, signingSecret, env = {}, con
     sendJson(res, 404, { ok: false, error: 'not-found' })
   } catch (err) {
     if (onError) onError(err)
-    sendJson(res, 500, { ok: false, error: err.message })
+    sendJson(res, err.message === 'request-body-too-large' ? 413 : 500, { ok: false, error: err.message })
   }
 }
 

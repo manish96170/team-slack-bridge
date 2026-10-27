@@ -33,7 +33,7 @@ async function withServer(opts, fn) {
 }
 
 async function rpc(port, message) {
-  const res = await fetch(`http://127.0.0.1:${port}/mcp`, { method: 'POST', body: JSON.stringify(message) })
+  const res = await fetch(`http://127.0.0.1:${port}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(message) })
   return res.json()
 }
 
@@ -45,6 +45,27 @@ test('single-account daemon exposes the full local tool set, unlike the 10-tool 
       assert.ok(names.includes('slack_dm'), 'slack_dm should be present on the local daemon')
       assert.ok(names.includes('slack_ask'), 'slack_ask should be present on the local daemon')
       assert.ok(names.length > 10, 'local daemon tool set should exceed the remote 10-tool set')
+    })
+  }))
+
+test('local daemon rejects browser-origin and non-JSON POSTs before any MCP tool can run', () =>
+  withTempHome(async () => {
+    await withServer({ accountMode: 'single', port: 0 }, async port => {
+      const browser = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: 'POST',
+        headers: { origin: 'https://evil.example.com', 'content-type': 'text/plain' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+      })
+      assert.equal(browser.status, 403)
+      assert.equal((await browser.json()).error, 'browser-origin-not-allowed')
+
+      const nonJson = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: 'POST',
+        headers: { 'content-type': 'text/plain' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }),
+      })
+      assert.equal(nonJson.status, 415)
+      assert.equal((await nonJson.json()).error, 'application-json-required')
     })
   }))
 

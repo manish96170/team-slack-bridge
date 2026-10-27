@@ -44,6 +44,14 @@ test('resolveAccountHome errors clearly on an unknown account name', () => {
   })
 })
 
+test('a malformed accounts.json fails safe to the synthesized single default instead of crashing every CLI/MCP import', () => {
+  withTempHome(dir => {
+    writeFileSync(join(dir, 'accounts.json'), '{ this is not valid json')
+    assert.deepEqual(listAccounts(), { default: 'default', accounts: { default: dir } })
+    assert.deepEqual(resolveAccountHome(), { ok: true, name: 'default', home: dir })
+  })
+})
+
 test('setDefaultAccount switches which account resolveAccountHome() returns with no name given', () => {
   withTempHome(dir => {
     addAccount('work', join(dir, 'work'))

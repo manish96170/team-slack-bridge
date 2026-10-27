@@ -1,7 +1,7 @@
 // Database retention (PLAN D63): .ledger.sqlite accumulates rows forever
 // across every table that logs something over time (ledger, asks,
 // agent_sessions, remote_audit, local_audit, bot_send_tracking,
-// dm_channels, directory_people, mpim_conversations, mpim_members) --
+// dm_channels, directory_people, mpim_conversations) --
 // nothing has ever pruned it, so a long-running install's
 // database file only grows. This exports anything older than a cutoff
 // (default: the first day of the current month) to a gzipped JSON archive
@@ -34,7 +34,6 @@ const TABLES = [
   { name: 'bot_send_tracking', timestampColumn: 'created_at' },
   { name: 'directory_people', timestampColumn: 'refreshed_at' },
   { name: 'mpim_conversations', timestampColumn: 'refreshed_at' },
-  { name: 'mpim_members', timestampColumn: 'refreshed_at' },
 ]
 
 export function startOfCurrentMonth(now = new Date()) {
@@ -43,8 +42,9 @@ export function startOfCurrentMonth(now = new Date()) {
 
 export function archiveOldData({ dbPath, archiveDir, before, dryRun }) {
   if (!dbPath) return { ok: false, error: 'dbPath-required', retryable: false }
+  if (before && Number.isNaN(Date.parse(before))) return { ok: false, error: 'before-must-be-an-iso-date', retryable: false }
   const db = getDb(dbPath)
-  const cutoff = before || startOfCurrentMonth()
+  const cutoff = before ? new Date(before).toISOString() : startOfCurrentMonth()
 
   const tables = {}
   let totalRows = 0

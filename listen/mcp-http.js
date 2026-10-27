@@ -16,6 +16,7 @@ import { packageVersion } from '../core/version.js'
 
 const PROTOCOL_VERSION = '2024-11-05'
 const BIND_HOST = '127.0.0.1'
+const MAX_REQUEST_BYTES = 1024 * 1024
 
 function sendJson(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json' })
@@ -24,7 +25,13 @@ function sendJson(res, status, body) {
 
 async function readBody(req) {
   const chunks = []
-  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+  let size = 0
+  for await (const chunk of req) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    size += bytes.length
+    if (size > MAX_REQUEST_BYTES) throw new Error('request-body-too-large')
+    chunks.push(bytes)
+  }
   return Buffer.concat(chunks).toString('utf8')
 }
 
@@ -109,6 +116,18 @@ export function createLocalMcpServer({ accountMode = 'single', port = 8918 } = {
     }
     if (req.method !== 'POST' || req.url !== '/mcp') {
       sendJson(res, 404, { ok: false, error: 'not-found' })
+      return
+    }
+    // A loopback daemon is not automatically browser-safe: a malicious web
+    // page can issue a CORS-simple text/plain POST to 127.0.0.1 even though it
+    // cannot read the response, and this daemon can perform blind Slack
+    // writes. Native MCP clients send application/json and no browser Origin.
+    if (req.headers.origin) {
+      sendJson(res, 403, { ok: false, error: 'browser-origin-not-allowed' })
+      return
+    }
+    if (!String(req.headers['content-type'] || '').toLowerCase().startsWith('application/json')) {
+      sendJson(res, 415, { ok: false, error: 'application-json-required' })
       return
     }
     try {

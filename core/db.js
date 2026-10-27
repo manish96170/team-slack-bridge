@@ -112,6 +112,10 @@ export function getDb(path) {
       refreshed_at TEXT NOT NULL,
       PRIMARY KEY(workspace_id, user_id)
     );
+    CREATE TABLE IF NOT EXISTS directory_index_state (
+      workspace_id TEXT PRIMARY KEY,
+      refreshed_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS mpim_conversations (
       workspace_id TEXT NOT NULL,
       token_identity TEXT NOT NULL,
@@ -119,14 +123,6 @@ export function getDb(path) {
       member_key TEXT NOT NULL,
       refreshed_at TEXT NOT NULL,
       PRIMARY KEY(workspace_id, token_identity, conversation_id)
-    );
-    CREATE TABLE IF NOT EXISTS mpim_members (
-      workspace_id TEXT NOT NULL,
-      token_identity TEXT NOT NULL,
-      conversation_id TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      refreshed_at TEXT NOT NULL,
-      PRIMARY KEY(workspace_id, token_identity, conversation_id, user_id)
     );
     CREATE INDEX IF NOT EXISTS idx_asks_thread_pending ON asks(channel, thread_ts, status);
     CREATE INDEX IF NOT EXISTS idx_ledger_status ON ledger(status);

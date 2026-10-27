@@ -275,10 +275,10 @@ skill/agent asks the human whether creation is wanted; automatic creation is del
 out of scope for this pass.
 
 For speed, successful live person lookups and visible MPIM membership edges are persisted
-in the selected account's `.ledger.sqlite` (`directory_people`, `mpim_conversations`,
-`mpim_members`). The index is scoped by Slack workspace plus a fingerprint of the user
-token identity, so one person's visible group DMs never leak into another user's index or
-another company account. Cache miss/stale state refreshes only MPIMs visible to that user
+in the selected account's `.ledger.sqlite` (`directory_people`, `mpim_conversations`).
+The MPIM index is scoped by Slack workspace plus a fingerprint of the user token identity,
+so one person's visible group DMs never leak into another user's index or another company
+account. Cache miss/stale state refreshes only MPIMs visible to that user
 token via Slack. Remote Slackbot MCP never exposes this: it has no personal user token by
 design (D20). Local MCP is supported as `slack_message_group_by_name`; the local daemon
 adds its standard optional `account` field in multi-account mode.
@@ -858,6 +858,11 @@ Enable to let multiple AI coding harnesses share one running server (binds
 node cli/mcp-daemon.js start|stop|restart|status|logs
 ```
 
+The daemon is native-MCP-client-only: it requires `Content-Type: application/json` and
+rejects browser `Origin` requests before parsing MCP, so a random web page cannot issue a
+CORS-simple blind write to `127.0.0.1`. Request bodies are capped at 1 MiB. This is still
+a powerful local surface — do not point untrusted native processes at it.
+
 `accountMode: "single"` (default) behaves exactly like the stdio server — any
 `account` argument naming a non-default account is rejected with a clear error, not
 silently ignored. `accountMode: "multi"` additionally resolves an optional `account`
@@ -996,7 +1001,7 @@ command, not an automatic background job).
 
 `.ledger.sqlite` accumulates rows forever across `ledger`, `asks`, `agent_sessions`,
 `remote_audit`, `local_audit`, `bot_send_tracking`, `dm_channels`, `directory_people`,
-`mpim_conversations`, and `mpim_members` — nothing
+and `mpim_conversations` — nothing
 previously pruned any of them, so a long-running install's database file only grows.
 
 Use:

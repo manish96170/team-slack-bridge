@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { messageGroupByName } from '../core/mpim.js'
+import { clearDirectoryCache } from '../core/directory.js'
 
 const SELF = { id: 'U0SELF001', name: 'me', real_name: 'Me' }
 const SHRESTHA = { id: 'U0SHRE001', name: 'shrestha', real_name: 'Shrestha Srivastava', profile: { display_name: 'Shrestha Srivastava' } }
@@ -11,9 +12,13 @@ const ALEX = { id: 'U0ALEX001', name: 'alex', real_name: 'Alex Doe', profile: { 
 
 function withTempDb(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'tsb-mpim-'))
+  clearDirectoryCache()
   return Promise.resolve()
     .then(() => fn(join(dir, '.ledger.sqlite')))
-    .finally(() => rmSync(dir, { recursive: true, force: true }))
+    .finally(() => {
+      clearDirectoryCache()
+      rmSync(dir, { recursive: true, force: true })
+    })
 }
 
 function transport({ mpims = [{ id: 'G0EXIST', members: [SELF.id, SHRESTHA.id, ALEX.id] }] } = {}) {
@@ -57,6 +62,27 @@ test('messageGroupByName indexes people and exact MPIM membership so a later ide
     const result = await messageGroupByName({ peopleNames: ['Shrestha Srivastava', 'Alex Doe'], text: 'second', userToken: 'xoxp-authorized-human', dbPath, slackCall: second.slackCall })
     assert.equal(result.ok, true)
     assert.deepEqual(second.calls.map(call => call.method), ['auth.test', 'chat.postMessage'])
+  }))
+
+test('persistent directory cache preserves ambiguous-user refusal instead of selecting one cached name match', async () =>
+  withTempDb(async dbPath => {
+    clearDirectoryCache('xoxp-authorized-human')
+    const AJAY_A = { id: 'U0AJAYA01', name: 'ajay.a', real_name: 'Ajay Kumar', profile: { display_name: 'Ajay Kumar' } }
+    const AJAY_B = { id: 'U0AJAYB01', name: 'ajay.b', real_name: 'Ajay Kumar', profile: { display_name: 'Ajay Kumar' } }
+    const { calls, slackCall } = transport()
+    const original = slackCall
+    const duplicateDirectory = async (method, token, body) => {
+      if (method === 'users.list') return { ok: true, members: [SELF, AJAY_A, AJAY_B, ALEX], response_metadata: {} }
+      return original(method, token, body)
+    }
+    const first = await messageGroupByName({ peopleNames: ['Ajay Kumar', 'Alex Doe'], text: 'hi', userToken: 'xoxp-authorized-human', dbPath, slackCall: duplicateDirectory })
+    assert.equal(first.ok, false)
+    assert.equal(first.error, 'ambiguous-user')
+    const listCallsAfterFirst = calls.filter(call => call.method === 'users.list').length
+    const second = await messageGroupByName({ peopleNames: ['Ajay Kumar', 'Alex Doe'], text: 'hi', userToken: 'xoxp-authorized-human', dbPath, slackCall: duplicateDirectory })
+    assert.equal(second.ok, false)
+    assert.equal(second.error, 'ambiguous-user')
+    assert.equal(calls.filter(call => call.method === 'users.list').length, listCallsAfterFirst, 'complete persistent snapshot should preserve ambiguity without another Slack walk')
   }))
 
 test('messageGroupByName asks before creating anything when no exact existing MPIM exists', async () =>

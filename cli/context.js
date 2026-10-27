@@ -23,7 +23,7 @@ const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 // on mcp/server.js or any other cli/*.js command, only on the account-aware
 // functions above — this closes that gap).
 const resolvedAccount = resolveAccountHome()
-const HOME_DIR = resolvedAccount.ok ? resolvedAccount.home : process.env.TSB_HOME || join(homedir(), '.team-slack-bridge')
+export const HOME_DIR = resolvedAccount.ok ? resolvedAccount.home : process.env.TSB_HOME || join(homedir(), '.team-slack-bridge')
 // Default to TSB_HOME for any new setup — an npm-installed copy must never
 // need to write inside its own install directory, since `npm update` wipes
 // it. The package-relative path is only a legacy fallback for existing
@@ -35,7 +35,13 @@ export const CONFIG_PATH = join(REPO_ROOT, 'slack-config.json')
 export const LEDGER_PATH = join(HOME_DIR, '.ledger.sqlite')
 
 export function loadContext() {
-  return { env: loadEnv(REPO_ROOT === PACKAGE_ROOT ? undefined : HOME_DIR), config: loadConfig(CONFIG_PATH), dbPath: LEDGER_PATH }
+  // Keep config and credentials paired: if a legacy package-root
+  // slack-config.json is selected, read that package root's .env too; for
+  // every normal account-aware path read that account home's .env. Passing
+  // undefined here would let env.js independently re-resolve raw TSB_HOME,
+  // which can belong to a different account after D66 selected a registered
+  // default home.
+  return { env: loadEnv(REPO_ROOT), config: loadConfig(CONFIG_PATH), dbPath: LEDGER_PATH }
 }
 
 // Multi-account path only (core/accounts.js) — every existing caller keeps

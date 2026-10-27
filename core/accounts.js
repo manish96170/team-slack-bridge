@@ -27,7 +27,16 @@ export function getAccountsRegistryPath() {
 function readRegistry() {
   const path = getAccountsRegistryPath()
   if (!existsSync(path)) return null
-  return JSON.parse(readFileSync(path, 'utf8'))
+  // A malformed local registry must not brick every CLI command and every
+  // stdio MCP server at module-import time (cli/context.js resolves the
+  // registered default immediately). Fail safe to the same synthesized
+  // single-account behavior as an absent registry; a later add/set-default
+  // overwrites the malformed file with a valid 0600 registry.
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'))
+  } catch {
+    return null
+  }
 }
 
 function writeRegistry(registry) {

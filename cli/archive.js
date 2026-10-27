@@ -14,7 +14,7 @@
 
 import { archiveOldData } from '../core/archive.js'
 import { parseFlags } from './lib/args.js'
-import { LEDGER_PATH, REPO_ROOT } from './context.js'
+import { HOME_DIR, LEDGER_PATH } from './context.js'
 import { join } from 'node:path'
 
 const command = process.argv[2]
@@ -27,7 +27,7 @@ if (command !== 'export') {
 
 const result = archiveOldData({
   dbPath: LEDGER_PATH,
-  archiveDir: join(REPO_ROOT, 'archives'),
+  archiveDir: join(HOME_DIR, 'archives'),
   before: flags.before,
   dryRun: flags['dry-run'],
 })
@@ -46,4 +46,3 @@ if (flags.json) {
   console.log(JSON.stringify(result.perTable, null, 2))
 }
 process.exitCode = result.ok ? 0 : 1
-

@@ -1,10 +1,16 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D70) and architecture; this file is the scannable done/pending list.
+log (D1–D71) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
 ## Done
+
+- [x] **Claude Sonnet 5 + Opus 5 India review fixes (D71)** — cache ambiguity,
+      browser-drive protection for the local daemon, request-body limits, account
+      config/env pairing, corrupt accounts-registry resilience, MPIM cache cleanup/
+      early exit, and archive cutoff/install-path safety. The uncertain remote
+      Slack-principal provenance concern is documented as open rather than guessed.
 
 - [x] **Existing group-DM/MPIM messaging by named people (D70)** —
       `messageGroupByName` + `cli/group-dm-by-name.js`/`tsb-group-dm` + local MCP

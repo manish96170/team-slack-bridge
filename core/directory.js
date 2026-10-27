@@ -74,9 +74,13 @@ function mapSlackFailure(result, requiredScope) {
   return { ok: false, error: result.error, retryable: !!result.retryable }
 }
 
-async function fetchAllMembers({ token, slackCall, ttlMs }) {
+async function fetchAllMembers({ token, slackCall, ttlMs, onDirectoryMembers }) {
   const cached = directoryCache.get(token)
-  if (cached && cached.expiresAt > Date.now()) return { ok: true, members: cached.members, truncated: cached.truncated }
+  if (cached && cached.expiresAt > Date.now()) {
+    const result = { ok: true, members: cached.members, truncated: cached.truncated }
+    if (onDirectoryMembers) await onDirectoryMembers(result)
+    return result
+  }
 
   const members = []
   let cursor
@@ -94,8 +98,10 @@ async function fetchAllMembers({ token, slackCall, ttlMs }) {
   // than refetching every call) but mark it so callers can tell "not
   // found" apart from "not found in what we were able to fetch."
   const truncated = page >= MAX_PAGES && !!cursor
+  const result = { ok: true, members, truncated }
   directoryCache.set(token, { members, expiresAt: Date.now() + (ttlMs ?? DEFAULT_TTL_MS), truncated })
-  return { ok: true, members, truncated }
+  if (onDirectoryMembers) await onDirectoryMembers(result)
+  return result
 }
 
 export async function lookupUserById({ token, userId, slackCall = callSlack, includeEmail = false, tokenSource = 'bot' }) {
@@ -130,12 +136,12 @@ export async function lookupUserByEmail({ token, email, slackCall = callSlack, i
 // guarantee a handle is globally unique, so more than one eligible match
 // is reported as `ambiguous-user` with every match listed, never resolved
 // to an arbitrary pick.
-export async function searchDirectoryByHandleOrName({ token, query, slackCall = callSlack, includeEmail = false, ttlMs, tokenSource = 'bot' }) {
+export async function searchDirectoryByHandleOrName({ token, query, slackCall = callSlack, includeEmail = false, ttlMs, tokenSource = 'bot', onDirectoryMembers }) {
   if (!query || !query.trim()) return { ok: false, error: 'query-required', retryable: false }
   if (!token) return { ok: false, error: 'no-token', retryable: false }
 
   const needle = normalize(query)
-  const fetched = await fetchAllMembers({ token, slackCall, ttlMs })
+  const fetched = await fetchAllMembers({ token, slackCall, ttlMs, onDirectoryMembers })
   if (!fetched.ok) return mapSlackFailure(fetched, 'users:read')
 
   const matches = fetched.members.filter(member => {
@@ -159,7 +165,7 @@ export async function searchDirectoryByHandleOrName({ token, query, slackCall = 
   return { ok: true, source: 'slack-directory', tokenSource, user: toPublicUser(matches[0], { includeEmail }) }
 }
 
-export async function lookupUser({ query, mode = 'auto', token, slackCall = callSlack, includeEmail = false, ttlMs, tokenSource = 'bot' }) {
+export async function lookupUser({ query, mode = 'auto', token, slackCall = callSlack, includeEmail = false, ttlMs, tokenSource = 'bot', onDirectoryMembers }) {
   if (!query || !query.trim()) return { ok: false, error: 'query-required', retryable: false }
   if (!token) return { ok: false, error: 'no-token', retryable: false }
 
@@ -168,5 +174,5 @@ export async function lookupUser({ query, mode = 'auto', token, slackCall = call
   if (resolvedMode === 'id') return lookupUserById({ token, userId: query, slackCall, includeEmail, tokenSource })
   if (resolvedMode === 'email') return lookupUserByEmail({ token, email: query, slackCall, includeEmail, tokenSource })
   // 'handle' and 'name' are the same search — see searchDirectoryByHandleOrName.
-  return searchDirectoryByHandleOrName({ token, query, slackCall, includeEmail, ttlMs, tokenSource })
+  return searchDirectoryByHandleOrName({ token, query, slackCall, includeEmail, ttlMs, tokenSource, onDirectoryMembers })
 }

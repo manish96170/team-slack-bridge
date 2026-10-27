@@ -7,10 +7,9 @@
 import { createHash } from 'node:crypto'
 import { getDb } from './db.js'
 import { callSlack } from './slack.js'
-import { lookupUser } from './directory.js'
+import { lookupUser, MAX_PAGES } from './directory.js'
 
 const DIRECTORY_TTL_MS = 7 * 24 * 60 * 60 * 1000
-const MAX_PAGES = 250
 
 function normalize(value) {
   return (value || '').trim().replace(/^@/, '').toLowerCase()
@@ -30,8 +29,15 @@ function isFresh(timestamp) {
 
 function cachedPerson({ dbPath, workspaceId, query }) {
   if (!dbPath) return null
+  const db = getDb(dbPath)
+  const state = db.prepare('SELECT refreshed_at FROM directory_index_state WHERE workspace_id = ?').get(workspaceId)
+  // A partial set of opportunistically-found people cannot safely prove a
+  // name is unique: it could hide the exact ambiguous-user collision that
+  // core/directory.js correctly refuses live. Only use the disk index after
+  // a complete, fresh users.list snapshot has populated it.
+  if (!state || !isFresh(state.refreshed_at)) return null
   const needle = normalize(query)
-  const rows = getDb(dbPath)
+  const rows = db
     .prepare(
       `SELECT user_id AS id, handle, display_name AS displayName, real_name AS realName, refreshed_at
        FROM directory_people
@@ -39,14 +45,20 @@ function cachedPerson({ dbPath, workspaceId, query }) {
          AND (normalized_handle = ? OR normalized_display_name = ? OR normalized_real_name = ?)`
     )
     .all(workspaceId, needle, needle, needle)
-    .filter(row => isFresh(row.refreshed_at))
-  return rows.length === 1 ? rows[0] : null
+  if (rows.length === 1) return { user: rows[0] }
+  if (rows.length > 1) return { ambiguous: true, matches: rows.map(({ id, displayName, handle }) => ({ id, displayName, handle })) }
+  return null
 }
 
-function cachePerson({ dbPath, workspaceId, user }) {
-  if (!dbPath || !user?.id) return
-  getDb(dbPath)
-    .prepare(
+function cacheDirectoryMembers({ dbPath, workspaceId, members, truncated }) {
+  if (!dbPath || truncated) return
+  const db = getDb(dbPath)
+  const now = new Date().toISOString()
+  const eligible = (members || []).filter(member => member && !member.deleted && !member.is_bot && member.id !== 'USLACKBOT')
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    db.prepare('DELETE FROM directory_people WHERE workspace_id = ?').run(workspaceId)
+    const insert = db.prepare(
       `INSERT INTO directory_people (
          workspace_id, user_id, handle, display_name, real_name,
          normalized_handle, normalized_display_name, normalized_real_name, refreshed_at
@@ -57,30 +69,41 @@ function cachePerson({ dbPath, workspaceId, user }) {
          normalized_display_name = excluded.normalized_display_name,
          normalized_real_name = excluded.normalized_real_name, refreshed_at = excluded.refreshed_at`
     )
-    .run(
-      workspaceId,
-      user.id,
-      user.handle,
-      user.displayName,
-      user.realName,
-      normalize(user.handle),
-      normalize(user.displayName),
-      normalize(user.realName),
-      new Date().toISOString()
-    )
+    for (const member of eligible) {
+      const handle = member.name || null
+      const displayName = member.profile?.display_name || member.profile?.real_name || member.real_name || member.name || null
+      const realName = member.real_name || member.profile?.real_name || null
+      insert.run(workspaceId, member.id, handle, displayName, realName, normalize(handle), normalize(displayName), normalize(realName), now)
+    }
+    db.prepare(
+      `INSERT INTO directory_index_state (workspace_id, refreshed_at) VALUES (?, ?)
+       ON CONFLICT(workspace_id) DO UPDATE SET refreshed_at = excluded.refreshed_at`
+    ).run(workspaceId, now)
+    db.exec('COMMIT')
+  } catch (err) {
+    db.exec('ROLLBACK')
+    throw err
+  }
 }
 
 async function resolvePeople({ peopleNames, userToken, workspaceId, dbPath, slackCall, dryRun }) {
   const users = []
   for (const query of peopleNames) {
     const cached = dryRun ? null : cachedPerson({ dbPath, workspaceId, query })
-    if (cached) {
-      users.push({ id: cached.id, handle: cached.handle, displayName: cached.displayName, realName: cached.realName, source: 'persistent-index' })
+    if (cached?.ambiguous) return { ok: false, error: 'ambiguous-user', retryable: false, matches: cached.matches }
+    if (cached?.user) {
+      const user = cached.user
+      users.push({ id: user.id, handle: user.handle, displayName: user.displayName, realName: user.realName, source: 'persistent-index' })
       continue
     }
-    const found = await lookupUser({ query, token: userToken, tokenSource: 'user', slackCall })
+    const found = await lookupUser({
+      query,
+      token: userToken,
+      tokenSource: 'user',
+      slackCall,
+      onDirectoryMembers: fetched => cacheDirectoryMembers({ dbPath, workspaceId, members: fetched.members, truncated: fetched.truncated || dryRun }),
+    })
     if (!found.ok) return found
-    if (!dryRun) cachePerson({ dbPath, workspaceId, user: found.user })
     users.push({ ...found.user, source: found.source })
   }
   const duplicate = users.find((user, index) => users.findIndex(other => other.id === user.id) !== index)
@@ -110,12 +133,9 @@ function cacheMpim({ dbPath, workspaceId, identity, conversationId, members }) {
      ON CONFLICT(workspace_id, token_identity, conversation_id) DO UPDATE SET
        member_key = excluded.member_key, refreshed_at = excluded.refreshed_at`
   ).run(workspaceId, identity, conversationId, key, now)
-  db.prepare('DELETE FROM mpim_members WHERE workspace_id = ? AND token_identity = ? AND conversation_id = ?').run(workspaceId, identity, conversationId)
-  const insert = db.prepare('INSERT INTO mpim_members (workspace_id, token_identity, conversation_id, user_id, refreshed_at) VALUES (?, ?, ?, ?, ?)')
-  for (const userId of members) insert.run(workspaceId, identity, conversationId, userId, now)
 }
 
-async function refreshMpims({ userToken, workspaceId, identity, dbPath, slackCall, dryRun }) {
+async function refreshMpims({ userToken, workspaceId, identity, dbPath, slackCall, dryRun, targetKey }) {
   let cursor
   const conversations = new Map()
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -126,6 +146,7 @@ async function refreshMpims({ userToken, workspaceId, identity, dbPath, slackCal
       if (!members.ok) return members
       conversations.set(memberKey(members.members || []), conversation.id)
       if (!dryRun) cacheMpim({ dbPath, workspaceId, identity, conversationId: conversation.id, members: members.members || [] })
+      if (memberKey(members.members || []) === targetKey) return { ok: true, conversations }
     }
     cursor = listed.response_metadata?.next_cursor
     if (!cursor) return { ok: true, conversations }
@@ -152,7 +173,7 @@ export async function messageGroupByName({ peopleNames, text, userToken, dbPath,
 
   let conversationId = dryRun ? null : findCachedMpim({ dbPath, workspaceId, tokenIdentity: identity, key })
   if (!conversationId) {
-    const refreshed = await refreshMpims({ userToken, workspaceId, identity, dbPath, slackCall, dryRun })
+    const refreshed = await refreshMpims({ userToken, workspaceId, identity, dbPath, slackCall, dryRun, targetKey: key })
     if (!refreshed.ok) return refreshed
     conversationId = refreshed.conversations.get(key) || (dryRun ? null : findCachedMpim({ dbPath, workspaceId, tokenIdentity: identity, key }))
   }

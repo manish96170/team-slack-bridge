@@ -117,3 +117,9 @@ test('archiveOldData requires dbPath rather than silently no-oping', () => {
   assert.equal(result.ok, false)
   assert.equal(result.error, 'dbPath-required')
 })
+
+test('archiveOldData rejects an invalid cutoff rather than lexicographically deleting every timestamped row', () => {
+  const result = archiveOldData({ dbPath: '/tmp/tsb-archive-invalid.sqlite', archiveDir: '/tmp/whatever', before: 'not-a-date' })
+  assert.equal(result.ok, false)
+  assert.equal(result.error, 'before-must-be-an-iso-date')
+})

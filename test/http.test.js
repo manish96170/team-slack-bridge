@@ -101,6 +101,18 @@ test('/webhook GET returns a 200 health response', async () => {
   assert.deepEqual(JSON.parse(response.body), { ok: true, endpoint: '/webhook' })
 })
 
+test('HTTP listener rejects an oversized body before parsing or signature work', async () => {
+  const response = res()
+  await handleHttpRequest({
+    req: req({ method: 'POST', url: '/webhook', body: 'x'.repeat(1024 * 1024 + 1) }),
+    res: response,
+    config: {},
+    verifySignatures: false,
+  })
+  assert.equal(response.statusCode, 413)
+  assert.deepEqual(JSON.parse(response.body), { ok: false, error: 'request-body-too-large' })
+})
+
 test('/webhook handles Slack url_verification with HTTP 200 and plain challenge', async () => {
   const response = res()
   await handleHttpRequest({

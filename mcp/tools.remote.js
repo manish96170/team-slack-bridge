@@ -7,7 +7,7 @@ import { queryMessages, getThread } from '../core/query.js'
 import { resolveUser } from '../core/identity.js'
 import { doctor } from '../core/doctor.js'
 import { complete } from '../core/ledger.js'
-import { schemas } from './schema.js'
+import { schemas, withoutBotIdentityFields } from './schema.js'
 
 function principalLabel(ctx) {
   return ctx.slack?.user_id ? `<@${ctx.slack.user_id}>` : 'unknown Slack user'
@@ -28,7 +28,7 @@ export const tools = {
   slack_post: {
     name: 'slack_post',
     description: 'Remote-safe bot post to an allow-listed Slack channel.',
-    inputSchema: schemas.slack_post,
+    inputSchema: withoutBotIdentityFields(schemas.slack_post),
     handler: (args, ctx) =>
       postToChannel({
         token: ctx.env.SLACK_BOT_TOKEN,
@@ -44,7 +44,7 @@ export const tools = {
   slack_reply: {
     name: 'slack_reply',
     description: 'Remote-safe bot reply in an allow-listed Slack channel thread.',
-    inputSchema: schemas.slack_reply,
+    inputSchema: withoutBotIdentityFields(schemas.slack_reply),
     handler: (args, ctx) =>
       reply({
         token: ctx.env.SLACK_BOT_TOKEN,
@@ -60,21 +60,21 @@ export const tools = {
   slack_react: {
     name: 'slack_react',
     description: 'Remote-safe reaction on a message in an allow-listed Slack channel.',
-    inputSchema: schemas.slack_react,
+    inputSchema: withoutBotIdentityFields(schemas.slack_react),
     handler: (args, ctx) =>
       react({ token: ctx.env.SLACK_BOT_TOKEN, channel: args.channel, ts: args.ts, emoji: args.emoji, dryRun: args.dryRun }),
   },
   slack_unreact: {
     name: 'slack_unreact',
     description: 'Remote-safe removal of this installation bot\'s emoji reaction in an allow-listed Slack channel.',
-    inputSchema: schemas.slack_unreact,
+    inputSchema: withoutBotIdentityFields(schemas.slack_unreact),
     handler: (args, ctx) =>
       unreact({ token: ctx.env.SLACK_BOT_TOKEN, channel: args.channel, ts: args.ts, emoji: args.emoji, dryRun: args.dryRun }),
   },
   slack_update_message: {
     name: 'slack_update_message',
     description: 'Remote-safe edit of a message posted by this install in an allow-listed Slack channel.',
-    inputSchema: schemas.slack_update_message,
+    inputSchema: withoutBotIdentityFields(schemas.slack_update_message),
     handler: (args, ctx) =>
       updateMessage({
         token: ctx.env.SLACK_BOT_TOKEN,
@@ -90,7 +90,7 @@ export const tools = {
   slack_delete_message: {
     name: 'slack_delete_message',
     description: 'Remote-safe delete of a message posted by this install in an allow-listed Slack channel.',
-    inputSchema: schemas.slack_delete_message,
+    inputSchema: withoutBotIdentityFields(schemas.slack_delete_message),
     handler: (args, ctx) =>
       deleteMessage({
         token: ctx.env.SLACK_BOT_TOKEN,

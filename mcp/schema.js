@@ -17,6 +17,24 @@ export function withAccountField(schema) {
   return { ...schema, properties: { ...schema.properties, account: { type: 'string', description: 'Named account from accounts.json; omit for the default account' } } }
 }
 
+// The remote/hosted profile has no user tokens, no SLACK_USER_TOKEN-backed
+// "locally authorized human" identity at all (D20) — `viaBot`/
+// `anonymousMessage` are local-only concepts that mean nothing there, and
+// `mcp/tools.remote.js`'s handlers never read either field (always the bot
+// token, unconditionally). Before this (found live during a review, D68),
+// `mcp/tools.remote.js` reused these same local schemas wholesale, so a
+// remote client's `tools/list` still advertised `viaBot`/`anonymousMessage`
+// with local-identity-specific descriptions ("send as the locally
+// authorized human") that are flatly untrue remotely, and `additionalProperties:
+// false` would have silently accepted-then-ignored either field if a client
+// passed one, rather than rejecting it. This strips both so an unknown-field
+// validation error (`mcp/validation.js`'s `additionalProperties:false` check)
+// is the actual, honest result of passing either one to a remote tool.
+export function withoutBotIdentityFields(schema) {
+  const { viaBot, anonymousMessage, ...rest } = schema.properties || {}
+  return { ...schema, properties: rest }
+}
+
 export const schemas = {
   slack_post: {
     type: 'object',

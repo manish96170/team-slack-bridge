@@ -999,10 +999,11 @@ plain `TSB_HOME`-less `mcp/server.js` and the rest of the CLI, read `TSB_HOME` (
 through the same `resolveAccountHome()` the account-aware functions already used, so
 `set-default work` changes which account an un-decorated `mcp/server.js`/CLI command
 talks to as well — one default, every surface, stdio or HTTP. Byte-identical for any
-install that never touches `accounts.json`. **A long-running `mcp/server.js` process
-(spawned by Claude Code/OpenCode before you changed the default) resolves its account
-once at startup and won't see a later `set-default` change until that MCP connection is
-restarted** — restart the harness or its MCP connection after switching defaults.
+install that never touches `accounts.json`. **Both `mcp/server.js` (stdio) and
+`listen/mcp-http.js`'s local daemon resolve their account once, the first time it's
+needed after process/daemon startup, and won't see a later `set-default` change until
+restarted** — restart the harness/MCP connection (stdio) or run `node cli/mcp-daemon.js
+restart` (daemon) after switching defaults.
 
 **Two MCP-server options, if a typed-tool front door is wanted instead of/alongside the
 CLI — pick deliberately, don't default to whichever is more capable:**

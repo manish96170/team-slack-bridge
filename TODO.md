@@ -1,10 +1,21 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D67) and architecture; this file is the scannable done/pending list.
+log (D1–D68) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
 ## Done
+
+- [x] **GPT-5.6 Terra adversarial review of D64–D67 (D68)** — found and fixed:
+      a real pre-existing bug where `mcp/tools.remote.js` reused local schemas
+      wholesale, so remote clients saw (and could pass, silently-ignored)
+      `viaBot`/`anonymousMessage` fields that mean nothing remotely — now
+      stripped via `mcp/schema.js`'s `withoutBotIdentityFields`, rejected
+      with a clean validation error instead; a factual error in D67's own
+      text wrongly claiming `dmByName` has a `viaBot` default; and two doc
+      gaps (D64's "Local-only" wording was ambiguous about MCP reachability;
+      the local HTTP daemon's own "needs a restart after set-default" case
+      was undocumented). 1 new test (`test/http.test.js`). npm test: 363/363.
 
 - [x] **MCP `initialize` now warns against unprompted `viaBot`/`anonymousMessage`
       (D67)** — found live: a calling agent set both explicitly, unprompted, on a

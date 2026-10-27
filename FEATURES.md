@@ -291,8 +291,13 @@ which company on that specific refusal, never guess.
 `--dry-run` skips the send only — the directory lookup is a real Slack read either way,
 so a `--dry-run` call still needs a working bot token.
 
-Turn off: remove the bot token, or avoid the command. Local-only, same as every other
-DM-shaped capability — absent from `mcp/tools.remote.js`'s import graph.
+Turn off: remove the bot token, or avoid the command. **CLI-only — no MCP tool exists for
+this (deliberately, D64's scope).** Not reachable from the stdio MCP server
+(`mcp/server.js`), the local MCP daemon (`listen/mcp-http.js`, which shares
+`mcp/tools.local.js` with the stdio server), or the remote profile
+(`mcp/tools.remote.js`). An agent using the MCP surfaces instead reaches for
+`slack_lookup_user` + `slack_dm` as two separate calls; `tsb-dm`/`cli/dm-by-name.js` is
+the only place the combined, single-result resolve-and-send primitive is exposed today.
 
 ### Channel and thread reads
 
@@ -837,7 +842,12 @@ Before D66, only this daemon's `"multi"` mode and the account-aware functions
 `accounts.json` at all. `cli/context.js` (shared by both) now resolves through the same
 registry, so one default applies everywhere. A long-running `mcp/server.js` process
 resolves its account once at startup — switching the default needs that connection
-restarted to take effect.
+restarted to take effect. **This daemon has the same restart requirement, found during
+a review (D68)**: `defaultAccount` (used by this daemon's own `GET /mcp` status response
+and by `"single"` mode's account-mismatch check) and this daemon's own per-account
+context cache are both captured/populated once, the first time each is touched after
+daemon startup — a `set-default` run against a *running* daemon has no effect until it's
+restarted (`node cli/mcp-daemon.js restart`), exactly like the stdio case above.
 
 ### Away mode — approve your own local session from Slack (PLAN D34–D40)
 

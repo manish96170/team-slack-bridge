@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url'
 import { handleHttpRequest } from '../listen/http.js'
 import { getSlackbotMcpTools } from '../mcp/http.js'
 import { complete } from '../core/ledger.js'
+import { tools as remoteTools } from '../mcp/tools.remote.js'
+import { validateArguments } from '../mcp/validation.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = join(__dirname, '..')
@@ -207,6 +209,41 @@ test('Slackbot MCP import path does not load the local registry or risky remote-
   assert.ok(!combined.includes('slack_post_as_user'))
   assert.ok(!combined.includes('slack_search'))
   assert.ok(!combined.includes('slack_lookup_user'))
+})
+
+// D68, found live by GPT-5.6 Terra's review: mcp/tools.remote.js used to
+// reuse the exact local schemas (mcp/schema.js) wholesale for
+// slack_post/slack_reply/slack_react/slack_unreact/slack_update_message/
+// slack_delete_message, which meant a remote client's own tools/list
+// advertised local-only viaBot/anonymousMessage fields (with descriptions
+// like "send as the locally authorized human") that mean nothing remotely
+// (D20: no user tokens exist there at all) and that every remote handler
+// silently ignored (always ctx.env.SLACK_BOT_TOKEN, unconditionally) rather
+// than rejecting. withoutBotIdentityFields strips both fields from the
+// remote copy of each schema so passing either is now a clean, honest
+// validation error instead of a silently-ignored no-op.
+test('remote tool schemas never advertise viaBot/anonymousMessage, and passing either is rejected, not silently ignored', () => {
+  for (const name of ['slack_post', 'slack_reply', 'slack_react', 'slack_unreact', 'slack_update_message', 'slack_delete_message']) {
+    const schema = remoteTools[name].inputSchema
+    assert.ok(!('viaBot' in (schema.properties || {})), `${name}'s remote schema should not expose viaBot`)
+    assert.ok(!('anonymousMessage' in (schema.properties || {})), `${name}'s remote schema should not expose anonymousMessage`)
+  }
+
+  const requiredArgsByTool = {
+    slack_post: { channel: '#x', text: 'hi' },
+    slack_reply: { channel: '#x', threadTs: '1.1', text: 'hi' },
+    slack_react: { channel: '#x', ts: '1.1', emoji: 'eyes' },
+    slack_unreact: { channel: '#x', ts: '1.1', emoji: 'eyes' },
+    slack_update_message: { channel: '#x', ts: '1.1', text: 'hi' },
+    slack_delete_message: { channel: '#x', ts: '1.1' },
+  }
+  for (const [name, baseArgs] of Object.entries(requiredArgsByTool)) {
+    const schema = remoteTools[name].inputSchema
+    const viaBotError = validateArguments(schema, { ...baseArgs, viaBot: true })
+    assert.equal(viaBotError, 'unknown argument: viaBot', `${name} should reject viaBot, not accept-then-ignore it`)
+  }
+  const anonError = validateArguments(remoteTools.slack_post.inputSchema, { channel: '#x', text: 'hi', anonymousMessage: true })
+  assert.equal(anonError, 'unknown argument: anonymousMessage')
 })
 
 test('/mcp validates tool arguments before invoking remote-safe tools', async () => {

@@ -4,9 +4,26 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { loadEnv } from '../env.js'
 import { loadConfig } from '../core/identity.js'
+import { resolveAccountHome } from '../core/accounts.js'
 
-const HOME_DIR = process.env.TSB_HOME || join(homedir(), '.team-slack-bridge')
 const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+
+// Resolve "which home directory" through core/accounts.js's registry (D21)
+// instead of a raw TSB_HOME-only read, so `cli/accounts.js set-default
+// <name>` applies the SAME WAY to every surface — every cli/*.js command,
+// the stdio MCP server (mcp/server.js), and the HTTP daemon's single-account
+// mode — not just the already account-aware functions that take an explicit
+// name (resolveAccountHome/loadAccountContext, cli/accounts.js,
+// cli/dm-by-name.js, localMcpDaemon's "multi" mode). D21's own guarantee
+// still holds for anyone who never touches the registry:
+// resolveAccountHome() with no accounts.json synthesizes a single "default"
+// account pointing at exactly the same TSB_HOME-or-homedir path this file
+// always computed directly, so this is byte-identical for an untouched
+// install (D66, found live: a registered default of "anchor" had no effect
+// on mcp/server.js or any other cli/*.js command, only on the account-aware
+// functions above — this closes that gap).
+const resolvedAccount = resolveAccountHome()
+const HOME_DIR = resolvedAccount.ok ? resolvedAccount.home : process.env.TSB_HOME || join(homedir(), '.team-slack-bridge')
 // Default to TSB_HOME for any new setup — an npm-installed copy must never
 // need to write inside its own install directory, since `npm update` wipes
 // it. The package-relative path is only a legacy fallback for existing
@@ -18,7 +35,7 @@ export const CONFIG_PATH = join(REPO_ROOT, 'slack-config.json')
 export const LEDGER_PATH = join(HOME_DIR, '.ledger.sqlite')
 
 export function loadContext() {
-  return { env: loadEnv(), config: loadConfig(CONFIG_PATH), dbPath: LEDGER_PATH }
+  return { env: loadEnv(REPO_ROOT === PACKAGE_ROOT ? undefined : HOME_DIR), config: loadConfig(CONFIG_PATH), dbPath: LEDGER_PATH }
 }
 
 // Multi-account path only (core/accounts.js) — every existing caller keeps

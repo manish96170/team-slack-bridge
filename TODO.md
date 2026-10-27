@@ -1,10 +1,21 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D64) and architecture; this file is the scannable done/pending list.
+log (D1–D66) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
 ## Done
+
+- [x] **`cli/context.js` now resolves through `core/accounts.js`'s registered default,
+      not just a raw `TSB_HOME` read (D66)** — found live: `cli/accounts.js
+      set-default anchor` had no effect on `mcp/server.js` or any other `cli/*.js`
+      command, only on the already account-aware functions. Fixed in `cli/context.js`
+      alone (`mcp/server.js`, every CLI command, `cli/listen.js`/`cli/http.js` all
+      inherit it with no changes of their own); byte-identical for any install that
+      never touches `accounts.json`. A long-running `mcp/server.js` process resolves
+      its account once at startup, so switching the default needs that MCP connection
+      restarted to take effect. 3 new tests (`test/context.test.js`). Live-verified
+      against the real two-company install.
 
 - [x] **Plain-English cross-company messaging (D64)** — `core/people.js`'s
       `dmByName()` + `cli/dm-by-name.js`/`tsb-dm`. Reuses `core/accounts.js`

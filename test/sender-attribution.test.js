@@ -29,17 +29,28 @@ test('getSenderInfo returns nulls when no owner is configured', () => {
   assert.deepEqual(getSenderInfo({}), { slackUserId: null, slackHandle: null, name: null })
 })
 
-test('withSenderAttribution appends a mention, handle, and a plain-text memberId', () => {
+test('withSenderAttribution leads with the plain name, then (@handle, memberId), then a bold no-reply marker', () => {
   const out = withSenderAttribution('hello', configWithOwner)
   assert.ok(out.startsWith('hello\n\n'))
-  assert.match(out, /<@U0OWNER>/)
-  assert.match(out, /@manish\.sharma/)
-  assert.match(out, /memberId: U0OWNER/)
+  assert.match(out, /sent via bot by Manish Sharma \(@manish\.sharma, U0OWNER\)/)
+  assert.match(out, /\*no-reply\*/)
+  assert.doesNotMatch(out, /<@U0OWNER>/) // no mention markup anymore, by request
+})
+
+test('withSenderAttribution falls back to handle (id) when no name is configured, without repeating the handle', () => {
+  const out = withSenderAttribution('hello', { owner: { slackUserId: 'U0OWNER' }, users: [{ slackHandle: '@manish.sharma', slackUserId: 'U0OWNER' }] })
+  assert.match(out, /sent via bot by @manish\.sharma \(U0OWNER\)/)
+})
+
+test('withSenderAttribution falls back to the bare id when neither name nor handle is configured', () => {
+  const out = withSenderAttribution('hello', { owner: { slackUserId: 'U0OWNER' } })
+  assert.match(out, /sent via bot by U0OWNER \*no-reply\*/)
 })
 
 test('withSenderAttribution degrades gracefully with no configured owner', () => {
   const out = withSenderAttribution('hello', {})
   assert.match(out, /no owner\.slackUserId configured/)
+  assert.match(out, /\*no-reply\*/)
 })
 
 test('local_audit round-trips through recordLocalAudit/queryLocalAudit', () => {
@@ -83,7 +94,8 @@ test('slack_post dry-run viaBot:true appends attribution and never touches local
   const result = await tools.slack_post.handler({ channel: '#x', text: 'hi', viaBot: true, dryRun: true }, { env: {}, config: configWithOwner })
   assert.equal(result.ok, true)
   assert.match(result.request.body.text, /sent via bot by/)
-  assert.match(result.request.body.text, /memberId: U0OWNER/)
+  assert.match(result.request.body.text, /U0OWNER/)
+  assert.match(result.request.body.text, /\*no-reply\*/)
 })
 
 test('slack_post viaBot:true without dry-run refuses when SLACK_BOT_TOKEN is missing', async () => {

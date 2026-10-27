@@ -171,7 +171,7 @@ per-install default — `"botSend": { "anonymousMessageDefault": true }` in
 `slack-config.json` means `viaBot:true` sends are anonymous unless a caller explicitly
 passes `anonymousMessage:false` for that one call (D49). When it
 does send: the text gets a visible attribution footer —
-`<@U...> (Name, @handle) · memberId: U...` — resolved from `slack-config.json`'s
+`Name (@handle, U...) *no-reply*` — resolved from `slack-config.json`'s
 `owner` (or `_sender withheld_` instead, if resolved anonymous), and the send is
 journaled to a local `local_audit` SQLite table (`core/local-audit.js`/`core/sender.js`).
 This is the local, trust-the-config-file equivalent of what the remote profile already

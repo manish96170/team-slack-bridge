@@ -113,7 +113,7 @@ and the exact flag/config key that changes it:
 |---|---|---|---|
 | `slack_post` / `slack_reply` / `slack_dm` (MCP) | **As you** — a real Slack message, visible to you with native edit/delete | `viaBot:true` | D47 |
 | Sending as the bot without an identified sender | **Refused** | `anonymousMessage:true` | D48 |
-| Attribution footer on a bot-sent message | **On** — `<@you> · memberId:U...` | `anonymousMessage:true` → "sender withheld" | D48 |
+| Attribution footer on a bot-sent message | **On** — `Name (@handle, U...) *no-reply*` | `anonymousMessage:true` → "sender withheld" | D48/D65 |
 | Private tracking DM to the sender of a bot send | **On** — even in anonymous mode | `botSendTracking.enabled:false` | D48 |
 | `anonymousMessage` without a per-call argument | Falls back to config | `botSend.anonymousMessageDefault` | D49 |
 | `slack_react` / `slack_unreact` (MCP) | **As you** (`SLACK_USER_TOKEN`) | `viaBot:true` | D60 |
@@ -141,7 +141,7 @@ slack_post / slack_reply / slack_dm  (MCP tools)
             │
             ▼
      SLACK_BOT_TOKEN ──► public text gets a footer:
-                          "sent via bot by <@you> · memberId:U..."
+                          "sent via bot by Name (@handle, U...) *no-reply*"
                           (or "sender withheld" if anonymous)
             │
             ▼
@@ -988,6 +988,21 @@ of stdio-spawning the server. `cli/mcp-daemon.js stop|restart|status|logs` mirro
   (`~/.team-slack-bridge/accounts.json`). This registry and daemon are fully opt-in —
   absent `accounts.json`, everything behaves exactly as a single-account install always
   has.
+
+**The registered default (`cli/accounts.js set-default <name>`) now applies the same
+way everywhere (PLAN D66).** Before this, only the explicitly account-aware functions
+(`cli/accounts.js` itself, `cli/dm-by-name.js`/`tsb-dm`, and `localMcpDaemon`'s
+`"multi"` mode) consulted the registry's default — every other surface, including a
+plain `TSB_HOME`-less `mcp/server.js` and the rest of the CLI, read `TSB_HOME` (or
+`~/.team-slack-bridge`) directly, with zero awareness of `accounts.json`. `cli/context.js`
+(shared by `mcp/server.js` and nearly every `cli/*.js` command) now resolves its home
+through the same `resolveAccountHome()` the account-aware functions already used, so
+`set-default work` changes which account an un-decorated `mcp/server.js`/CLI command
+talks to as well — one default, every surface, stdio or HTTP. Byte-identical for any
+install that never touches `accounts.json`. **A long-running `mcp/server.js` process
+(spawned by Claude Code/OpenCode before you changed the default) resolves its account
+once at startup and won't see a later `set-default` change until that MCP connection is
+restarted** — restart the harness or its MCP connection after switching defaults.
 
 **Two MCP-server options, if a typed-tool front door is wanted instead of/alongside the
 CLI — pick deliberately, don't default to whichever is more capable:**

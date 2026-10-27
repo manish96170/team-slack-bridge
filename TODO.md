@@ -1,10 +1,17 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D69) and architecture; this file is the scannable done/pending list.
+log (D1–D70) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
 ## Done
+
+- [x] **Existing group-DM/MPIM messaging by named people (D70)** —
+      `messageGroupByName` + `cli/group-dm-by-name.js`/`tsb-group-dm` + local MCP
+      `slack_message_group_by_name`. Always uses the user token, finds an exact
+      existing MPIM containing sender plus recipients, never bot-sends or implicitly
+      creates/opens a group. No match returns `mpim-not-found-confirm-create-first`.
+      Persisted per-account SQLite people/MPIM membership graph; remote MCP excluded.
 
 - [x] **Live-directory `MAX_PAGES` raised 20→250, truncation now detectable (D69)** —
       found live while dogfooding the multi-account daemon: a real company's

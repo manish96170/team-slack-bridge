@@ -1,7 +1,8 @@
 // Database retention (PLAN D63): .ledger.sqlite accumulates rows forever
 // across every table that logs something over time (ledger, asks,
 // agent_sessions, remote_audit, local_audit, bot_send_tracking,
-// dm_channels) -- nothing has ever pruned it, so a long-running install's
+// dm_channels, directory_people, mpim_conversations, mpim_members) --
+// nothing has ever pruned it, so a long-running install's
 // database file only grows. This exports anything older than a cutoff
 // (default: the first day of the current month) to a gzipped JSON archive
 // file, deletes those rows from the live database, then runs VACUUM so
@@ -31,6 +32,9 @@ const TABLES = [
   { name: 'remote_audit', timestampColumn: 'created_at' },
   { name: 'local_audit', timestampColumn: 'created_at' },
   { name: 'bot_send_tracking', timestampColumn: 'created_at' },
+  { name: 'directory_people', timestampColumn: 'refreshed_at' },
+  { name: 'mpim_conversations', timestampColumn: 'refreshed_at' },
+  { name: 'mpim_members', timestampColumn: 'refreshed_at' },
 ]
 
 export function startOfCurrentMonth(now = new Date()) {

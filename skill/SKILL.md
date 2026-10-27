@@ -62,6 +62,19 @@ inside the command. If the company isn't registered yet, see `cli/dm-by-name.js`
 header or the README's "Plain-English cross-company messaging" section for
 `cli/accounts.js add <alias> --home <path>`.
 
+## Existing group DM by name (PLAN D70)
+
+For "Message Shrestha, Manish, and Alex: hi", use the existing-MPIM command:
+
+```bash
+node cli/group-dm-by-name.js --to "Shrestha,Manish,Alex" --text "hi" --json
+```
+
+The named people are recipients; the locally authorized human is added automatically.
+This is always as-user, never bot/anonymous, and only targets an **existing exact group
+DM**. If it returns `mpim-not-found-confirm-create-first`, ask the user whether to create
+one — never create/open a group DM automatically in this skill.
+
 ## Commands
 
 Run from the repo root (`team-slack-bridge/`). Always pass `--json` — output is one JSON

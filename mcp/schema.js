@@ -204,6 +204,20 @@ export const schemas = {
     required: ['userId', 'text'],
     additionalProperties: false,
   },
+  slack_message_group_by_name: {
+    type: 'object',
+    properties: {
+      peopleNames: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'At least two other people to include with the locally authorized sender in an existing group DM (MPIM). Names resolve only in the selected local account/workspace.',
+      },
+      text: { type: 'string' },
+      dryRun: { type: 'boolean' },
+    },
+    required: ['peopleNames', 'text'],
+    additionalProperties: false,
+  },
   slack_dm_as_user: {
     type: 'object',
     properties: {

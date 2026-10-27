@@ -81,6 +81,7 @@ import { listMyChannels } from '../core/channels.js'
 import { uploadFile } from '../core/files.js'
 import { resolveUser } from '../core/identity.js'
 import { lookupUser } from '../core/directory.js'
+import { messageGroupByName } from '../core/mpim.js'
 import { doctor } from '../core/doctor.js'
 import { scheduleMessage, deleteScheduledMessage, listScheduledMessages } from '../core/schedule.js'
 import { ask } from '../core/ask.js'
@@ -344,6 +345,20 @@ export const tools = {
       }
       return result
     },
+  },
+  slack_message_group_by_name: {
+    name: 'slack_message_group_by_name',
+    description:
+      'Send a message AS the locally authorized human to an EXISTING Slack group DM (MPIM) with the exact named people. Local-only and user-token-only: never uses the bot, viaBot, or anonymousMessage. It resolves the sender plus peopleNames in the selected account/workspace, then looks for an exact existing MPIM; on a cache miss it refreshes only MPIMs visible to that user token. It NEVER creates or opens a new group automatically: no exact existing MPIM returns mpim-not-found-confirm-create-first so ask the human whether creation is wanted before doing anything else.',
+    inputSchema: schemas.slack_message_group_by_name,
+    handler: (args, ctx) =>
+      messageGroupByName({
+        peopleNames: args.peopleNames,
+        text: args.text,
+        userToken: ctx.env.SLACK_USER_TOKEN,
+        dbPath: ctx.dbPath,
+        dryRun: args.dryRun,
+      }),
   },
   slack_dm_as_user: {
     name: 'slack_dm_as_user',

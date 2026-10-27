@@ -249,6 +249,40 @@ node cli/dm.js --user U0123ABC --text "can you check this?" --json
 Turn off: avoid local DM commands or remove bot DM scopes. Remote Slackbot MCP never
 exposes DMs or ask/approval.
 
+### Existing group-DM messaging (MPIM, PLAN D70)
+
+Default: local-only and **always as the locally authorized human** (`SLACK_USER_TOKEN`).
+An MPIM belongs to the participating users, not the shared bot; this feature has no
+`viaBot`/`anonymousMessage` option and never falls back to the bot.
+
+Use:
+
+```bash
+node cli/group-dm-by-name.js --to "Shrestha Srivastava,Manish,Alex" --text "hi" [--company anchor] [--dry-run] [--json]
+tsb-group-dm --to "Shrestha Srivastava,Manish,Alex" --text "hi" [--company anchor] [--dry-run] [--json]  # global install
+```
+
+The names mean **other recipients**; the locally authorized sender is added
+automatically. At least two other people are required, so this remains an MPIM rather
+than accidentally becoming a one-person DM. It resolves every name inside the selected
+company/workspace, finds an exact existing membership set (`you + sorted recipient IDs`),
+and posts to that existing `G...` conversation as you.
+
+**Ask-first policy:** if no exact existing MPIM is found, it returns
+`mpim-not-found-confirm-create-first` with the resolved people. It never calls
+`conversations.open`, never creates a group, and never asks Slack to add members. The
+skill/agent asks the human whether creation is wanted; automatic creation is deliberately
+out of scope for this pass.
+
+For speed, successful live person lookups and visible MPIM membership edges are persisted
+in the selected account's `.ledger.sqlite` (`directory_people`, `mpim_conversations`,
+`mpim_members`). The index is scoped by Slack workspace plus a fingerprint of the user
+token identity, so one person's visible group DMs never leak into another user's index or
+another company account. Cache miss/stale state refreshes only MPIMs visible to that user
+token via Slack. Remote Slackbot MCP never exposes this: it has no personal user token by
+design (D20). Local MCP is supported as `slack_message_group_by_name`; the local daemon
+adds its standard optional `account` field in multi-account mode.
+
 ### Plain-English cross-company messaging (PLAN D64)
 
 Default: available locally when bot token exists, same posture as "DMs" above — this is
@@ -961,7 +995,8 @@ Default: off (nothing prunes `.ledger.sqlite` on its own — this is a manual/sc
 command, not an automatic background job).
 
 `.ledger.sqlite` accumulates rows forever across `ledger`, `asks`, `agent_sessions`,
-`remote_audit`, `local_audit`, `bot_send_tracking`, and `dm_channels` — nothing
+`remote_audit`, `local_audit`, `bot_send_tracking`, `dm_channels`, `directory_people`,
+`mpim_conversations`, and `mpim_members` — nothing
 previously pruned any of them, so a long-running install's database file only grows.
 
 Use:

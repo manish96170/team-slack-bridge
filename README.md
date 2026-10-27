@@ -80,6 +80,7 @@ terminal, an MCP client, or `skill/SKILL.md`.
 | **Post / reply / edit / delete / react** | As the shared bot, or explicitly as the authorized human (`--as-user`, MCP default since D47/D60) | `cli/post.js`, `cli/reply.js`, `cli/update.js`, `cli/delete.js`, `cli/react.js` | Bot posting, Post as user, DM as user / edit as user |
 | **DM someone by raw Slack ID** | One-to-one message, bot or as-user, cached DM-channel lookup | `cli/dm.js` | DMs |
 | **DM someone by name, across companies** | "DM `<person>` in `<company>`: `<text>`" — resolves a company alias and a live Slack-directory match, no raw ID or `TSB_HOME` path needed (PLAN D64) | `cli/dm-by-name.js` / `tsb-dm` | Plain-English cross-company messaging |
+| **Message an existing group DM by member names** | Finds an exact existing MPIM for you plus the named people, then sends as you; never creates a group automatically | `cli/group-dm-by-name.js` / `tsb-group-dm` | Existing group-DM messaging |
 | **Upload a file** | Screenshot/video/any local file, optionally shared straight into a channel/thread | `cli/upload.js` | File/attachment uploads |
 | **Read channels and threads** | History for a channel or a specific thread, bot-token scoped to channels the bot is in | `cli/query.js`, `cli/thread.js` | Channel and thread reads |
 | **Search** | Full-text Slack search — user-token-only, Slack has no bot equivalent | `cli/search.js` | Search |
@@ -411,8 +412,8 @@ remains deliberately deferred until an actual company asks for it.
 ## Database retention (PLAN D63)
 
 `.ledger.sqlite` accumulates rows forever — the idempotency ledger, human-in-the-loop
-asks, agent-session records, remote/local audit logs, bot-send tracking, and the DM
-channel-ID cache all just grow. Nothing prunes them, so a long-running install's
+asks, agent-session records, remote/local audit logs, bot-send tracking, the DM
+channel-ID cache, and the persistent directory/MPIM index all just grow. Nothing prunes them, so a long-running install's
 database only gets bigger. `cli/archive.js`/`tsb-archive` exports (gzipped JSON) and
 deletes anything older than a cutoff — default: the first day of the current month, so
 only the current month's data stays live — then runs `VACUUM` so the `.ledger.sqlite`
@@ -504,6 +505,17 @@ messaging" above for the full picture):
 node cli/dm-by-name.js --to "pulkit.jain" [--company anchor] --text 'hi' [--as-user] [--dry-run] [--json]
 tsb-dm --to "pulkit.jain" [--company anchor] --text 'hi' [--as-user] [--dry-run] [--json]   # global install
 ```
+
+**Message an existing group DM by names** (MPIM; always as the locally authorized
+human, never the bot):
+```bash
+node cli/group-dm-by-name.js --to "Shrestha Srivastava,Manish,Alex" [--company anchor] --text 'hi' [--dry-run] [--json]
+tsb-group-dm --to "Shrestha Srivastava,Manish,Alex" [--company anchor] --text 'hi' [--dry-run] [--json]   # global install
+```
+
+This only sends to an **existing exact group DM** containing you plus the named people.
+If none exists it returns `mpim-not-found-confirm-create-first`; it never opens/creates
+a group automatically — ask the human first.
 
 Bot-sent and as-you-sent DMs are never conflated — each identity opens and caches its
 *own* conversation, keyed by a fingerprint of the actual token in use (never the token

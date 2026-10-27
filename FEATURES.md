@@ -410,6 +410,14 @@ cache and a user-token cache are naturally independent since the cache key is th
 itself — and a failed page is never cached, so a `missing_scope` error is visible on the
 very next call, not silently repeated for the whole TTL window.
 
+**The walk caps out at 250 pages (50,000 members), found live to matter (PLAN D69)** —
+a real company's workspace had 5,144 members, and the original 20-page (4,000-member)
+cap silently stopped the walk before reaching a real, eligible member who was findable
+by direct ID but not by name/handle search, with no error to explain why. If a name/
+handle search genuinely exhausts even the new cap, `searchDirectoryByHandleOrName`'s
+`user-not-found` result now carries `truncated:true` so that's distinguishable from a
+real absence, rather than looking identical to one.
+
 Turn off: remove the token the call would use, or avoid calling the tool.
 `slack_doctor`'s `directoryLookup.ready` reports whether the bot token is present (never
 the scope set — that's only discoverable from a real `missing_scope` response at call

@@ -1,10 +1,20 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D68) and architecture; this file is the scannable done/pending list.
+log (D1–D69) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
 ## Done
+
+- [x] **Live-directory `MAX_PAGES` raised 20→250, truncation now detectable (D69)** —
+      found live while dogfooding the multi-account daemon: a real company's
+      workspace (5,144 members) silently truncated at the old 4,000-member cap, so
+      a real, eligible member resolved to a false `user-not-found` with no error.
+      `fetchAllMembers`/`searchDirectoryByHandleOrName` now track and surface
+      `truncated:true` when the cap (not a genuinely exhausted directory) is what
+      stopped the walk. 2 new tests (`test/directory.test.js`). Also fixed on the
+      same install (a credential-setup mistake, not a code bug): Hornblower's and
+      Anchor's `.env` had the identical `SLACK_USER_TOKEN` — re-authorized correctly.
 
 - [x] **GPT-5.6 Terra adversarial review of D64–D67 (D68)** — found and fixed:
       a real pre-existing bug where `mcp/tools.remote.js` reused local schemas

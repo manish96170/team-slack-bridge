@@ -17,11 +17,22 @@
 import { callSlack } from './slack.js'
 
 const DEFAULT_TTL_MS = 10 * 60 * 1000 // 10 minutes — PLAN D50's "5-15 minute TTL"
-const MAX_PAGES = 20 // hard stop against a runaway paginated walk, not a tuning knob
+// A hard stop against a runaway/infinite-cursor walk, not a deliberate
+// business limit — found too low live (D69): a real company's workspace
+// had 5,144 members across 26 pages, and the original MAX_PAGES=20
+// (4,000 members) silently truncated the walk before reaching page 24,
+// where the specific person being searched for actually was. The walk
+// still returned `{ ok: true, members }` with no error and no indication
+// anything was missing, so a real, eligible, non-deleted member resolved
+// to a false `user-not-found` with nothing to suggest why. Raised to a
+// number no real single Slack workspace is expected to hit (Slack's own
+// workspace member limits are far below this), while still bounding the
+// genuinely-pathological case this constant exists for.
+export const MAX_PAGES = 250
 
-// token -> { members, expiresAt }. Deliberately NEVER stores an error here
-// — a missing_scope or network failure must be visible on the very next
-// call, not silently repeated for the whole TTL window.
+// token -> { members, expiresAt, truncated }. Deliberately NEVER stores an
+// error here — a missing_scope or network failure must be visible on the
+// very next call, not silently repeated for the whole TTL window.
 const directoryCache = new Map()
 
 export function clearDirectoryCache(token) {
@@ -65,19 +76,26 @@ function mapSlackFailure(result, requiredScope) {
 
 async function fetchAllMembers({ token, slackCall, ttlMs }) {
   const cached = directoryCache.get(token)
-  if (cached && cached.expiresAt > Date.now()) return { ok: true, members: cached.members }
+  if (cached && cached.expiresAt > Date.now()) return { ok: true, members: cached.members, truncated: cached.truncated }
 
   const members = []
   let cursor
-  for (let page = 0; page < MAX_PAGES; page++) {
+  let page = 0
+  for (; page < MAX_PAGES; page++) {
     const result = await slackCall('users.list', token, { limit: 200, cursor })
     if (!result.ok) return result // never cache a failed page
     members.push(...(result.members || []))
     cursor = result.response_metadata?.next_cursor
     if (!cursor) break
   }
-  directoryCache.set(token, { members, expiresAt: Date.now() + (ttlMs ?? DEFAULT_TTL_MS) })
-  return { ok: true, members }
+  // Still more pages left when the loop stopped — the walk hit MAX_PAGES
+  // itself, not a genuine end of the directory (Slack sets next_cursor to
+  // '' once there's nothing left). Cache the partial result (still better
+  // than refetching every call) but mark it so callers can tell "not
+  // found" apart from "not found in what we were able to fetch."
+  const truncated = page >= MAX_PAGES && !!cursor
+  directoryCache.set(token, { members, expiresAt: Date.now() + (ttlMs ?? DEFAULT_TTL_MS), truncated })
+  return { ok: true, members, truncated }
 }
 
 export async function lookupUserById({ token, userId, slackCall = callSlack, includeEmail = false, tokenSource = 'bot' }) {
@@ -125,7 +143,7 @@ export async function searchDirectoryByHandleOrName({ token, query, slackCall = 
     return [member.name, member.profile?.display_name, member.real_name, member.profile?.real_name].some(candidate => normalize(candidate) === needle)
   })
 
-  if (matches.length === 0) return { ok: false, error: 'user-not-found', retryable: false }
+  if (matches.length === 0) return { ok: false, error: 'user-not-found', retryable: false, ...(fetched.truncated ? { truncated: true } : {}) }
   if (matches.length > 1) {
     return {
       ok: false,

@@ -6,6 +6,7 @@ import {
   lookupUserByEmail,
   searchDirectoryByHandleOrName,
   clearDirectoryCache,
+  MAX_PAGES,
 } from '../core/directory.js'
 
 const JANE = { id: 'U0JANE001', name: 'jane.doe', real_name: 'Jane Doe', profile: { display_name: 'Jane', real_name: 'Jane Doe', email: 'jane@example.com' } }
@@ -184,6 +185,47 @@ test('searchDirectoryByHandleOrName follows pagination across multiple pages', a
   const result = await searchDirectoryByHandleOrName({ token: 'xoxb-fake', query: 'jane.doe', slackCall })
   assert.equal(result.ok, true)
   assert.equal(result.user.id, 'U0JANE001')
+})
+
+// D69, found live: MAX_PAGES used to be 20 (4,000 members) -- too low for a
+// real company (one install's own workspace had 5,144 members, and the
+// specific person being searched for was on page 24, past the old cap).
+// The walk silently returned `{ ok: true }` with whatever partial list it
+// had and no indication anything was missing, so an eligible, real member
+// resolved to a false user-not-found with nothing to explain why. This
+// confirms the walk now goes far enough for that case (250 pages = 50,000
+// members) AND, for the still-possible pathological case beyond even that,
+// that truncation is now detectable rather than silently wrong.
+function fakeDeepPaginatedList(totalPages, targetMember) {
+  let call = 0
+  return async (method, token, body) => {
+    const page = call
+    call += 1
+    const isLast = page === totalPages - 1
+    const members = page === totalPages - 1 ? [targetMember] : [{ id: `U0PAGE${page}`, name: `page${page}`, real_name: `Page ${page}` }]
+    return { ok: true, members, response_metadata: { next_cursor: isLast ? '' : `cursor-${page + 1}` } }
+  }
+}
+
+test('searchDirectoryByHandleOrName stops at MAX_PAGES and marks the result truncated, rather than silently fetching forever or lying about completeness', async () => {
+  clearDirectoryCache()
+  // The target member sits one page PAST MAX_PAGES -- the walk must never
+  // reach it, and must say so.
+  const slackCall = fakeDeepPaginatedList(MAX_PAGES + 1, { id: 'U0FARAWAY', name: 'far.away', real_name: 'Far Away' })
+  const result = await searchDirectoryByHandleOrName({ token: 'xoxb-fake-deep', query: 'far.away', slackCall })
+  assert.equal(result.ok, false)
+  assert.equal(result.error, 'user-not-found')
+  assert.equal(result.truncated, true)
+})
+
+test('searchDirectoryByHandleOrName finds a real match within MAX_PAGES without flagging truncation', async () => {
+  clearDirectoryCache()
+  // Same shape, but the target is the LAST page within the cap -- a
+  // complete walk, nothing truncated.
+  const slackCall = fakeDeepPaginatedList(MAX_PAGES, { id: 'U0LASTPAGE', name: 'last.page', real_name: 'Last Page' })
+  const result = await searchDirectoryByHandleOrName({ token: 'xoxb-fake-full', query: 'last.page', slackCall })
+  assert.equal(result.ok, true)
+  assert.equal(result.user.id, 'U0LASTPAGE')
 })
 
 test('searchDirectoryByHandleOrName caches users.list across calls within the TTL', async () => {

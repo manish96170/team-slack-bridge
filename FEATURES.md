@@ -236,6 +236,51 @@ node cli/dm.js --user U0123ABC --text "can you check this?" --json
 Turn off: avoid local DM commands or remove bot DM scopes. Remote Slackbot MCP never
 exposes DMs or ask/approval.
 
+### Plain-English cross-company messaging (PLAN D64)
+
+Default: available locally when bot token exists, same posture as "DMs" above — this is
+a combined resolve-and-send wrapper around it, not a separate send path.
+
+Use:
+
+```bash
+node cli/dm-by-name.js --to "pulkit.jain" --company anchor --text "hi" [--as-user] [--dry-run] [--json]
+tsb-dm --to "pulkit.jain" --company anchor --text "hi" [--as-user] [--dry-run] [--json]   # global install
+```
+
+`core/people.js`'s `dmByName({ accountName, personName, text, asUser, dryRun })` resolves
+`--company` through `core/accounts.js`'s name→home registry (D21) — the local-profile
+multi-account registry, deliberately kept separate from `core/tenant-store.js`'s
+team_id-keyed one (D54), which resolves an incoming *signed webhook*, not a *human-typed
+name*. An install where a company is only registered in `tenants.json` so far needs it
+registered in `accounts.json` under a friendly name too (`node cli/accounts.js add
+anchor --home <that tenant's home>`) before `--company anchor` means anything.
+
+`--company` omitted uses the registry's own registered default
+(`node cli/accounts.js set-default anchor`). Resolves the person via
+`core/directory.js`'s live `lookupUser` (live-first — a config-file-first attempt would
+only save one Slack round trip for someone already in that account's
+`slack-config.json`, and this feature's whole point is reaching people who are not) and
+sends with `core/dm.js`'s `dm()`, using that same resolved account's own token — one
+combined result (`{ ok, account, person, send }`) describing one action, not two
+disjoint calls. `ambiguous-user` and every other `lookupUser` refusal propagate through
+unchanged.
+
+**The specific refusal this feature exists for**: no `--company` given AND no usable
+registered default either (only reachable if the registry itself resolves to nothing —
+e.g. a hand-crafted `accounts.json` with zero accounts, since `addAccount`/
+`setDefaultAccount` always keep a `default` key pointing at *something* once any account
+is registered) → `error:"no-company-specified-and-no-default-configured"`, distinct from
+an explicitly-named-but-unregistered `--company` (`account-not-found`). The CLI itself
+stays non-interactive; `skill/SKILL.md` is where an agent is instructed to ask the human
+which company on that specific refusal, never guess.
+
+`--dry-run` skips the send only — the directory lookup is a real Slack read either way,
+so a `--dry-run` call still needs a working bot token.
+
+Turn off: remove the bot token, or avoid the command. Local-only, same as every other
+DM-shaped capability — absent from `mcp/tools.remote.js`'s import graph.
+
 ### Channel and thread reads
 
 Default: available locally when bot has history scopes and is in the channel.

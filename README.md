@@ -393,6 +393,37 @@ cron entry:
 0 3 1 * * TSB_HOME=/path/to/home node /path/to/cli/archive.js export --json >> /path/to/archive.log 2>&1
 ```
 
+## Plain-English cross-company messaging (PLAN D64)
+
+"DM `<person>` in `<company>`: `<text>`" — no raw Slack user ID, no `TSB_HOME` path.
+`--company` resolves through the same name→home registry as "Connecting multiple AI
+coding harnesses / multiple Slack accounts" below (`core/accounts.js`, D21); register
+one first if it isn't already:
+
+```bash
+node cli/accounts.js add anchor --home ~/.team-slack-bridge-anchor
+```
+
+(`cli/accounts.js` has no `bin` entry of its own yet — from a global install, run
+`node $(npm root -g)/team-slack-bridge/cli/accounts.js add anchor --home …` instead.)
+
+Then:
+
+```bash
+node cli/dm-by-name.js --to "pulkit.jain" --company anchor --text "hi" [--as-user] [--dry-run] [--json]   # from a git clone
+tsb-dm --to "pulkit.jain" --company anchor --text "hi" [--as-user] [--dry-run] [--json]                   # from a global npm install
+```
+
+`--company` omitted falls back to the registry's own default
+(`node cli/accounts.js set-default anchor`). The person's real Slack user ID is resolved
+live via `core/directory.js`'s `lookupUser` — the same ambiguous-match refusal that
+command already has (`error:"ambiguous-user"`, every match listed) applies here
+unchanged. If no company is named **and** no default is configured either, this refuses
+with `error:"no-company-specified-and-no-default-configured"` rather than guessing —
+`skill/SKILL.md` instructs an agent reading it to ask which company on that refusal, not
+pick one. `--dry-run` skips the send only; the directory lookup is a real Slack read
+either way.
+
 ## Usage
 
 Every command below accepts `--json` (structured `{ ok, ... }` output, non-zero exit
@@ -417,6 +448,13 @@ node cli/react.js --channel '#x' --ts '169…' --emoji eyes [--remove] [--as-use
 **DM someone** (find their Slack member ID via their profile → "Copy member ID"):
 ```bash
 node cli/dm.js --user U0123ABC --text 'hi' [--as-user] [--dry-run] [--json]
+```
+
+**DM someone by name, across companies** (no raw ID, see "Plain-English cross-company
+messaging" above for the full picture):
+```bash
+node cli/dm-by-name.js --to "pulkit.jain" [--company anchor] --text 'hi' [--as-user] [--dry-run] [--json]
+tsb-dm --to "pulkit.jain" [--company anchor] --text 'hi' [--as-user] [--dry-run] [--json]   # global install
 ```
 
 Bot-sent and as-you-sent DMs are never conflated — each identity opens and caches its

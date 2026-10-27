@@ -188,7 +188,7 @@ never be able to tell the difference from the inside.
   HTTP surface) could visualize active sessions instead of only `cli/agent-session.js
   list`/Slack threads.
 
-## Plain-English cross-company messaging — "DM <person> in <company>" (not started, 2026-10-27)
+## Plain-English cross-company messaging — "DM <person> in <company>" (shipped, PLAN D64, 2026-10-27)
 
 Today, sending a DM to someone requires knowing two things no human carries around in
 their head: their raw Slack user ID (different per workspace — confirmed live, the
@@ -254,10 +254,11 @@ example alias one install's owner chose for themselves via `setDefaultAccount`/
 specific company. Any install picks its own aliases and its own default, or configures
 no default at all and lets the skill ask every time.
 
-**Open question before implementation starts**: should `dmByName` try the config-file
-`resolveUser` (fast, no network, but only knows people already in `slack-config.json`'s
-`users` list) before falling back to the live `lookupUser` search, or always go straight
-to the live search (slower, but complete, and what's already been used successfully in
-this session)? Leaning live-first for completeness, but worth deciding deliberately
-rather than defaulting silently either way.
+**Open question before implementation starts, resolved live-first (PLAN D64):** should
+`dmByName` try the config-file `resolveUser` (fast, no network, but only knows people
+already in `slack-config.json`'s `users` list) before falling back to the live
+`lookupUser` search, or always go straight to the live search (slower, but complete)?
+Shipped live-first — see D64 for the full reasoning. `core/people.js`'s `dmByName()` and
+`cli/dm-by-name.js`/`tsb-dm` are built; `skill/SKILL.md` documents the natural-language
+pattern and the ask-don't-guess instruction.
 

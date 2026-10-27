@@ -240,20 +240,17 @@ log (D1–D63) and architecture; this file is the scannable done/pending list.
       that concurrent asks require.
   - `PreCompact` is announce-only (D38) — "block autocompact until I approve" is not
     achievable with hooks.
+- [x] Plain-English cross-company messaging (D64) — `core/people.js`'s `dmByName()` +
+      `cli/dm-by-name.js`/`tsb-dm`. Reuses `core/accounts.js` (D21)'s name→home registry
+      as the company-alias store, resolves the person via `core/directory.js`'s live
+      `lookupUser` (live-first, decided), sends via `core/dm.js`'s `dm()`. Omitted
+      `--company` with no usable default refuses with
+      `no-company-specified-and-no-default-configured`; `skill/SKILL.md` instructs the
+      agent to ask which company on that refusal rather than guess. Verified via a real
+      `npm pack` → clean `--prefix` install → `tsb-dm`.
 
 ## Pending
 
-- [ ] **Plain-English cross-company messaging ("DM `<person>` in `<company>`:
-      `<text>`") — not started, design in ROADMAP.md.** Reuses `core/accounts.js`
-      (D21)'s name→home registry as the company-alias store (deliberately
-      separate from `core/tenant-store.js`'s team_id-keyed one, D54). Needs: a
-      combined `core/people.js` resolve-and-send primitive, `cli/dm-by-name.js`/
-      `tsb-dm`, and a `skill/SKILL.md` update instructing the agent to ask which
-      company when the underlying call refuses with
-      `no-company-specified-and-no-default-configured` rather than guessing.
-      Open question before starting: live directory lookup first, or try the
-      config-file `resolveUser` first and fall back — see ROADMAP.md for the
-      full design.
 - [ ] **D47's `viaBot:false` default needs `SLACK_USER_TOKEN` configured on every
       developer's machine to work at all** — anyone who hasn't run `npm run
       get-user-token` yet will see `slack_post`/`slack_dm` start failing with

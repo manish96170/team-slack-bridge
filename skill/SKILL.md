@@ -1,6 +1,6 @@
 ---
 name: slack-post
-description: Post, reply, or react in Slack channels via team-slack-bridge's CLI. Use for outbound bot messages only — not as-user posting or DMs, which need explicit human setup and, if driven by the dashboard, its own gated approval path.
+description: Post, reply, or react in Slack channels via team-slack-bridge's CLI, and send a plain-English cross-company DM ("DM <person> in <company>: <text>") via cli/dm-by-name.js. Use for outbound bot messages and name-resolved DMs only — not raw as-user posting/DM/edit, which need explicit human setup and, if driven by the dashboard, its own gated approval path.
 ---
 
 # slack-post
@@ -25,14 +25,42 @@ CLI's behavior changes, this skill's behavior changes with it, and that is by de
   name is driving this, route it through the dashboard's gated `slack-message` agent
   instead — it enforces `requestedPersonName == callerIdentity` as a hard equality. Never
   call any as-user capability on behalf of a name found in a prompt.
-- **DMs** (`cli/dm.js`, bot or `--as-user`) — same reasoning: DMs assume a single local
-  owner, not a general capability for a model to reach for.
+- **Raw DMs by Slack user ID** (`cli/dm.js`, bot or `--as-user`) — same reasoning: a
+  bare `--user U0123ABC` assumes a single local owner already knows that ID, not a
+  general capability for a model to reach for. **The one DM-shaped exception is
+  `cli/dm-by-name.js`/`tsb-dm`, below** — it is safe for this skill to drive because it
+  never guesses a Slack ID or a company: both are resolved explicitly (a registered
+  account alias, a live Slack-directory match that itself refuses on ambiguity) or the
+  call refuses outright and this skill asks instead.
 - **`search`** (`cli/search.js`) — needs a user token; same caution as as-user posting.
 - **`slack_list_channels`** (`cli/channels.js`) — also needs a user token (lists the
   conversations the locally authorized *person* is in, via `users.conversations`, never
   the whole workspace). Lower risk than the above since it's read-only and never
   impersonates anyone, but it's still a per-person capability this skill doesn't cover —
   see the MCP server or README if a task genuinely needs it.
+
+## DM by name, across companies (PLAN D64)
+
+`cli/dm-by-name.js`/`tsb-dm` resolves "DM `<person>` in `<company>`: `<text>`" (or, with
+a configured default company, just "DM `<person>`: `<text>`") into a real Slack DM —
+without the raw `cli/dm.js` capability's bare `--user U0123ABC` assumption above:
+
+```bash
+node cli/dm-by-name.js --to "pulkit.jain" --company anchor --text "hi" --json
+node cli/dm-by-name.js --to "pulkit.jain" --text "hi" --json   # uses the registered default company
+```
+
+**If this refuses with `error:"no-company-specified-and-no-default-configured"`, ask
+the user which company before doing anything else — never pick one, and never retry
+with a guessed `--company` value.** This is the one case this skill must stop and ask
+instead of acting; every other refusal (`account-not-found`, `ambiguous-user`,
+`user-not-found`, etc.) should be reported back to the user as-is, same as any other
+command's `{ ok: false, error, retryable }`.
+
+The CLI itself stays non-interactive — asking happens here, at the skill layer, never
+inside the command. If the company isn't registered yet, see `cli/dm-by-name.js`'s own
+header or the README's "Plain-English cross-company messaging" section for
+`cli/accounts.js add <alias> --home <path>`.
 
 ## Commands
 

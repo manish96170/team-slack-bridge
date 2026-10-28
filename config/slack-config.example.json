@@ -24,7 +24,8 @@
     "rateLimitPerMinute": 30,
     "tenancy": { "mode": "single" }
   },
-  "remote": { "postableChannels": [], "readableChannels": [] },
+  "remote": { "postableChannels": [], "readableChannels": [], "deletableFiles": [] },
+  "fileDeletion": { "enabled": false },
   "botSendTracking": { "enabled": true },
   "botSend": { "anonymousMessageDefault": false },
   "directoryLookup": { "cacheTtlMs": 600000 }

@@ -4,6 +4,12 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { uploadFile } from '../core/files.js'
+import { deleteFile } from '../core/file-delete.js'
+import { getSlackClient } from '../core/slack.js'
+import { tools as localTools } from '../mcp/tools.local.js'
+import { tools as remoteTools } from '../mcp/tools.remote.js'
+import { validateArguments } from '../mcp/validation.js'
+import { queryLocalFileAudit } from '../core/local-file-delete.js'
 
 function tempFile(content = 'fake screenshot bytes') {
   const path = join(mkdtempSync(join(tmpdir(), 'files-test-')), 'evidence.png')
@@ -129,4 +135,59 @@ test('uploadFile surfaces a failed getUploadURLExternal without attempting the P
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test('deleteFile requires an exact file ID and explicit confirmation, and previews without a token', async () => {
+  assert.equal((await deleteFile({ fileId: '' })).error, 'fileId-required')
+  assert.equal((await deleteFile({ fileId: 'f123', dryRun: true })).error, 'invalid-file-id')
+  assert.equal((await deleteFile({ fileId: 'F123' })).error, 'file-deletion-confirmation-required')
+  assert.equal((await deleteFile({ fileId: 'F123', confirm: true })).error, 'no-token')
+  const preview = await deleteFile({ fileId: ' F123 ', dryRun: true })
+  assert.deepEqual(preview.request, { method: 'files.delete', body: { file: 'F123' } })
+  assert.match(preview.warning, /all shares/)
+})
+
+test('deleteFile sends the exact file ID and propagates Slack permission failures', async () => {
+  const client = getSlackClient('xoxp-file-delete-test', { noRetry: true })
+  const original = client.apiCall
+  const calls = []
+  try {
+    client.apiCall = async (method, body) => { calls.push({ method, body }); return { ok: true } }
+    assert.equal((await deleteFile({ token: 'xoxp-file-delete-test', fileId: 'F123', confirm: true })).ok, true)
+    assert.deepEqual(calls, [{ method: 'files.delete', body: { file: 'F123' } }])
+    client.apiCall = async () => { throw { code: 'slack_webapi_platform_error', data: { error: 'cant_delete_file' } } }
+    const result = await deleteFile({ token: 'xoxp-file-delete-test', fileId: 'F123', confirm: true })
+    assert.equal(result.ok, false)
+    assert.equal(result.error, 'cant_delete_file')
+    client.apiCall = async () => { throw { code: 'slack_webapi_request_error', message: 'lost response' } }
+    const uncertain = await deleteFile({ token: 'xoxp-file-delete-test', fileId: 'F123', confirm: true })
+    assert.equal(uncertain.outcomeUnknown, true)
+    assert.equal(uncertain.retryable, false)
+  } finally {
+    client.apiCall = original
+  }
+})
+
+test('local file deletion defaults to user and never falls back between identities', async () => {
+  const tool = localTools.slack_delete_file
+  assert.ok(tool)
+  assert.ok(remoteTools.slack_delete_file)
+  assert.equal(validateArguments(tool.inputSchema, { fileId: 'F123', confirm: 'true' }), 'confirm must be boolean')
+  assert.equal(validateArguments(tool.inputSchema, { fileId: 'F123', channel: 'C123' }), 'unknown argument: channel')
+  const dbPath = join(mkdtempSync(join(tmpdir(), 'file-audit-test-')), 'audit.sqlite')
+  const config = { fileDeletion: { enabled: true } }
+  const disabled = await tool.handler({ fileId: 'F123', confirm: true }, { env: {}, config: {}, dbPath })
+  assert.equal(disabled.error, 'file-deletion-disabled')
+  const noUser = await tool.handler({ fileId: 'F123', confirm: true }, { env: { SLACK_BOT_TOKEN: 'xoxb-bot' }, config, dbPath })
+  assert.equal(noUser.error, 'no-token')
+  assert.equal(noUser.tokenSource, 'user')
+  const noBot = await tool.handler({ fileId: 'F123', confirm: true, viaBot: true }, { env: { SLACK_USER_TOKEN: 'xoxp-user' }, config, dbPath })
+  assert.equal(noBot.error, 'no-token')
+  assert.equal(noBot.tokenSource, 'bot')
+  const entries = queryLocalFileAudit({ dbPath })
+  assert.equal(entries.length, 3)
+  assert.equal(entries[0].file_id, 'F123')
+  assert.equal(entries[0].token_source, 'bot')
+  assert.equal(entries[0].status, 'failed')
+  assert.equal(entries[2].error, 'file-deletion-disabled')
 })

@@ -7,6 +7,7 @@ import { queryMessages, getThread } from '../core/query.js'
 import { resolveUser } from '../core/identity.js'
 import { doctor } from '../core/doctor.js'
 import { complete } from '../core/ledger.js'
+import { deleteFile } from '../core/file-delete.js'
 import { schemas, withoutBotIdentityFields } from './schema.js'
 
 function principalLabel(ctx) {
@@ -25,6 +26,12 @@ function recordRemoteLedgerResult(result, ctx, idempotencyKey) {
 }
 
 export const tools = {
+  slack_delete_file: {
+    name: 'slack_delete_file',
+    description: 'Delete an explicitly granted Slack file using the tenant bot token. This deletes the file from all its shares. Requires a file-and-principal grant, explicit user authorization and confirm:true; dryRun previews only.',
+    inputSchema: withoutBotIdentityFields(schemas.slack_delete_file),
+    handler: (args, ctx) => deleteFile({ token: ctx.env.SLACK_BOT_TOKEN, fileId: args.fileId, confirm: args.confirm, dryRun: args.dryRun }),
+  },
   slack_post: {
     name: 'slack_post',
     description: 'Remote-safe bot post to an allow-listed Slack channel.',

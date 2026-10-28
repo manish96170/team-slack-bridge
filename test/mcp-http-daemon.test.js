@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createLocalMcpServer } from '../listen/mcp-http.js'
 import { addAccount } from '../core/accounts.js'
+import { getSlackClient } from '../core/slack.js'
 
 function withTempHome(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'tsb-daemon-'))
@@ -37,14 +38,14 @@ async function rpc(port, message) {
   return res.json()
 }
 
-test('single-account daemon exposes the full local tool set, unlike the 10-tool remote profile', () =>
+test('single-account daemon exposes the full local tool set, unlike the restricted remote profile', () =>
   withTempHome(async () => {
     await withServer({ accountMode: 'single', port: 0 }, async port => {
       const response = await rpc(port, { jsonrpc: '2.0', id: 1, method: 'tools/list' })
       const names = response.result.tools.map(tool => tool.name)
       assert.ok(names.includes('slack_dm'), 'slack_dm should be present on the local daemon')
       assert.ok(names.includes('slack_ask'), 'slack_ask should be present on the local daemon')
-      assert.ok(names.length > 10, 'local daemon tool set should exceed the remote 10-tool set')
+      assert.ok(names.length > 11, 'local daemon tool set should exceed the restricted remote tool set')
     })
   }))
 
@@ -119,4 +120,35 @@ test('multi-account daemon errors clearly on an unknown account name instead of 
       assert.equal(report.error, 'account-not-found')
       assert.equal(response.result.isError, true)
     })
+  }))
+
+test('multi-account file deletion uses only the selected account and requires confirmation', () =>
+  withTempHome(async dir => {
+    const workHome = join(dir, 'work')
+    mkdirSync(workHome, { recursive: true })
+    writeFileSync(join(dir, '.env'), 'SLACK_USER_TOKEN=xoxp-delete-default\n')
+    writeFileSync(join(workHome, '.env'), 'SLACK_USER_TOKEN=xoxp-delete-work\n')
+    writeFileSync(join(workHome, 'slack-config.json'), JSON.stringify({ fileDeletion: { enabled: true } }))
+    addAccount('work', workHome)
+    const workClient = getSlackClient('xoxp-delete-work', { noRetry: true })
+    const defaultClient = getSlackClient('xoxp-delete-default', { noRetry: true })
+    const originalWork = workClient.apiCall
+    const originalDefault = defaultClient.apiCall
+    const calls = []
+    workClient.apiCall = async (method, body) => { calls.push({ account: 'work', method, body }); return { ok: true } }
+    defaultClient.apiCall = async (method, body) => { calls.push({ account: 'default', method, body }); return { ok: true } }
+    try {
+      await withServer({ accountMode: 'multi', port: 0 }, async port => {
+        const args = { account: 'work', fileId: 'F123' }
+        const refusal = await rpc(port, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'slack_delete_file', arguments: args } })
+        assert.equal(JSON.parse(refusal.result.content[0].text).error, 'file-deletion-confirmation-required')
+        assert.equal(calls.length, 0)
+        const result = await rpc(port, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'slack_delete_file', arguments: { ...args, confirm: true } } })
+        assert.equal(JSON.parse(result.result.content[0].text).ok, true)
+        assert.deepEqual(calls, [{ account: 'work', method: 'files.delete', body: { file: 'F123' } }])
+      })
+    } finally {
+      workClient.apiCall = originalWork
+      defaultClient.apiCall = originalDefault
+    }
   }))

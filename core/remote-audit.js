@@ -1,5 +1,17 @@
 import { getDb } from './db.js'
 
+export function recordRemoteFileAudit({ dbPath, principal, fileId, ok, error, dryRun }) {
+  if (!dbPath || typeof fileId !== 'string') return
+  getDb(dbPath).prepare(
+    'INSERT INTO remote_file_audit (created_at, principal_user_id, principal_team_id, file_id, ok, error, dry_run) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(new Date().toISOString(), principal?.user_id || null, principal?.team_id || principal?.enterprise_id || null, fileId, ok ? 1 : 0, error || null, dryRun ? 1 : 0)
+}
+
+export function queryRemoteFileAudit({ dbPath, limit = 50 }) {
+  if (!dbPath) return []
+  return getDb(dbPath).prepare('SELECT * FROM remote_file_audit ORDER BY id DESC LIMIT ?').all(limit)
+}
+
 export function recordRemoteAudit({ dbPath, principal, tool, ok, error, channel, ts }) {
   if (!dbPath) return
   getDb(dbPath)

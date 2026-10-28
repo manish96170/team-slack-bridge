@@ -19,6 +19,9 @@ CLI's behavior changes, this skill's behavior changes with it, and that is by de
 
 ## When NOT to use
 
+- **Slack file deletion** — this outbound posting skill does not authorize deletions.
+  See `FEATURES.md`'s "File deletion" section for the opt-in, identity, exact-file
+  confirmation, multi-account and all-shares safeguards on that separate capability.
 - **As-user posting/DM/edit** (`--as-user`, or the MCP tools `slack_post_as_user`,
   `slack_dm_as_user`, `slack_update_message_as_user`) — requires a human-authorized user
   token and a verified caller identity bound to the exact request. If a caller-supplied

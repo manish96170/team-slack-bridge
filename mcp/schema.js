@@ -276,6 +276,17 @@ export const schemas = {
     required: [],
     additionalProperties: false,
   },
+  slack_delete_file: {
+    type: 'object',
+    properties: {
+      fileId: { type: 'string', description: 'Exact Slack file ID, not a local path or message timestamp' },
+      confirm: { type: 'boolean', description: 'Must be true for a real deletion after explicit user authorization. Deletes the file from all its shares.' },
+      viaBot: { type: 'boolean', description: 'Default false: use the locally authorized user token. Set true only to use the bot identity explicitly; never silently switch identities.' },
+      dryRun: { type: 'boolean', description: 'Preview without deleting or contacting Slack' },
+    },
+    required: ['fileId'],
+    additionalProperties: false,
+  },
   slack_upload_file: {
     type: 'object',
     properties: {

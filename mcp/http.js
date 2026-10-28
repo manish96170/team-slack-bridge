@@ -1,7 +1,7 @@
 import { tools as remoteTools } from './tools.remote.js'
 import { validateArguments } from './validation.js'
 import { findRemoteOwnedByTs, getEntry } from '../core/ledger.js'
-import { recordRemoteAudit, reserveRemoteCall, updateRemoteAudit } from '../core/remote-audit.js'
+import { recordRemoteAudit, recordRemoteFileAudit, reserveRemoteCall, updateRemoteAudit } from '../core/remote-audit.js'
 import { normalizeSlackbotMcp } from '../core/slackbot-mcp.js'
 import { resolveAccount } from '../core/tenancy.js'
 import { packageVersion } from '../core/version.js'
@@ -16,6 +16,7 @@ const WRITE_TOOLS = new Set([
   'slack_unreact',
   'slack_update_message',
   'slack_delete_message',
+  'slack_delete_file',
 ])
 const CHANNEL_WRITE_TOOLS = new Set([
   'slack_post',
@@ -98,6 +99,13 @@ export function authorizeRemoteToolCall({ name, args, config, dbPath, principal 
   if (OWNED_MESSAGE_TOOLS.has(name) && !findRemoteOwnedByTs(dbPath, args.channel, args.ts, principal?.user_id)) {
     return { ok: false, error: 'remote-mcp-not-own-message', retryable: false }
   }
+  if (name === 'slack_delete_file') {
+    const grants = Array.isArray(config.remote?.deletableFiles) ? config.remote.deletableFiles : []
+    const principalWorkspace = principal?.team_id || principal?.enterprise_id
+    if (typeof args.fileId !== 'string' || args.fileId !== args.fileId.trim() || !grants.some(grant => grant && typeof grant.fileId === 'string' && grant.fileId === args.fileId && typeof grant.userId === 'string' && grant.userId === principal?.user_id && typeof grant.teamId === 'string' && grant.teamId !== '' && grant.teamId === principalWorkspace)) {
+      return { ok: false, error: 'remote-mcp-file-not-granted', retryable: false }
+    }
+  }
   return { ok: true }
 }
 
@@ -149,9 +157,13 @@ export async function handleMcpMessage({ message, env, config, dbPath }) {
     if (validationError) return error(id, -32602, validationError)
 
     const principal = slackPrincipal(params)
+    const auditFile = (ok, err) => {
+      if (params.name === 'slack_delete_file') recordRemoteFileAudit({ dbPath, principal, fileId: typeof args.fileId === 'string' ? args.fileId.trim() : args.fileId, ok, error: err, dryRun: args.dryRun })
+    }
     try {
       const authorized = authorizeRemoteToolCall({ name: params.name, args, config, dbPath, principal })
       if (!authorized.ok) {
+        auditFile(false, authorized.error)
         recordRemoteAudit({ dbPath, principal, tool: params.name, ok: false, error: authorized.error, channel: args.channel, ts: args.ts })
         return success(id, { content: [{ type: 'text', text: JSON.stringify(authorized) }], isError: true })
       }
@@ -159,10 +171,12 @@ export async function handleMcpMessage({ message, env, config, dbPath }) {
         ? { ok: true }
         : reserveRemoteCall({ dbPath, principal, tool: params.name, rateLimitPerMinute: normalizeSlackbotMcp(config?.slackbotMcp).rateLimitPerMinute, channel: args.channel, ts: args.ts })
       if (!reservation.ok) {
+        auditFile(false, reservation.error)
         recordRemoteAudit({ dbPath, principal, tool: params.name, ok: false, error: reservation.error, channel: args.channel, ts: args.ts })
         return success(id, { content: [{ type: 'text', text: JSON.stringify(reservation) }], isError: true })
       }
       const result = await tool.handler(args, { env, config, dbPath, slack: principal })
+      auditFile(result.ok, result.outcomeUnknown ? `outcome-unknown: ${result.error}` : result.error)
       if (reservation.auditId) {
         updateRemoteAudit({ dbPath, auditId: reservation.auditId, ok: result.ok, error: result.error, channel: args.channel || result.channel, ts: args.ts || result.ts })
       } else {
@@ -170,6 +184,7 @@ export async function handleMcpMessage({ message, env, config, dbPath }) {
       }
       return success(id, { content: [{ type: 'text', text: JSON.stringify(result) }], isError: !result.ok })
     } catch (err) {
+      auditFile(false, err.message)
       recordRemoteAudit({ dbPath, principal, tool: params.name, ok: false, error: err.message, channel: args.channel, ts: args.ts })
       return error(id, -32000, err.message)
     }

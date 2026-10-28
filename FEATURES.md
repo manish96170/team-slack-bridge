@@ -640,6 +640,60 @@ Turn off: remove `files:write` from the relevant token. Local-only for two reaso
 the usual token-identity one, and because `filePath` reads an arbitrary local file, a
 primitive that must never be exposed remotely. Remote Slackbot MCP never exposes this.
 
+### File deletion
+
+MCP `slack_delete_file` and `cli/delete-file.js` call Slack's `files.delete`
+for one exact Slack file ID. **This deletes the file from all its shares, not just
+one channel or thread**, and Slack may refuse deletion based on ownership or workspace
+policy. Obtain explicit authorization for that exact file and its workspace before
+setting `confirm: true` or `--confirm`; the command refuses real calls without it.
+Deleting a message is a different operation and does not necessarily delete its file.
+
+The local CLI and MCP require `fileDeletion.enabled: true` in the selected account's
+`slack-config.json` before any real deletion. This defaults to false; dry runs remain
+available. Confirmed attempts record an intent in `local_file_audit` before calling
+Slack and then record the result; if an audit intent cannot be written, deletion is
+refused. An unfinished `pending` entry indicates an operation whose outcome must be
+checked manually. Local audit records the configured owner, not a verified caller.
+
+Both local surfaces default to the locally authorized user token; `viaBot: true` or
+`--via-bot` selects the bot explicitly, with no fallback. `files:write` is required;
+`files:read` is separately needed for Slack's `files.info` to inspect file metadata and
+shares, and is not added automatically; the bridge does not currently implement that
+inspection API. Inspect manually or by another authorized method. If shares cannot be inspected, do not assume
+the file is shared only in the target thread. The local multi-account MCP daemon accepts
+its usual `account` argument; the CLI accepts `--account <alias>` and otherwise uses
+the registered default. Check the workspace and token identity before acting.
+
+```bash
+node cli/delete-file.js --account work --file-id F123 --dry-run --json
+node cli/delete-file.js --account work --file-id F123 --confirm --json
+```
+
+The hosted Slackbot MCP profile can expose `slack_delete_file` only when the tool is
+explicitly listed in `slackbotMcp.allowedTools`, `exposeWriteTools` is enabled, Slack
+identity authentication is in use, and the tenant's `remote.deletableFiles` grants the
+exact file ID to the authenticated user and workspace, e.g.
+`[{"fileId":"F123","userId":"U123","teamId":"T123"}]`.
+Grants are empty by default. The hosted profile uses its tenant bot token, not a user
+token, and Slack may still deny the deletion. This grant authorizes deletion of the file
+everywhere, not merely in a configured channel. Authorized and denied calls that pass
+tool/schema validation are recorded in
+`remote_file_audit` with file ID and principal; normal remote rate limits apply. Remove
+the grant when it is no longer needed. The remote schema does not accept `viaBot`.
+For enterprise-only principals, `teamId` may be the enterprise ID when Slack provides
+no team ID; multi-tenant mode still requires a registered team ID.
+
+A dry run only previews the request; it does not check Slack permissions or delete
+anything. File deletion has automatic retries disabled: a network failure may leave
+`outcomeUnknown: true`, so inspect the file before retrying instead of assuming failure.
+To read recent local and remote file audit records for a registered account from the
+repository root, replace `work` with the desired account alias:
+
+```bash
+node --input-type=module -e 'import {loadAccountContext} from "./core/accounts.js"; import {queryLocalFileAudit} from "./core/local-file-delete.js"; import {queryRemoteFileAudit} from "./core/remote-audit.js"; const c=loadAccountContext("work"); if (!c.ok) throw new Error(c.error); console.log(JSON.stringify({local:queryLocalFileAudit({dbPath:c.dbPath}),remote:queryRemoteFileAudit({dbPath:c.dbPath})},null,2))'
+```
+
 ### App Home
 
 Default: enabled in manifest template; publishing happens when users open the Home tab
@@ -842,8 +896,9 @@ skip it entirely.
 
 ### Local MCP daemon + multi-account (PLAN D21/D22)
 
-Local-only, separate from `slackbotMcp` above — not signature-gated, not restricted to
-10 tools, never touches the remote/hosted profile (D6 unchanged).
+Local-only, separate from `slackbotMcp` above — not signature-gated and not restricted
+to the hosted profile's explicitly allowed tools. Hosted file deletion has a separate,
+opt-in file/user/workspace grant (D72).
 
 Default:
 

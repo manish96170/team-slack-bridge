@@ -9,27 +9,31 @@
 import { ErrorCode, LogLevel, WebClient } from '@slack/web-api'
 
 const RETRYABLE_SLACK_ERRORS = new Set(['ratelimited', 'internal_error', 'fatal_error', 'request_timeout'])
+// Separate per-token caches keep destructive, no-retry calls from sharing
+// retry policy with ordinary Slack operations.
 const clients = new Map()
+const noRetryClients = new Map()
 
-export function getSlackClient(token) {
+export function getSlackClient(token, { noRetry = false } = {}) {
   if (!token) return null
-  let client = clients.get(token)
+  const cache = noRetry ? noRetryClients : clients
+  let client = cache.get(token)
   if (client) return client
   client = new WebClient(token, {
-    retryConfig: { retries: 2, factor: 2, minTimeout: 500, maxTimeout: 2000, randomize: true },
-    rejectRateLimitedCalls: false,
+    retryConfig: noRetry ? { retries: 0 } : { retries: 2, factor: 2, minTimeout: 500, maxTimeout: 2000, randomize: true },
+    rejectRateLimitedCalls: noRetry,
     timeout: 10000,
     logLevel: LogLevel.ERROR,
   })
-  clients.set(token, client)
+  cache.set(token, client)
   return client
 }
 
-export async function callSlack(method, token, body = {}) {
+export async function callSlack(method, token, body = {}, { noRetry = false } = {}) {
   if (!token) return { ok: false, error: 'no-token', retryable: false }
 
   try {
-    const data = await getSlackClient(token).apiCall(method, body)
+    const data = await getSlackClient(token, { noRetry }).apiCall(method, body)
     return { ok: true, ...data }
   } catch (err) {
     if (err.code === ErrorCode.PlatformError) {

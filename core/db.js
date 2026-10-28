@@ -76,6 +76,25 @@ export function getDb(path) {
       channel TEXT,
       ts TEXT
     );
+    CREATE TABLE IF NOT EXISTS remote_file_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT NOT NULL,
+      principal_user_id TEXT,
+      principal_team_id TEXT,
+      file_id TEXT NOT NULL,
+      ok INTEGER NOT NULL,
+      error TEXT,
+      dry_run INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS local_file_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT NOT NULL,
+      file_id TEXT NOT NULL,
+      token_source TEXT NOT NULL,
+      configured_owner_id TEXT,
+      status TEXT NOT NULL,
+      error TEXT
+    );
     CREATE TABLE IF NOT EXISTS local_audit (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       created_at TEXT NOT NULL,

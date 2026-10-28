@@ -9,7 +9,8 @@
 // additionally read an arbitrary local `filePath`, which would be a local-file
 // read primitive in a remote profile. `slack_lookup_user` can use either
 // token (tokenSource:"bot"/"user", explicit, never a silent fallback) but
-// is local-only for a different reason — see D50/D51 below.
+// is local-only for a different reason — see D50/D51 below. Hosted file deletion
+// has a separate bot-only, explicitly granted implementation in tools.remote.js.
 //
 // D47: `slack_post`/`slack_reply`/`slack_dm` default to sending AS THE
 // LOCAL USER (`viaBot:false`), not as the bot — reversed from the original
@@ -79,6 +80,7 @@ import { queryMessages, getThread } from '../core/query.js'
 import { search } from '../core/search.js'
 import { listMyChannels } from '../core/channels.js'
 import { uploadFile } from '../core/files.js'
+import { deleteLocalFile } from '../core/local-file-delete.js'
 import { resolveUser } from '../core/identity.js'
 import { lookupUser } from '../core/directory.js'
 import { messageGroupByName } from '../core/mpim.js'
@@ -109,7 +111,8 @@ export const MCP_INSTRUCTIONS =
   'anonymous message in THIS request — never set either on your own initiative, including for routine status ' +
   'updates, completion notices, or production/approval messages. If a viaBot send is refused as unauthorized ' +
   '(not-authorized-to-send-as-bot-...), report that refusal back to the human and let them decide; do not retry ' +
-  'with anonymousMessage:true yourself.'
+  'with anonymousMessage:true yourself. Never set confirm:true for file deletion without explicit human ' +
+  'authorization for that exact file and workspace, after explaining deletion affects all shares.'
 
 export const tools = {
   slack_post: {
@@ -414,6 +417,12 @@ export const tools = {
       "List the Slack conversations the locally authorized user is a member of (not the whole workspace). Requires a locally configured user token. Local only.",
     inputSchema: schemas.slack_list_channels,
     handler: (args, ctx) => listMyChannels({ token: ctx.env.SLACK_USER_TOKEN, types: args.types, limit: args.limit, cursor: args.cursor }),
+  },
+  slack_delete_file: {
+    name: 'slack_delete_file',
+    description: 'Delete an exact Slack file ID from all its shares. Local profile requires fileDeletion.enabled, files:write and explicit user authorization (confirm:true). Defaults to the locally authorized human; viaBot:true explicitly selects the bot. Use dryRun:true to preview; never silently switch identities. Hosted profile has separate bot-only grants.',
+    inputSchema: schemas.slack_delete_file,
+    handler: (args, ctx) => deleteLocalFile({ env: ctx.env, config: ctx.config, dbPath: ctx.dbPath, fileId: args.fileId, confirm: args.confirm, dryRun: args.dryRun, viaBot: args.viaBot }),
   },
   slack_upload_file: {
     name: 'slack_upload_file',

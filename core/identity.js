@@ -35,7 +35,8 @@ export function loadConfig(path) {
       },
       openacp: { enabled: false, adapterPackage: '@openacp/slack-adapter', autoCreateSession: false },
       slackbotMcp: normalizeSlackbotMcp(),
-      remote: { postableChannels: [], readableChannels: [] },
+      remote: { postableChannels: [], readableChannels: [], deletableFiles: [] },
+      fileDeletion: { enabled: false },
       localMcpDaemon: { enabled: false, port: 8918, accountMode: 'single' },
       // D48 — on by default; the echo-DM-with-thread-reply tracking that
       // lets an authorized sender see what a viaBot send actually said.
@@ -121,7 +122,9 @@ export function loadConfig(path) {
     remote: {
       postableChannels: raw.remote?.postableChannels || [],
       readableChannels: raw.remote?.readableChannels || [],
+      deletableFiles: Array.isArray(raw.remote?.deletableFiles) ? raw.remote.deletableFiles : [],
     },
+    fileDeletion: { enabled: raw.fileDeletion?.enabled === true },
     localMcpDaemon: {
       enabled: !!raw.localMcpDaemon?.enabled,
       port: raw.localMcpDaemon?.port || 8918,

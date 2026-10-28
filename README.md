@@ -82,6 +82,7 @@ terminal, an MCP client, or `skill/SKILL.md`.
 | **DM someone by name, across companies** | "DM `<person>` in `<company>`: `<text>`" — resolves a company alias and a live Slack-directory match, no raw ID or `TSB_HOME` path needed (PLAN D64) | `cli/dm-by-name.js` / `tsb-dm` | Plain-English cross-company messaging |
 | **Message an existing group DM by member names** | Finds an exact existing MPIM for you plus the named people, then sends as you; never creates a group automatically | `cli/group-dm-by-name.js` / `tsb-group-dm` | Existing group-DM messaging |
 | **Upload a file** | Screenshot/video/any local file, optionally shared straight into a channel/thread | `cli/upload.js` | File/attachment uploads |
+| **Delete a Slack file** | Delete an exact file ID from all shares after explicit confirmation; local deletion is disabled by default, hosted HTTP requires an explicit per-file/principal grant | `cli/delete-file.js` | File deletion |
 | **Read channels and threads** | History for a channel or a specific thread, bot-token scoped to channels the bot is in | `cli/query.js`, `cli/thread.js` | Channel and thread reads |
 | **Search** | Full-text Slack search — user-token-only, Slack has no bot equivalent | `cli/search.js` | Search |
 | **List "my" channels** | Every conversation the authorized human is actually in (`users.conversations`), never the whole workspace | `cli/channels.js` | List my channels |
@@ -253,7 +254,7 @@ the gap away mode fills (PLAN D34).
    Permissions -> Scopes**, add these **Bot Token Scopes**:
    - `chat:write` — post messages as the bot
    - `im:write` — open/send DMs
-   - `files:write` — upload a screenshot/video as the bot (`cli/upload.js`/`slack_upload_file`)
+   - `files:write` — upload or delete a Slack file as the bot (`cli/upload.js`/`slack_upload_file`; `cli/delete-file.js --via-bot`)
    - `im:read`, `im:history` — only needed if you're also building DM-reading on top
      of this (e.g. a note-to-self pattern) — without these the bot can send a DM but
      not read what comes back. Skip if you only need outbound posting.
@@ -274,7 +275,7 @@ the gap away mode fills (PLAN D34).
      `users.conversations`, scoped to their own membership — never the whole
      workspace)
    - `files:write` — upload a screenshot/video as the user (`cli/upload.js --as-user`/
-     `slack_upload_file_as_user`), e.g. evidence attached to an MR announcement
+     `slack_upload_file_as_user`) or delete an authorized file (`cli/delete-file.js`/`slack_delete_file`)
    - `reactions:write` — add/remove a reaction as the user (`cli/react.js --as-user`/
      `slack_react_as_user`/`slack_unreact_as_user`)
 

@@ -11,10 +11,13 @@ import { getSlackbotMcpTools } from '../mcp/http.js'
 import { complete } from '../core/ledger.js'
 import { tools as remoteTools } from '../mcp/tools.remote.js'
 import { validateArguments } from '../mcp/validation.js'
+import { getSlackClient } from '../core/slack.js'
+import { getDb } from '../core/db.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = join(__dirname, '..')
 const remoteToolNames = [
+  'slack_delete_file',
   'slack_delete_message',
   'slack_doctor',
   'slack_get_thread',
@@ -318,6 +321,52 @@ test('/mcp requires Slack identity metadata for actionable remote calls', async 
   assert.equal(response.statusCode, 200)
   const result = JSON.parse(JSON.parse(response.body).result.content[0].text)
   assert.equal(result.error, 'remote-mcp-slack-identity-required')
+})
+
+test('remote file deletion is opt-in, restricted to exact file and authenticated principal, confirmed and audited', async () => {
+  const dbPath = tempDbPath()
+  const config = {
+    slackbotMcp: { enabled: true, allowedTools: ['slack_delete_file'], exposeWriteTools: true },
+    remote: { deletableFiles: [{ fileId: 'F1', userId: 'U1', teamId: 'T1' }, { fileId: 'F3', userId: 'U1', teamId: 'E1' }] },
+  }
+  const bot = getSlackClient('xoxb-remote-file-test', { noRetry: true })
+  const original = bot.apiCall
+  const calls = []
+  bot.apiCall = async (method, body) => { calls.push({ method, body }); return { ok: true } }
+  async function invoke(user, fileId, args = {}, teamId = 'T1', enterpriseId = null) {
+    const response = res()
+    await handleHttpRequest({
+      req: signedMcpReq({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: {
+        name: 'slack_delete_file', arguments: { fileId, ...args },
+        _meta: { slack: { user_id: user, team_id: teamId, enterprise_id: enterpriseId } },
+      } }),
+      res: response, signingSecret, env: { SLACK_BOT_TOKEN: 'xoxb-remote-file-test', SLACK_USER_TOKEN: 'xoxp-never-used' }, config, dbPath, verifySignatures: true,
+    })
+    return JSON.parse(JSON.parse(response.body).result.content[0].text)
+  }
+  try {
+    assert.equal((await invoke('U2', 'F1', { confirm: true })).error, 'remote-mcp-file-not-granted')
+    assert.equal((await invoke('U1', 'F1', { confirm: true }, 'T2')).error, 'remote-mcp-file-not-granted')
+    assert.equal((await invoke('U1', 'F3', { dryRun: true }, null, 'E1')).dryRun, true)
+    assert.equal((await invoke('U1', 'F2', { confirm: true })).error, 'remote-mcp-file-not-granted')
+    assert.equal((await invoke('U1', 'F1')).error, 'file-deletion-confirmation-required')
+    assert.equal((await invoke('U1', 'F1', { dryRun: true })).dryRun, true)
+    assert.equal(calls.length, 0)
+    assert.equal((await invoke('U1', 'F1', { confirm: true })).ok, true)
+    assert.deepEqual(calls, [{ method: 'files.delete', body: { file: 'F1' } }])
+    const audit = getDb(dbPath).prepare('SELECT principal_user_id, file_id, ok, error, dry_run FROM remote_file_audit ORDER BY id').all()
+    assert.equal(audit.length, 7)
+    assert.equal(audit[0].principal_user_id, 'U2')
+    assert.equal(audit[0].file_id, 'F1')
+    assert.equal(audit[0].error, 'remote-mcp-file-not-granted')
+    assert.equal(audit[5].dry_run, 1)
+    assert.equal(audit[6].ok, 1)
+    const hidden = getSlackbotMcpTools({ ...config, slackbotMcp: { ...config.slackbotMcp, exposeWriteTools: false } })
+    assert.equal(hidden.slack_delete_file, undefined)
+    assert.equal(validateArguments(remoteTools.slack_delete_file.inputSchema, { fileId: 'F1', viaBot: true }), 'unknown argument: viaBot')
+  } finally {
+    bot.apiCall = original
+  }
 })
 
 test('/mcp requires idempotency keys for remote post and reply ownership', async () => {

@@ -30,6 +30,8 @@ const TABLES = [
   { name: 'dm_channels', timestampColumn: 'updated_at' },
   { name: 'agent_sessions', timestampColumn: 'created_at' },
   { name: 'remote_audit', timestampColumn: 'created_at' },
+  { name: 'remote_file_audit', timestampColumn: 'created_at' },
+  { name: 'local_file_audit', timestampColumn: 'created_at' },
   { name: 'local_audit', timestampColumn: 'created_at' },
   { name: 'bot_send_tracking', timestampColumn: 'created_at' },
   { name: 'directory_people', timestampColumn: 'refreshed_at' },

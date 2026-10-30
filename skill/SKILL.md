@@ -70,13 +70,32 @@ header or the README's "Plain-English cross-company messaging" section for
 For "Message Shrestha, Manish, and Alex: hi", use the existing-MPIM command:
 
 ```bash
-node cli/group-dm-by-name.js --to "Shrestha,Manish,Alex" --text "hi" --json
+node cli/group-dm-by-name.js --to "Shrestha,Manish,Alex" --text "hi" --json          # preview + approval prompt
+node cli/group-dm-by-name.js --to "Shrestha,Manish,Alex" --text "hi" --confirm --json  # only after the user approved
 ```
+
+**Group communication always needs the user's approval.** Without `--confirm` the command
+refuses and returns the recipients and text — show them to the user, get an explicit yes
+for that exact recipient set and text, then re-run with `--confirm`. A changed recipient or
+text, a second message, or a different group needs a fresh approval; never add `--confirm`
+on your own.
 
 The named people are recipients; the locally authorized human is added automatically.
 This is always as-user, never bot/anonymous, and only targets an **existing exact group
 DM**. If it returns `mpim-not-found-confirm-create-first`, ask the user whether to create
 one — never create/open a group DM automatically in this skill.
+
+If (and only if) the user says yes, create it explicitly. This needs `--confirm`, is
+as-user only, and never modifies an already-existing group:
+
+```bash
+node cli/group-dm-create.js --to "Shrestha,Manish,Alex" [--topic "Release sync"] [--text "hi"] --confirm --json
+node cli/group-topic.js --channel G0123ABCD --topic "Release sync" --confirm --json   # existing group DM only; approval needed too
+```
+
+MCP equivalents: `slack_create_group_dm`, `slack_message_group_by_name` and
+`slack_set_group_topic` (pass `confirm:true` only after the user approved those exact
+recipients and text/topic).
 
 ## Commands
 

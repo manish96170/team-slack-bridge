@@ -49,6 +49,7 @@
         "im:history",
         "im:read",
         "im:write",
+        "mpim:history",
         "reactions:write",
         "users:read",
         "users:read.email"
@@ -58,9 +59,15 @@
         "search:read",
         "im:write",
         "channels:read",
+        "channels:history",
         "groups:read",
+        "groups:history",
         "im:read",
+        "im:history",
         "mpim:read",
+        "mpim:history",
+        "mpim:write",
+        "mpim:write.topic",
         "files:write",
         "reactions:write",
         "users:read",
@@ -75,7 +82,8 @@
         "app_mention",
         "message.channels",
         "message.groups",
-        "message.im"
+        "message.im",
+        "message.mpim"
       ]
     },
     "interactivity": {

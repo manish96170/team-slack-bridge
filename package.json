@@ -18,7 +18,9 @@
     "tsb-get-workspace-token": "get-workspace-token.js",
     "tsb-archive": "cli/archive.js",
     "tsb-dm": "cli/dm-by-name.js",
-    "tsb-group-dm": "cli/group-dm-by-name.js"
+    "tsb-group-dm": "cli/group-dm-by-name.js",
+    "tsb-group-dm-create": "cli/group-dm-create.js",
+    "tsb-group-topic": "cli/group-topic.js"
   },
   "scripts": {
     "get-user-token": "node get-user-token.js",
@@ -27,6 +29,8 @@
     "archive": "node cli/archive.js",
     "dm-by-name": "node cli/dm-by-name.js",
     "group-dm-by-name": "node cli/group-dm-by-name.js",
+    "group-dm-create": "node cli/group-dm-create.js",
+    "group-topic": "node cli/group-topic.js",
     "post": "node post.js",
     "verify-dm": "node verify-dm.js",
     "doctor": "node cli/doctor.js",

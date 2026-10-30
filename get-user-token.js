@@ -29,7 +29,7 @@ import { loadLocalTlsCert } from './core/local-tls.js'
 
 const PORT = 8917
 const REDIRECT_URI = `https://localhost:${PORT}/callback`
-const USER_SCOPES = 'chat:write,search:read,im:write,channels:read,groups:read,im:read,mpim:read,files:write,reactions:write,users:read,users:read.email'
+const USER_SCOPES = 'chat:write,search:read,im:write,channels:read,channels:history,groups:read,groups:history,im:read,im:history,mpim:read,mpim:history,mpim:write,mpim:write.topic,files:write,reactions:write,users:read,users:read.email'
 const HOME_DIR = process.env.TSB_HOME || join(homedir(), '.team-slack-bridge')
 
 const env = loadEnv()

@@ -35,6 +35,20 @@ export function withoutBotIdentityFields(schema) {
   return { ...schema, properties: rest }
 }
 
+// Local-only: `asUser` selects the locally authorized human's token for reads,
+// which the remote/hosted profile never has (D20). Stripped so a remote
+// client gets an honest unknown-argument error instead of a silent no-op.
+export function withoutAsUserField(schema) {
+  const { asUser, ...rest } = schema.properties || {}
+  return { ...schema, properties: rest }
+}
+
+const AS_USER_READ = {
+  type: 'boolean',
+  description:
+    'Default false: read with the bot token (only conversations the bot is a member of). Set true to read as the locally authorized human (SLACK_USER_TOKEN), which also covers that user\'s own DMs, group DMs (MPIMs) and private channels. Requires the user token\'s channels:history/groups:history/im:history/mpim:history scopes.',
+}
+
 export const schemas = {
   slack_post: {
     type: 'object',
@@ -213,9 +227,37 @@ export const schemas = {
         description: 'At least two other people to include with the locally authorized sender in an existing group DM (MPIM). Names resolve only in the selected local account/workspace.',
       },
       text: { type: 'string' },
+      confirm: { type: 'boolean', description: 'Must be true for a real send, and only after the human approved sending this exact text to this exact set of people. Omit to get a refusal that previews the recipients and text.' },
       dryRun: { type: 'boolean' },
     },
     required: ['peopleNames', 'text'],
+    additionalProperties: false,
+  },
+  slack_create_group_dm: {
+    type: 'object',
+    properties: {
+      peopleNames: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Two to eight other people to include with the locally authorized sender in the new group DM (MPIM). Names resolve only in the selected local account/workspace.',
+      },
+      topic: { type: 'string', description: 'Optional topic for a newly created group (max 250 characters). Not applied to an already-existing group.' },
+      text: { type: 'string', description: 'Optional first message sent as the user into a newly created group. Not sent if the group already exists.' },
+      confirm: { type: 'boolean', description: 'Must be true for a real creation, and only after the human explicitly asked to create this group. Omit to get a refusal listing who would be included.' },
+      dryRun: { type: 'boolean', description: 'Preview without creating anything' },
+    },
+    required: ['peopleNames'],
+    additionalProperties: false,
+  },
+  slack_set_group_topic: {
+    type: 'object',
+    properties: {
+      channel: { type: 'string', description: 'Group DM (MPIM) conversation ID (G…)' },
+      topic: { type: 'string', description: 'New topic (max 250 characters); empty string clears it' },
+      confirm: { type: 'boolean', description: 'Must be true for a real change, and only after the human approved this exact topic for this group. Omit to get a refusal that previews it.' },
+      dryRun: { type: 'boolean' },
+    },
+    required: ['channel', 'topic'],
     additionalProperties: false,
   },
   slack_dm_as_user: {
@@ -242,9 +284,10 @@ export const schemas = {
   slack_query_messages: {
     type: 'object',
     properties: {
-      channel: { type: 'string' },
+      channel: { type: 'string', description: 'Conversation ID (C… channel, G… private channel/group DM, D… DM)' },
       sinceMinutes: { type: 'number' },
       limit: { type: 'number' },
+      asUser: AS_USER_READ,
     },
     required: ['channel'],
     additionalProperties: false,
@@ -252,8 +295,9 @@ export const schemas = {
   slack_get_thread: {
     type: 'object',
     properties: {
-      channel: { type: 'string' },
+      channel: { type: 'string', description: 'Conversation ID (C… channel, G… private channel/group DM, D… DM)' },
       threadTs: { type: 'string' },
+      asUser: AS_USER_READ,
     },
     required: ['channel', 'threadTs'],
     additionalProperties: false,

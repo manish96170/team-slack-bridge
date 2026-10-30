@@ -1,8 +1,8 @@
-// Existing group-DM (MPIM) messaging, local-only. An MPIM belongs to the
-// human user who can see it, not the shared bot: this module always sends
-// with SLACK_USER_TOKEN and never creates/opens a conversation implicitly.
-// A missing exact group returns a distinct "ask first" result; the skill or
-// caller decides whether to ask the human about creation in a later pass.
+// Group-DM (MPIM) messaging, creation and topics, local-only. An MPIM belongs
+// to the human user who can see it, not the shared bot: this module always
+// acts with SLACK_USER_TOKEN. Messaging never creates/opens a conversation
+// implicitly: a missing exact group returns a distinct "ask first" result,
+// and only createGroupByName (explicit, confirm:true) opens a new group.
 
 import { createHash } from 'node:crypto'
 import { getDb } from './db.js'
@@ -154,9 +154,14 @@ async function refreshMpims({ userToken, workspaceId, identity, dbPath, slackCal
   return { ok: false, error: 'mpim-list-truncated', retryable: false }
 }
 
-export async function messageGroupByName({ peopleNames, text, userToken, dbPath, dryRun, slackCall = callSlack } = {}) {
+const MAX_MPIM_RECIPIENTS = 8
+const MAX_TOPIC_LENGTH = 250
+
+// Shared by messaging and creation: authenticate, resolve names, and look for
+// the exact existing MPIM. Never creates anything.
+async function locateGroup({ peopleNames, userToken, dbPath, dryRun, slackCall }) {
   if (!Array.isArray(peopleNames) || peopleNames.length < 2) return { ok: false, error: 'at-least-two-mpim-recipients-required', retryable: false }
-  if (!text) return { ok: false, error: 'text-required', retryable: false }
+  if (peopleNames.length > MAX_MPIM_RECIPIENTS) return { ok: false, error: 'too-many-mpim-recipients', retryable: false, max: MAX_MPIM_RECIPIENTS }
   if (!userToken) return { ok: false, error: 'user-token-required', retryable: false }
 
   const auth = await slackCall('auth.test', userToken)
@@ -177,16 +182,126 @@ export async function messageGroupByName({ peopleNames, text, userToken, dbPath,
     if (!refreshed.ok) return refreshed
     conversationId = refreshed.conversations.get(key) || (dryRun ? null : findCachedMpim({ dbPath, workspaceId, tokenIdentity: identity, key }))
   }
+  return { ok: true, workspaceId, selfUserId, identity, recipients: resolved.users, recipientIds, key, conversationId }
+}
+
+// Approval gate: a real send to a group needs confirm:true, which a caller
+// may only pass after the human approved this exact recipient set and text.
+// Without it the group is located (reads only) and the send is refused, so
+// the result doubles as the approval preview.
+export async function messageGroupByName({ peopleNames, text, confirm, userToken, dbPath, dryRun, slackCall = callSlack } = {}) {
+  if (!Array.isArray(peopleNames) || peopleNames.length < 2) return { ok: false, error: 'at-least-two-mpim-recipients-required', retryable: false }
+  if (!text) return { ok: false, error: 'text-required', retryable: false }
+  if (!userToken) return { ok: false, error: 'user-token-required', retryable: false }
+
+  const located = await locateGroup({ peopleNames, userToken, dbPath, dryRun, slackCall })
+  if (!located.ok) return located
+  const { workspaceId, recipients, conversationId } = located
   if (!conversationId) {
     return {
       ok: false,
       error: 'mpim-not-found-confirm-create-first',
       retryable: false,
       workspaceId,
-      recipients: resolved.users,
+      recipients,
     }
   }
-  if (dryRun) return { ok: true, dryRun: true, workspaceId, recipients: resolved.users, conversationId, request: { method: 'chat.postMessage', body: { channel: conversationId, text }, asUser: true } }
+  if (dryRun) return { ok: true, dryRun: true, workspaceId, recipients, conversationId, request: { method: 'chat.postMessage', body: { channel: conversationId, text }, asUser: true } }
+  if (confirm !== true) return { ok: false, error: 'confirm-required-to-message-group-dm', retryable: false, workspaceId, recipients, conversationId, text }
   const sent = await slackCall('chat.postMessage', userToken, { channel: conversationId, text })
-  return { ...sent, workspaceId, recipients: resolved.users, conversationId, asUser: true }
+  return { ...sent, workspaceId, recipients, conversationId, asUser: true }
+}
+
+// Explicit group-DM creation, local-only and user-token-only like the rest of
+// this module. Opening a group is a visible side effect for every member, so
+// a real creation requires confirm:true (after the human has said yes to the
+// "mpim-not-found-confirm-create-first" question); without it the result
+// previews who would be included and whether the group already exists.
+// conversations.open is idempotent for an identical member set, but we look
+// first so an existing group is never touched: its topic is left alone and
+// the caller is pointed at setGroupTopic instead.
+export async function createGroupByName({ peopleNames, topic, text, confirm, userToken, dbPath, dryRun, slackCall = callSlack } = {}) {
+  if (topic !== undefined && (typeof topic !== 'string' || topic.length > MAX_TOPIC_LENGTH)) {
+    return { ok: false, error: 'invalid-topic', retryable: false, maxLength: MAX_TOPIC_LENGTH }
+  }
+
+  const located = await locateGroup({ peopleNames, userToken, dbPath, dryRun, slackCall })
+  if (!located.ok) return located
+  const { workspaceId, selfUserId, identity, recipients, recipientIds, key, conversationId: existingId } = located
+
+  if (existingId) {
+    return {
+      ok: true,
+      ...(dryRun ? { dryRun: true } : {}),
+      created: false,
+      existing: true,
+      workspaceId,
+      recipients,
+      conversationId: existingId,
+      ...(topic ? { topicApplied: false, topicSkippedReason: 'group-already-exists-use-slack_set_group_topic' } : {}),
+      ...(text ? { textSent: false, textSkippedReason: 'group-already-exists-use-slack_message_group_by_name' } : {}),
+    }
+  }
+
+  const request = { method: 'conversations.open', body: { users: recipientIds.join(',') }, asUser: true }
+  if (dryRun) {
+    return { ok: true, dryRun: true, created: false, workspaceId, recipients, request, ...(topic ? { topic } : {}), ...(text ? { text } : {}) }
+  }
+  if (confirm !== true) {
+    return { ok: false, error: 'confirm-required-to-create-group-dm', retryable: false, workspaceId, recipients, ...(topic ? { topic } : {}), ...(text ? { text } : {}) }
+  }
+
+  const opened = await slackCall('conversations.open', userToken, request.body)
+  if (!opened.ok) return { ...opened, workspaceId, recipients }
+  const conversationId = opened.channel?.id
+  if (!conversationId) return { ok: false, error: 'conversations-open-returned-no-channel', retryable: false, workspaceId, recipients }
+  cacheMpim({ dbPath, workspaceId, identity, conversationId, members: [selfUserId, ...recipientIds] })
+
+  // Lost a race with another creator or a stale index: the group already
+  // existed, so leave it exactly as it is (no topic, no message).
+  if (opened.already_open) {
+    return {
+      ok: true,
+      created: false,
+      existing: true,
+      workspaceId,
+      recipients,
+      conversationId,
+      asUser: true,
+      ...(topic ? { topicApplied: false, topicSkippedReason: 'group-already-exists-use-slack_set_group_topic' } : {}),
+      ...(text ? { textSent: false, textSkippedReason: 'group-already-exists-use-slack_message_group_by_name' } : {}),
+    }
+  }
+
+  const result = { ok: true, created: true, existing: false, workspaceId, recipients, conversationId, asUser: true }
+  if (topic) {
+    const set = await slackCall('conversations.setTopic', userToken, { channel: conversationId, topic })
+    result.topicApplied = set.ok
+    if (!set.ok) result.topicError = set.error
+  }
+  if (text) {
+    const sent = await slackCall('chat.postMessage', userToken, { channel: conversationId, text })
+    result.textSent = sent.ok
+    if (sent.ok) result.ts = sent.ts
+    else result.textError = sent.error
+  }
+  return result
+}
+
+// Set the topic of a group DM (needs the user token's mpim:write.topic).
+// conversations.setTopic also works on channels, but those need different
+// scopes and are not this tool's business, so verify it really is an MPIM.
+export async function setGroupTopic({ channel, topic, confirm, userToken, dryRun, slackCall = callSlack } = {}) {
+  if (!channel) return { ok: false, error: 'channel-required', retryable: false }
+  if (typeof topic !== 'string' || topic.length > MAX_TOPIC_LENGTH) return { ok: false, error: 'invalid-topic', retryable: false, maxLength: MAX_TOPIC_LENGTH }
+  if (!userToken) return { ok: false, error: 'user-token-required', retryable: false }
+
+  const info = await slackCall('conversations.info', userToken, { channel })
+  if (!info.ok) return info
+  if (!info.channel?.is_mpim) return { ok: false, error: 'not-a-group-dm', retryable: false, channel }
+  const request = { method: 'conversations.setTopic', body: { channel, topic }, asUser: true }
+  if (dryRun) return { ok: true, dryRun: true, channel, request }
+  if (confirm !== true) return { ok: false, error: 'confirm-required-to-set-group-topic', retryable: false, channel, topic }
+  const set = await slackCall('conversations.setTopic', userToken, request.body)
+  return set.ok ? { ...set, channel, asUser: true } : set
 }

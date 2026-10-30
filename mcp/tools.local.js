@@ -4,7 +4,9 @@
 // `slack_react_as_user`, `slack_unreact_as_user`, `slack_dm`,
 // `slack_dm_as_user`, `slack_update_message_as_user`,
 // `slack_delete_message_as_user`, `slack_search`, `slack_list_channels`,
-// `slack_upload_file`, `slack_upload_file_as_user`, and `slack_lookup_user`
+// `slack_message_group_by_name`, `slack_create_group_dm`,
+// `slack_set_group_topic`, `slack_upload_file`, `slack_upload_file_as_user`,
+// and `slack_lookup_user`
 // are exactly what mcp/tools.remote.js must NOT import. The upload tools
 // additionally read an arbitrary local `filePath`, which would be a local-file
 // read primitive in a remote profile. `slack_lookup_user` can use either
@@ -83,7 +85,7 @@ import { uploadFile } from '../core/files.js'
 import { deleteLocalFile } from '../core/local-file-delete.js'
 import { resolveUser } from '../core/identity.js'
 import { lookupUser } from '../core/directory.js'
-import { messageGroupByName } from '../core/mpim.js'
+import { messageGroupByName, createGroupByName, setGroupTopic } from '../core/mpim.js'
 import { doctor } from '../core/doctor.js'
 import { scheduleMessage, deleteScheduledMessage, listScheduledMessages } from '../core/schedule.js'
 import { ask } from '../core/ask.js'
@@ -112,7 +114,19 @@ export const MCP_INSTRUCTIONS =
   'updates, completion notices, or production/approval messages. If a viaBot send is refused as unauthorized ' +
   '(not-authorized-to-send-as-bot-...), report that refusal back to the human and let them decide; do not retry ' +
   'with anonymousMessage:true yourself. Never set confirm:true for file deletion without explicit human ' +
-  'authorization for that exact file and workspace, after explaining deletion affects all shares.'
+  'authorization for that exact file and workspace, after explaining deletion affects all shares. ' +
+  'GROUP COMMUNICATION REQUIRES APPROVAL EVERY TIME. Group DMs (MPIMs) and any message that reaches more than ' +
+  'one other person at once are visible to every member and cannot be quietly undone. Never create a group DM, ' +
+  'send to one, or change its topic on your own initiative. Before slack_create_group_dm, ' +
+  'slack_message_group_by_name or slack_set_group_topic: (1) show the human the exact recipients and the exact ' +
+  'text/topic, (2) ask for an explicit yes, (3) only then pass confirm:true. Those tools refuse a real action ' +
+  'without confirm:true and return the recipients/text to show; treat that refusal as a prompt to ask, never as ' +
+  'something to retry with confirm:true yourself. Approval covers only the exact recipients and text the human ' +
+  'saw: a changed recipient, changed text, a second message, or a different group needs a fresh approval, and an ' +
+  'earlier approval or a general instruction like "keep them posted" is not approval. If ' +
+  'slack_message_group_by_name returns mpim-not-found-confirm-create-first, ask whether to create the group ' +
+  'before anything else. Do not route around this by posting into a group DM through slack_post/slack_reply ' +
+  'with a G… conversation ID unless the human approved that exact message to that group.'
 
 export const tools = {
   slack_post: {
@@ -352,16 +366,40 @@ export const tools = {
   slack_message_group_by_name: {
     name: 'slack_message_group_by_name',
     description:
-      'Send a message AS the locally authorized human to an EXISTING Slack group DM (MPIM) with the exact named people. Local-only and user-token-only: never uses the bot, viaBot, or anonymousMessage. It resolves the sender plus peopleNames in the selected account/workspace, then looks for an exact existing MPIM; on a cache miss it refreshes only MPIMs visible to that user token. It NEVER creates or opens a new group automatically: no exact existing MPIM returns mpim-not-found-confirm-create-first so ask the human whether creation is wanted before doing anything else.',
+      'Send a message AS the locally authorized human to an EXISTING Slack group DM (MPIM) with the exact named people. Local-only and user-token-only: never uses the bot, viaBot, or anonymousMessage. It resolves the sender plus peopleNames in the selected account/workspace, then looks for an exact existing MPIM; on a cache miss it refreshes only MPIMs visible to that user token. It NEVER creates or opens a new group automatically: no exact existing MPIM returns mpim-not-found-confirm-create-first so ask the human whether creation is wanted before doing anything else. A real send requires confirm:true, which you may pass ONLY after the human approved this exact text to this exact set of people in THIS conversation; without it the call is refused (confirm-required-to-message-group-dm) and returns the recipients and text to show them for approval. dryRun:true previews.',
     inputSchema: schemas.slack_message_group_by_name,
     handler: (args, ctx) =>
       messageGroupByName({
         peopleNames: args.peopleNames,
         text: args.text,
+        confirm: args.confirm,
         userToken: ctx.env.SLACK_USER_TOKEN,
         dbPath: ctx.dbPath,
         dryRun: args.dryRun,
       }),
+  },
+  slack_create_group_dm: {
+    name: 'slack_create_group_dm',
+    description:
+      'Start a NEW Slack group DM (MPIM) AS the locally authorized human with the named people, optionally setting its topic and sending a first message. Local-only and user-token-only (needs mpim:write, plus mpim:write.topic for topic): never uses the bot. Opening a group is visible to every member, so a real creation requires confirm:true and must only follow the human explicitly asking for it (typically after slack_message_group_by_name returned mpim-not-found-confirm-create-first and they said yes). Without confirm:true it refuses and returns who would be included; dryRun:true previews. If the exact group already exists it is NOT modified: the existing conversationId is returned with created:false (use slack_set_group_topic / slack_message_group_by_name for it).',
+    inputSchema: schemas.slack_create_group_dm,
+    handler: (args, ctx) =>
+      createGroupByName({
+        peopleNames: args.peopleNames,
+        topic: args.topic,
+        text: args.text,
+        confirm: args.confirm,
+        userToken: ctx.env.SLACK_USER_TOKEN,
+        dbPath: ctx.dbPath,
+        dryRun: args.dryRun,
+      }),
+  },
+  slack_set_group_topic: {
+    name: 'slack_set_group_topic',
+    description:
+      'Set the topic of an existing Slack group DM (MPIM) AS the locally authorized human. Local-only and user-token-only (needs mpim:write.topic). Refuses anything that is not a group DM (not-a-group-dm), so it cannot change channel topics. A real change requires confirm:true, which you may pass ONLY after the human approved this exact topic for this group; without it the call is refused (confirm-required-to-set-group-topic). dryRun:true previews.',
+    inputSchema: schemas.slack_set_group_topic,
+    handler: (args, ctx) => setGroupTopic({ channel: args.channel, topic: args.topic, confirm: args.confirm, userToken: ctx.env.SLACK_USER_TOKEN, dryRun: args.dryRun }),
   },
   slack_dm_as_user: {
     name: 'slack_dm_as_user',
@@ -394,16 +432,17 @@ export const tools = {
   },
   slack_query_messages: {
     name: 'slack_query_messages',
-    description: 'Read recent channel history.',
+    description:
+      "Read recent conversation history (public/private channels, DMs, group DMs). Defaults to the bot token (only conversations the bot is in); pass asUser:true to read as the locally authorized human, including their own DMs and group DMs.",
     inputSchema: schemas.slack_query_messages,
     handler: (args, ctx) =>
-      queryMessages({ token: ctx.env.SLACK_BOT_TOKEN, channel: args.channel, sinceMinutes: args.sinceMinutes, limit: args.limit }),
+      queryMessages({ token: args.asUser ? ctx.env.SLACK_USER_TOKEN : ctx.env.SLACK_BOT_TOKEN, channel: args.channel, sinceMinutes: args.sinceMinutes, limit: args.limit }),
   },
   slack_get_thread: {
     name: 'slack_get_thread',
-    description: "Read a thread's replies.",
+    description: "Read a thread's replies. Defaults to the bot token; pass asUser:true to read as the locally authorized human (their own DMs and group DMs included).",
     inputSchema: schemas.slack_get_thread,
-    handler: (args, ctx) => getThread({ token: ctx.env.SLACK_BOT_TOKEN, channel: args.channel, threadTs: args.threadTs }),
+    handler: (args, ctx) => getThread({ token: args.asUser ? ctx.env.SLACK_USER_TOKEN : ctx.env.SLACK_BOT_TOKEN, channel: args.channel, threadTs: args.threadTs }),
   },
   slack_search: {
     name: 'slack_search',

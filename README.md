@@ -83,7 +83,7 @@ terminal, an MCP client, or `skill/SKILL.md`.
 | **Message an existing group DM by member names** | Finds an exact existing MPIM for you plus the named people, then sends as you; never creates a group automatically | `cli/group-dm-by-name.js` / `tsb-group-dm` | Existing group-DM messaging |
 | **Upload a file** | Screenshot/video/any local file, optionally shared straight into a channel/thread | `cli/upload.js` | File/attachment uploads |
 | **Delete a Slack file** | Delete an exact file ID from all shares after explicit confirmation; local deletion is disabled by default, hosted HTTP requires an explicit per-file/principal grant | `cli/delete-file.js` | File deletion |
-| **Read channels and threads** | History for a channel or a specific thread, bot-token scoped to channels the bot is in | `cli/query.js`, `cli/thread.js` | Channel and thread reads |
+| **Read channels and threads** | History for a channel, DM, group DM or a specific thread. Bot token by default (only conversations the bot is in); `--as-user`/`asUser:true` reads as the authorized human, including their own DMs and group DMs | `cli/query.js`, `cli/thread.js` | Channel and thread reads |
 | **Search** | Full-text Slack search — user-token-only, Slack has no bot equivalent | `cli/search.js` | Search |
 | **List "my" channels** | Every conversation the authorized human is actually in (`users.conversations`), never the whole workspace | `cli/channels.js` | List my channels |
 | **Resolve a configured person** | Config-file-only, zero network calls — name/handle/ID/display-name → Slack user ID | `cli/resolve-user.js` | Configured users |
@@ -255,12 +255,14 @@ the gap away mode fills (PLAN D34).
    - `chat:write` — post messages as the bot
    - `im:write` — open/send DMs
    - `files:write` — upload or delete a Slack file as the bot (`cli/upload.js`/`slack_upload_file`; `cli/delete-file.js --via-bot`)
-   - `im:read`, `im:history` — only needed if you're also building DM-reading on top
-     of this (e.g. a note-to-self pattern) — without these the bot can send a DM but
-     not read what comes back. Skip if you only need outbound posting.
+   - `im:read`, `im:history` — read DMs with the bot (`cli/query.js`/`cli/thread.js`,
+     `slack_query_messages`/`slack_get_thread`) and receive `message.im` events —
+     without these the bot can send a DM but not read what comes back. Skip if you only
+     need outbound posting.
    - `channels:read`, `channels:history`, `groups:read`, `groups:history` — read
-     public/private channels the bot is invited to (only needed if you'll query
-     message history later — not used by anything in this repo yet)
+     public/private channels the bot is invited to (`cli/query.js`/`cli/thread.js`)
+   - `mpim:history` — read group DMs the bot is part of and receive `message.mpim`
+     events. Also subscribe to the `message.mpim` bot event.
    - `users:read` — resolve handles to user IDs
 
    If you also want the "post as a specific person" capability, add these **User Token
@@ -270,6 +272,12 @@ the gap away mode fills (PLAN D34).
      equivalent)
    - `im:write` — open DMs as the user (`cli/dm.js --as-user`/`slack_dm_as_user`);
      `conversations.open` fails `missing_scope` without it
+   - `channels:history`, `groups:history`, `im:history`, `mpim:history` — read history
+     and threads as the user (`cli/query.js --as-user`/`cli/thread.js --as-user`,
+     `slack_query_messages`/`slack_get_thread` with `asUser:true`), including the user's
+     own DMs and group DMs
+   - `mpim:write`, `mpim:write.topic` — start a group DM and set its topic as the user
+     (`cli/group-dm-create.js`/`slack_create_group_dm`, `cli/group-topic.js`/`slack_set_group_topic`)
    - `channels:read`, `groups:read`, `im:read`, `mpim:read` — `cli/channels.js`/
      `slack_list_channels`, "which conversations is this person actually in" (uses
      `users.conversations`, scoped to their own membership — never the whole
@@ -510,11 +518,24 @@ tsb-dm --to "pulkit.jain" [--company anchor] --text 'hi' [--as-user] [--dry-run]
 **Message an existing group DM by names** (MPIM; always as the locally authorized
 human, never the bot):
 ```bash
-node cli/group-dm-by-name.js --to "Shrestha Srivastava,Manish,Alex" [--company anchor] --text 'hi' [--dry-run] [--json]
-tsb-group-dm --to "Shrestha Srivastava,Manish,Alex" [--company anchor] --text 'hi' [--dry-run] [--json]   # global install
+node cli/group-dm-by-name.js --to "Shrestha Srivastava,Manish,Alex" [--company anchor] --text 'hi' --confirm [--dry-run] [--json]
+tsb-group-dm --to "Shrestha Srivastava,Manish,Alex" [--company anchor] --text 'hi' --confirm [--dry-run] [--json]   # global install
 ```
 
-This only sends to an **existing exact group DM** containing you plus the named people.
+**Start a new group DM / set its topic** (as the locally authorized human, never the bot;
+needs the user scopes `mpim:write` and `mpim:write.topic`). Real creation needs `--confirm`:
+```bash
+node cli/group-dm-create.js --to "Shrestha Srivastava,Manish,Alex" [--topic 'Release sync'] [--text 'hi'] --confirm [--company anchor] [--dry-run] [--json]
+node cli/group-topic.js --channel G0123ABCD --topic 'Release sync' --confirm [--company anchor] [--dry-run] [--json]
+```
+MCP (stdio and local HTTP): `slack_create_group_dm`, `slack_set_group_topic`.
+
+**Group actions always need approval.** Sending to, creating, or retitling a group DM
+refuses without `--confirm` / `confirm:true`, and the MCP server instructions tell agents to
+show the exact recipients and text, get an explicit yes, and only then confirm — see
+FEATURES.md "Approval required for all group communication".
+
+The by-name command above only sends to an **existing exact group DM** containing you plus the named people.
 If none exists it returns `mpim-not-found-confirm-create-first`; it never opens/creates
 a group automatically — ask the human first.
 
@@ -532,8 +553,8 @@ dm({ asUser: true  })  ──►  SLACK_USER_TOKEN  ──►  conversations.ope
 **Read channels/threads/search** (search requires a user token — Slack's own
 per-person construction):
 ```bash
-node cli/query.js --channel '#x' [--since-minutes 60] [--limit 20] [--json]
-node cli/thread.js --channel '#x' --thread-ts '169…' [--json]
+node cli/query.js --channel '#x' [--since-minutes 60] [--limit 20] [--as-user] [--json]
+node cli/thread.js --channel '#x' --thread-ts '169…' [--as-user] [--json]
 node cli/search.js --query 'from:@bob deploy' [--json]
 node cli/resolve-user.js --handle @jane [--json]  # configured-only, config-file lookup — never a network call
 node cli/lookup-user.js --query U055NFSGF88 [--mode auto|id|email|handle|name] [--as-user] [--include-email] [--json]  # live Slack-directory lookup, for anyone NOT in slack-config.json (D50/D51)

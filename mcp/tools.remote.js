@@ -8,7 +8,7 @@ import { resolveUser } from '../core/identity.js'
 import { doctor } from '../core/doctor.js'
 import { complete } from '../core/ledger.js'
 import { deleteFile } from '../core/file-delete.js'
-import { schemas, withoutBotIdentityFields } from './schema.js'
+import { schemas, withoutBotIdentityFields, withoutAsUserField } from './schema.js'
 
 function principalLabel(ctx) {
   return ctx.slack?.user_id ? `<@${ctx.slack.user_id}>` : 'unknown Slack user'
@@ -111,14 +111,14 @@ export const tools = {
   slack_query_messages: {
     name: 'slack_query_messages',
     description: 'Read recent history from an allow-listed Slack channel.',
-    inputSchema: schemas.slack_query_messages,
+    inputSchema: withoutAsUserField(schemas.slack_query_messages),
     handler: (args, ctx) =>
       queryMessages({ token: ctx.env.SLACK_BOT_TOKEN, channel: args.channel, sinceMinutes: args.sinceMinutes, limit: args.limit }),
   },
   slack_get_thread: {
     name: 'slack_get_thread',
     description: 'Read a thread from an allow-listed Slack channel.',
-    inputSchema: schemas.slack_get_thread,
+    inputSchema: withoutAsUserField(schemas.slack_get_thread),
     handler: (args, ctx) => getThread({ token: ctx.env.SLACK_BOT_TOKEN, channel: args.channel, threadTs: args.threadTs }),
   },
   slack_resolve_user: {

@@ -62,6 +62,7 @@ groups:read
 im:history
 im:read
 im:write
+mpim:history
 reactions:write
 users:read
 users:read.email
@@ -81,9 +82,15 @@ chat:write
 search:read
 im:write
 channels:read
+channels:history
 groups:read
+groups:history
 im:read
+im:history
 mpim:read
+mpim:history
+mpim:write
+mpim:write.topic
 files:write
 reactions:write
 ```
@@ -258,8 +265,8 @@ An MPIM belongs to the participating users, not the shared bot; this feature has
 Use:
 
 ```bash
-node cli/group-dm-by-name.js --to "Shrestha Srivastava,Manish,Alex" --text "hi" [--company anchor] [--dry-run] [--json]
-tsb-group-dm --to "Shrestha Srivastava,Manish,Alex" --text "hi" [--company anchor] [--dry-run] [--json]  # global install
+node cli/group-dm-by-name.js --to "Shrestha Srivastava,Manish,Alex" --text "hi" --confirm [--company anchor] [--dry-run] [--json]
+tsb-group-dm --to "Shrestha Srivastava,Manish,Alex" --text "hi" --confirm [--company anchor] [--dry-run] [--json]  # global install
 ```
 
 The names mean **other recipients**; the locally authorized sender is added
@@ -271,8 +278,8 @@ and posts to that existing `G...` conversation as you.
 **Ask-first policy:** if no exact existing MPIM is found, it returns
 `mpim-not-found-confirm-create-first` with the resolved people. It never calls
 `conversations.open`, never creates a group, and never asks Slack to add members. The
-skill/agent asks the human whether creation is wanted; automatic creation is deliberately
-out of scope for this pass.
+skill/agent asks the human whether creation is wanted. Messaging itself stays
+creation-free; creating a group is a separate, explicit tool (next section).
 
 For speed, successful live person lookups and visible MPIM membership edges are persisted
 in the selected account's `.ledger.sqlite` (`directory_people`, `mpim_conversations`).
@@ -282,6 +289,64 @@ account. Cache miss/stale state refreshes only MPIMs visible to that user
 token via Slack. Remote Slackbot MCP never exposes this: it has no personal user token by
 design (D20). Local MCP is supported as `slack_message_group_by_name`; the local daemon
 adds its standard optional `account` field in multi-account mode.
+
+### Approval required for all group communication
+
+Group DMs reach several people at once and cannot be quietly undone, so every group
+action is gated, in code and in the guidance MCP clients receive:
+
+- **Code:** `slack_message_group_by_name`, `slack_create_group_dm` and
+  `slack_set_group_topic` (and their CLIs, `--confirm`) refuse a real action unless
+  `confirm: true` is passed. The refusal (`confirm-required-to-message-group-dm`,
+  `confirm-required-to-create-group-dm`, `confirm-required-to-set-group-topic`) returns the
+  recipients and the exact text/topic so the agent can show them to the human. `dryRun`
+  never needs `confirm` and never sends.
+- **MCP instructions** (sent on `initialize` by both the stdio server and the local HTTP
+  daemon): agents must show the exact recipients and text, get an explicit yes, and only
+  then pass `confirm: true`. Approval covers only what the human saw -- changed
+  recipients/text, another message, or a different group needs a fresh approval, and a
+  general "keep them posted" is not approval. A `confirm-required-*` refusal is a prompt
+  to ask, never something to retry with `confirm: true` unprompted.
+- This is a guard against an agent acting on its own, not against a human running the
+  CLI with `--confirm`.
+- **Known gap:** the gate covers the three group tools only. `slack_post`, `slack_reply`
+  and `slack_post_as_user` can still be handed a `G…` conversation ID that happens to be
+  a group DM (private channels share that prefix, so it cannot be told from the ID alone),
+  and are covered by the MCP instructions only, not by code. Enforcing it would need a
+  `conversations.info` call on every `G…` post.
+
+### Starting a group DM and setting its topic (MPIM)
+
+Local-only (CLI, stdio MCP and the local HTTP MCP daemon) and **always as the locally
+authorized human** (`SLACK_USER_TOKEN`); no bot path, and the remote Slackbot MCP never
+exposes either tool. Requires the user token's `mpim:write` (create) and
+`mpim:write.topic` (topic) scopes. Every real action needs approval -- see above.
+
+```bash
+node cli/group-dm-create.js --to "Shrestha,Manish,Alex" [--topic "Release sync"] [--text "first message"] --confirm [--company anchor] [--dry-run] [--json]
+tsb-group-dm-create --to "Shrestha,Manish,Alex" --confirm ...      # global install
+node cli/group-topic.js --channel G0123ABCD --topic "Release sync" --confirm [--company anchor] [--dry-run] [--json]
+tsb-group-topic --channel G0123ABCD --topic "..." --confirm        # global install
+```
+
+MCP tools: `slack_create_group_dm` (`peopleNames`, optional `topic`, `text`, `confirm`,
+`dryRun`) and `slack_set_group_topic` (`channel`, `topic`, `confirm`, `dryRun`).
+
+- Names are the **other** members (two to eight); you are added automatically.
+- Creating a group is visible to every member, so a real creation needs `confirm: true`
+  / `--confirm`, and should only follow the human explicitly asking for it (typically
+  after `mpim-not-found-confirm-create-first`). Without it the tool refuses with
+  `confirm-required-to-create-group-dm` and lists who would be included; `dryRun`
+  previews the `conversations.open` call.
+- An exact existing group is never modified: the result is `created:false` with its
+  `conversationId`, and `topic`/`text` are not applied to it.
+- `topic` (max 250 chars) and `text` are applied only to a newly created group. A topic
+  or message failure after a successful creation is reported (`topicApplied:false` /
+  `textSent:false` plus an error) without hiding that the group now exists.
+- `slack_set_group_topic` first checks `conversations.info` and refuses anything that is
+  not a group DM (`not-a-group-dm`), so it cannot change channel topics.
+- A newly created group is added to the same persistent MPIM index, so
+  `slack_message_group_by_name` finds it immediately.
 
 ### Plain-English cross-company messaging (PLAN D64)
 
@@ -335,16 +400,24 @@ the only place the combined, single-result resolve-and-send primitive is exposed
 
 ### Channel and thread reads
 
-Default: available locally when bot has history scopes and is in the channel.
+Default: available locally when bot has history scopes and is in the conversation.
+Pass `--as-user` (CLI) or `asUser:true` (stdio and local HTTP MCP) to read as the locally
+authorized human instead; that also covers their own DMs (`D…`) and group DMs (`G…`)
+using the user token's `channels:history`, `groups:history`, `im:history` and
+`mpim:history` scopes. Use the conversation ID for DMs and group DMs
+(see `cli/channels.js --types "public_channel,private_channel,mpim,im"`).
+The bot can only read a group DM it is a member of (`mpim:history`).
 
 Use:
 
 ```bash
 node cli/query.js --channel "#deploys" --limit 20 --json
 node cli/thread.js --channel "#deploys" --thread-ts "123.456" --json
+node cli/query.js --channel G0123ABCD --as-user --limit 20 --json
+node cli/thread.js --channel D0123ABCD --thread-ts "123.456" --as-user --json
 ```
 
-Remote Slackbot MCP can expose reads only if the tool is in `slackbotMcp.allowedTools`
+Remote Slackbot MCP has no user token, so `asUser` is not accepted there. It can expose reads only if the tool is in `slackbotMcp.allowedTools`
 and the channel is in `remote.readableChannels`.
 
 ### Search

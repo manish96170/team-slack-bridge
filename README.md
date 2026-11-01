@@ -126,6 +126,11 @@ and the exact flag/config key that changes it:
 | Remote/hosted `slackbotMcp` multi-tenancy | **Off** (`"single"`, one deployment = one workspace) | `slackbotMcp.tenancy.mode: "multi"` + `cli/tenants.js add` | D53/D54 |
 | CLI post-as identity (`cli/post.js`, `cli/react.js`, `cli/lookup-user.js`, etc.) | **The bot**, unchanged | `--as-user` | pre-existing, see "Scope note" — deliberately NOT flipped alongside D47/D60, see note there |
 | Remote/hosted `mcp/tools.remote.js` (`slack_post`, `slack_react`, `slack_update_message`, etc.) | **Always the bot** — no user tokens exist remotely at all | not configurable, by design | D20 |
+| `slack_call`, `slack_canvas`, `slack_pin`, `slack_bookmark`, `slack_reminder`, `slack_set_status`, `slack_set_presence`, `slack_dnd` (MCP) | **As you** (`SLACK_USER_TOKEN`), never silently the bot | not configurable — no `viaBot` | D72 |
+| `slack_huddle_status`, `slack_usergroup_lookup`, `slack_file` (MCP, read-only) | **As you** (`SLACK_USER_TOKEN`) | `tokenSource:"bot"` | D72 |
+| Deleting a canvas; reminding another user | **Refused** | `confirm:true` after explicit approval | D72 |
+| Huddle watching (`user_huddle_changed`) | **Off** | `huddleWatch.enabled:true` | D72 |
+| Message tools accept a pasted Slack permalink | **Yes** — `link` argument / `--link` flag | — | D72 |
 
 ```
 slack_post / slack_reply / slack_dm  (MCP tools)
@@ -263,7 +268,11 @@ the gap away mode fills (PLAN D34).
      public/private channels the bot is invited to (`cli/query.js`/`cli/thread.js`)
    - `mpim:history` — read group DMs the bot is part of and receive `message.mpim`
      events. Also subscribe to the `message.mpim` bot event.
-   - `users:read` — resolve handles to user IDs
+   - `users:read` — resolve handles to user IDs (also `users.info`, which carries `huddle_state`)
+   - `files:read`, `usergroups:read` — read files other people posted / look up user groups
+     with the bot token (`slack_file`, `slack_usergroup_lookup` with `tokenSource:"bot"`)
+   - Subscribe to the `user_huddle_changed` bot event only if you turn on `huddleWatch`
+     (see FEATURES.md "Huddles")
 
    If you also want the "post as a specific person" capability, add these **User Token
    Scopes**, and set an OAuth redirect URL (see step 3):
@@ -286,6 +295,15 @@ the gap away mode fills (PLAN D34).
      `slack_upload_file_as_user`) or delete an authorized file (`cli/delete-file.js`/`slack_delete_file`)
    - `reactions:write` — add/remove a reaction as the user (`cli/react.js --as-user`/
      `slack_react_as_user`/`slack_unreact_as_user`)
+   - `calls:write`, `calls:read` — register a call and post it as a native call card
+     (`slack_call`); see FEATURES.md "Call cards" (huddles themselves have no API)
+   - `canvases:write`, `canvases:read` — create/edit/share/read canvases (`slack_canvas`)
+   - `pins:write`, `pins:read`, `bookmarks:write`, `bookmarks:read` — `slack_pin`, `slack_bookmark`
+   - `reminders:write`, `reminders:read` — your own reminders (`slack_reminder`; bots cannot own reminders)
+   - `usergroups:read` — `slack_usergroup_lookup` (`<!subteam^ID>` mention strings)
+   - `files:read` — read files and canvases other people posted (`slack_file`, `slack_canvas` read)
+   - `users.profile:write`, `users:write`, `dnd:write`, `dnd:read` — your status, presence and
+     Do Not Disturb (`slack_set_status`, `slack_set_presence`, `slack_dnd`)
 
    `get-user-token.js`/`npm run get-user-token` requests all of the above in one go.
    **Any scope change here requires reinstalling the app and re-running
@@ -529,6 +547,18 @@ node cli/group-dm-create.js --to "Shrestha Srivastava,Manish,Alex" [--topic 'Rel
 node cli/group-topic.js --channel G0123ABCD --topic 'Release sync' --confirm [--company anchor] [--dry-run] [--json]
 ```
 MCP (stdio and local HTTP): `slack_create_group_dm`, `slack_set_group_topic`.
+
+**Pasted Slack links, calls, canvases, pins, reminders, files, status (D72).** Every message
+command takes `--link <permalink>` instead of `--channel`/`--ts`/`--thread-ts`, and any local MCP
+tool can be run from the shell with `cli/tool.js` (same handler, same validation as MCP):
+```bash
+node cli/thread.js --link 'https://x.slack.com/archives/C0123ABCD/p1793337025613279' --as-user --json
+node cli/tool.js --list
+node cli/tool.js slack_call --args '{"action":"start","channel":"C0123ABCD","title":"Release sync"}' --dry-run
+node cli/tool.js slack_pin --args '{"action":"list","channel":"C0123ABCD"}' --company anchor
+node cli/tool.js slack_file --args '{"action":"read","fileId":"F0123ABCD"}'
+```
+See FEATURES.md for each tool; huddles can be *detected* but not started, joined or recorded.
 
 **Group actions always need approval.** Sending to, creating, or retitling a group DM
 refuses without `--confirm` / `confirm:true`, and the MCP server instructions tell agents to

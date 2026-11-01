@@ -7,8 +7,8 @@
 // also share the finished upload straight into a channel/thread in the same
 // call.
 
-import { readFileSync, statSync } from 'node:fs'
-import { basename } from 'node:path'
+import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { basename, join } from 'node:path'
 import { callSlack } from './slack.js'
 
 export async function uploadFile({ token, filePath, filename, title, channel, threadTs, dryRun }) {
@@ -47,4 +47,137 @@ export async function uploadFile({ token, filePath, filename, title, channel, th
   if (threadTs) complete.thread_ts = threadTs
 
   return callSlack('files.completeUploadExternal', token, complete)
+}
+
+// ---------------------------------------------------------------------------
+// Reading files other people posted (D72). Needs files:read. A message's JSON
+// (slack_get_thread / slack_query_messages) lists `files[].id`; these turn an
+// id into metadata, a listing, or the content itself. Canvases are files too
+// (filetype "quip", HTML body), so slack_file read doubles as canvas reading.
+// ---------------------------------------------------------------------------
+
+const DEFAULT_MAX_BYTES = 5 * 1024 * 1024
+const DEFAULT_MAX_CHARS = 20000
+const TEXT_MIMETYPES = new Set(['application/json', 'application/xml', 'application/x-yaml', 'application/yaml', 'application/javascript', 'application/x-sh', 'application/sql'])
+const TEXT_FILETYPES = new Set(['text', 'json', 'xml', 'yaml', 'csv', 'markdown', 'javascript', 'typescript', 'python', 'shell', 'sql', 'html', 'quip', 'space', 'post'])
+
+function summarize(file) {
+  return {
+    id: file.id,
+    name: file.name,
+    title: file.title,
+    mimetype: file.mimetype,
+    filetype: file.filetype,
+    size: file.size,
+    created: file.created,
+    user: file.user,
+    isCanvas: file.filetype === 'quip' || file.filetype === 'canvas',
+    permalink: file.permalink,
+    hasPrivateUrl: !!file.url_private,
+  }
+}
+
+export async function getFileInfo({ token, fileId, slackCall = callSlack }) {
+  if (!fileId) return { ok: false, error: 'fileId-required', retryable: false }
+  if (!token) return { ok: false, error: 'no-token', retryable: false }
+  const info = await slackCall('files.info', token, { file: fileId })
+  if (!info.ok) return info
+  return { ok: true, file: summarize(info.file) }
+}
+
+export async function listFiles({ token, channel, userId, types, count = 20, slackCall = callSlack }) {
+  if (!token) return { ok: false, error: 'no-token', retryable: false }
+  const params = { count: String(Math.min(Math.max(Math.floor(Number(count)) || 20, 1), 100)) }
+  if (channel) params.channel = channel
+  if (userId) params.user = userId
+  if (types) params.types = types
+  const listed = await slackCall('files.list', token, params)
+  if (!listed.ok) return listed
+  return { ok: true, files: (listed.files || []).map(summarize), paging: listed.paging }
+}
+
+export function htmlToText(html) {
+  return String(html)
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\/\s*(p|div|h[1-6]|li|tr|ul|ol|table|section)\s*>/gi, '\n')
+    .replace(/<\s*li[^>]*>/gi, '- ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function isTextLike(file) {
+  const mimetype = (file.mimetype || '').toLowerCase()
+  return mimetype.startsWith('text/') || TEXT_MIMETYPES.has(mimetype) || TEXT_FILETYPES.has((file.filetype || '').toLowerCase())
+}
+
+function isSlackHost(hostname) {
+  return hostname === 'slack.com' || hostname.endsWith('.slack.com')
+}
+
+function safeName(file) {
+  const base = basename(file.name || file.title || 'file').replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 80) || 'file'
+  return `${file.id}-${base}`
+}
+
+// Text-like files (and canvases) come back inline, truncated to maxChars.
+// Anything else is saved under destDir (0600) and returned as a local path so
+// the caller can open an image/PDF itself. The download only ever goes to a
+// slack.com host and never follows redirects: the bearer token must not be
+// replayed anywhere else, and a redirect is how Slack answers a missing
+// files:read scope (with a login page), which is reported rather than saved.
+export async function readFile({ token, fileId, destDir, maxBytes = DEFAULT_MAX_BYTES, maxChars = DEFAULT_MAX_CHARS, fetchImpl = fetch, slackCall = callSlack }) {
+  if (!fileId) return { ok: false, error: 'fileId-required', retryable: false }
+  if (!token) return { ok: false, error: 'no-token', retryable: false }
+  const info = await slackCall('files.info', token, { file: fileId })
+  if (!info.ok) return info
+  const file = info.file
+  const meta = summarize(file)
+  if (!file.url_private) return { ok: false, error: 'file-has-no-downloadable-content', retryable: false, file: meta }
+  if (file.size && file.size > maxBytes) return { ok: false, error: 'file-too-large', retryable: false, file: meta, maxBytes }
+
+  let url
+  try {
+    url = new URL(file.url_private)
+  } catch {
+    return { ok: false, error: 'invalid-file-url', retryable: false, file: meta }
+  }
+  if (url.protocol !== 'https:' || !isSlackHost(url.hostname)) return { ok: false, error: 'refusing-non-slack-file-host', retryable: false, file: meta }
+
+  let response
+  try {
+    response = await fetchImpl(url, { headers: { Authorization: `Bearer ${token}` }, redirect: 'manual' })
+  } catch (err) {
+    return { ok: false, error: `download-transport-error: ${err.message}`, retryable: true, file: meta }
+  }
+  if (response.status >= 300 && response.status < 400) return { ok: false, error: 'file-download-not-authorized-check-files-read-scope', retryable: false, file: meta }
+  if (!response.ok) return { ok: false, error: `download-failed: HTTP ${response.status}`, retryable: response.status >= 500, file: meta }
+
+  const bytes = Buffer.from(await response.arrayBuffer())
+  if (bytes.length > maxBytes) return { ok: false, error: 'file-too-large', retryable: false, file: meta, maxBytes }
+  const contentType = (response.headers.get('content-type') || '').toLowerCase()
+  if (contentType.includes('text/html') && !isTextLike(file)) {
+    return { ok: false, error: 'file-download-not-authorized-check-files-read-scope', retryable: false, file: meta }
+  }
+
+  if (isTextLike(file)) {
+    const raw = bytes.toString('utf8')
+    const text = /html|quip/i.test(`${file.mimetype} ${file.filetype}`) || contentType.includes('text/html') ? htmlToText(raw) : raw
+    const truncated = text.length > maxChars
+    return { ok: true, file: meta, kind: 'text', text: truncated ? text.slice(0, maxChars) : text, truncated, totalChars: text.length }
+  }
+
+  if (!destDir) return { ok: false, error: 'destDir-required-for-binary-files', retryable: false, file: meta }
+  mkdirSync(destDir, { recursive: true, mode: 0o700 })
+  const localPath = join(destDir, safeName(file))
+  writeFileSync(localPath, bytes, { mode: 0o600 })
+  return { ok: true, file: meta, kind: 'binary', localPath, bytes: bytes.length }
 }

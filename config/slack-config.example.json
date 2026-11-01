@@ -28,5 +28,7 @@
   "fileDeletion": { "enabled": false },
   "botSendTracking": { "enabled": true },
   "botSend": { "anonymousMessageDefault": false },
-  "directoryLookup": { "cacheTtlMs": 600000 }
+  "directoryLookup": { "cacheTtlMs": 600000 },
+  "calls": { "jitsiBaseUrl": "https://meet.jit.si" },
+  "huddleWatch": { "enabled": false, "userIds": [], "promptRecap": false }
 }

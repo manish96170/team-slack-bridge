@@ -2,10 +2,11 @@
 // node cli/delete.js --channel '#x' --ts '169…' [--as-user] [--dry-run] [--json]
 
 import { deleteMessage } from '../core/post.js'
-import { parseFlags, output } from './lib/args.js'
+import { parseFlags, output, applyLinkFlag } from './lib/args.js'
 import { loadContext, LEDGER_PATH } from './context.js'
 
 const flags = parseFlags(process.argv.slice(2), ['as-user', 'dry-run', 'json'])
+applyLinkFlag(flags, { channel: 'channel', ts: 'ts' })
 const { env } = loadContext()
 
 if (!flags.channel || !flags.ts) {

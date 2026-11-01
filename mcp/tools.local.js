@@ -96,6 +96,8 @@ import { getSenderInfo, withSenderAttribution, isAuthorizedSender, resolveAnonym
 import { recordLocalAudit } from '../core/local-audit.js'
 import { isTrackingEnabled, echoBotSendToSender, propagateUpdateToTracking, propagateDeleteToTracking } from '../core/tracking.js'
 import { schemas } from './schema.js'
+import { featureTools } from './tools.features.js'
+import { applyLinkSupport } from './links.js'
 
 // Surfaced in the MCP `initialize` response's `instructions` field (D67, on
 // request — found live: a calling agent explicitly set viaBot:true and
@@ -126,9 +128,17 @@ export const MCP_INSTRUCTIONS =
   'earlier approval or a general instruction like "keep them posted" is not approval. If ' +
   'slack_message_group_by_name returns mpim-not-found-confirm-create-first, ask whether to create the group ' +
   'before anything else. Do not route around this by posting into a group DM through slack_post/slack_reply ' +
-  'with a G… conversation ID unless the human approved that exact message to that group.'
+  'with a G… conversation ID unless the human approved that exact message to that group. ' +
+  'ACTIONS VISIBLE TO OTHERS: slack_call (call cards), slack_pin, slack_bookmark, slack_canvas (create/edit/share/delete), ' +
+  'slack_reminder with userId, slack_set_status, slack_set_presence and slack_dnd all act AS the human and are seen by ' +
+  'others (or change how the human appears). Only use them when the human asked for that specific action in THIS ' +
+  'request, never as a side effect of another task. Deleting a canvas and reminding another user need confirm:true ' +
+  'after the human approved that exact action. Huddles cannot be started, joined, recorded or transcribed through ' +
+  'Slack: slack_huddle_status only reports who is in one, and slack_call registers a call hosted elsewhere — never ' +
+  'claim to have joined or recorded a huddle. Tools that address one message accept a pasted Slack permalink as ' +
+  '`link`; the link\'s workspace is not checked against the active account, so confirm they match before acting.'
 
-export const tools = {
+const baseTools = {
   slack_post: {
     name: 'slack_post',
     description:
@@ -648,3 +658,8 @@ export const tools = {
       }),
   },
 }
+
+// D72: the feature tools (mcp/tools.features.js) join the base registry, then every
+// tool that addresses one message/thread gains an optional Slack permalink
+// `link` argument (mcp/links.js).
+export const tools = applyLinkSupport({ ...baseTools, ...featureTools })

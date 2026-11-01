@@ -2,10 +2,11 @@
 // node cli/reply.js --channel '#x' --thread-ts '169…' --text 'hi' [--idempotency-key …] [--dry-run] [--json]
 
 import { reply } from '../core/post.js'
-import { parseFlags, output } from './lib/args.js'
+import { parseFlags, output, applyLinkFlag } from './lib/args.js'
 import { loadContext, LEDGER_PATH } from './context.js'
 
 const flags = parseFlags(process.argv.slice(2), ['dry-run', 'json'])
+applyLinkFlag(flags, { channel: 'channel', 'thread-ts': 'thread' })
 const { env, config } = loadContext()
 
 if (!flags.channel || !flags['thread-ts'] || !flags.text) {

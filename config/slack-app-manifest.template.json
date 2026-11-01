@@ -52,7 +52,9 @@
         "mpim:history",
         "reactions:write",
         "users:read",
-        "users:read.email"
+        "users:read.email",
+        "files:read",
+        "usergroups:read"
       ],
       "user": [
         "chat:write",
@@ -71,7 +73,23 @@
         "files:write",
         "reactions:write",
         "users:read",
-        "users:read.email"
+        "users:read.email",
+        "files:read",
+        "pins:read",
+        "pins:write",
+        "bookmarks:read",
+        "bookmarks:write",
+        "calls:read",
+        "calls:write",
+        "canvases:read",
+        "canvases:write",
+        "reminders:read",
+        "reminders:write",
+        "usergroups:read",
+        "users.profile:write",
+        "users:write",
+        "dnd:read",
+        "dnd:write"
       ]
     }
   },
@@ -83,7 +101,8 @@
         "message.channels",
         "message.groups",
         "message.im",
-        "message.mpim"
+        "message.mpim",
+        "user_huddle_changed"
       ]
     },
     "interactivity": {

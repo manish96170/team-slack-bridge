@@ -4,10 +4,11 @@
 // only allows editing a message with the same identity that authored it.
 
 import { updateMessage } from '../core/post.js'
-import { parseFlags, output } from './lib/args.js'
+import { parseFlags, output, applyLinkFlag } from './lib/args.js'
 import { loadContext, LEDGER_PATH } from './context.js'
 
 const flags = parseFlags(process.argv.slice(2), ['as-user', 'dry-run', 'json'])
+applyLinkFlag(flags, { channel: 'channel', ts: 'ts' })
 const { env, config } = loadContext()
 
 if (!flags.channel || !flags.ts || !flags.text) {

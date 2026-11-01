@@ -36,6 +36,13 @@ CLI's behavior changes, this skill's behavior changes with it, and that is by de
   account alias, a live Slack-directory match that itself refuses on ambiguity) or the
   call refuses outright and this skill asks instead.
 - **`search`** (`cli/search.js`) — needs a user token; same caution as as-user posting.
+- **The D72 feature tools** (`slack_call`, `slack_canvas`, `slack_pin`, `slack_bookmark`,
+  `slack_reminder`, `slack_set_status`, `slack_set_presence`, `slack_dnd`, run via
+  `cli/tool.js`) — they act as the authorized human, are visible to others (or change how
+  that person appears), and need explicit per-request approval, so this outbound-bot skill
+  does not drive them. The read-only, offline `slack_resolve_link`, and `--link` on the
+  existing thread/reply/react/query/update/delete commands, are fine to use. Never claim
+  to start, join, record or transcribe a huddle: Slack offers no API for it.
 - **`slack_list_channels`** (`cli/channels.js`) — also needs a user token (lists the
   conversations the locally authorized *person* is in, via `users.conversations`, never
   the whole workspace). Lower risk than the above since it's read-only and never

@@ -2,10 +2,11 @@
 // node cli/query.js --channel '#x' [--since-minutes 60] [--limit 20] [--as-user] [--json]
 
 import { queryMessages } from '../core/query.js'
-import { parseFlags, output } from './lib/args.js'
+import { parseFlags, output, applyLinkFlag } from './lib/args.js'
 import { loadContext } from './context.js'
 
 const flags = parseFlags(process.argv.slice(2), ['as-user', 'json'])
+applyLinkFlag(flags, { channel: 'channel' })
 const { env } = loadContext()
 
 if (!flags.channel) {

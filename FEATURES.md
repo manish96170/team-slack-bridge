@@ -548,6 +548,122 @@ identically for both token types. The manifest template and `get-user-token.js`'
 against the real workspace: `users.info`, `users.list`, and `users.lookupByEmail` all
 succeed with both `tokenSource:"bot"` and `tokenSource:"user"`.
 
+### Slack permalinks (PLAN D72)
+
+Default: available locally. Any tool that addresses one message or thread
+(`slack_get_thread`, `slack_query_messages`, `slack_reply`, `slack_react`/`slack_unreact`
+and their `_as_user` forms, `slack_update_message`/`slack_delete_message` and their
+`_as_user` forms, `slack_upload_file`/`slack_upload_file_as_user`, `slack_call`, `slack_pin`,
+`slack_bookmark`) accepts an optional `link` — a message permalink such as
+`https://<workspace>.slack.com/archives/C0123ABCD/p1793337025613279[?thread_ts=…]` — instead of a
+hand-split channel ID and dotted timestamp. A link to a reply resolves the *thread root* for
+thread arguments and the reply's own timestamp for message arguments. An explicit
+`channel`/`ts`/`threadTs` always wins over the link. `slack_resolve_link` parses a link offline and
+returns the parts plus `workspaceDomain`.
+
+The link's workspace is **not** checked against the active account: on a multi-account install,
+confirm the link's domain matches the account before acting (the account argument/`--company` is
+what selects the workspace). Only `https://*.slack.com` and `*.slack-gov.com` links are accepted.
+CLI: `--link` on `cli/thread.js`, `reply.js`, `react.js`, `query.js`, `update.js`, `delete.js`.
+
+### Huddles and call cards (PLAN D72)
+
+**What Slack does not offer:** there is no API to start, join, record, transcribe or end a
+huddle, and no scope that grants one. Nothing in this repo claims otherwise.
+
+**What it can do:**
+- `slack_huddle_status` — who is in a huddle right now, from each user's `huddle_state`
+  (`users.info`, `users:read`). Pass `userIds` and/or a `channel` (members checked, capped by
+  `limit`, truncation reported). Read-only; `tokenSource` is echoed.
+- `slack_call` (`calls:write`, `calls:read`; user token) — Slack's Calls API. Slack does not host
+  the call; `start` registers one that lives elsewhere and posts it as a native call card
+  (participant list, Join button, duration). Give `joinUrl` for an existing Meet/Zoom/Teams link,
+  or omit it for a fresh Jitsi room (`calls.jitsiBaseUrl` in `slack-config.json` points it at a
+  self-hosted Jitsi; the public `meet.jit.si` may require a login to *host*). `update`, `end`
+  and `info` manage it. If registering succeeds but posting fails (e.g. not in the channel) the
+  result keeps the `callId` instead of orphaning the call. Non-partner apps normally start calls
+  from a slash command; the `calls.add` path used here was unit-tested but **not yet exercised
+  against a live workspace** (see TODO.md).
+- `huddleWatch` (listener, **off by default**) — set `huddleWatch.enabled:true` and subscribe to
+  the `user_huddle_changed` bot event. Only the watched users (`huddleWatch.userIds`, default the
+  owner) are tracked, in memory. The listener emits `huddle-started` / `huddle-ended` to the
+  caller's `onClassified` queue; with `huddleWatch.promptRecap:true` it also DMs the owner once
+  when their huddle ends, saying plainly that Slack provides no audio or transcript and asking
+  them to paste notes for a recap.
+
+### Canvases (PLAN D72)
+
+`slack_canvas`, one action-based tool, user token (`canvases:write`; `canvases:read` and
+`files:read` for `read`). `create` (standalone with `title`, or the channel canvas with
+`channelId`), `edit` (`insert_at_end` default, `insert_at_start`, `insert_after`, `insert_before`,
+`replace`, `delete`; section operations need `sectionId`, found with `sections`), `share`
+(read/write to channels or users), `sections`, `read` (the canvas as text) and `delete`.
+`delete` is permanent for everyone it is shared with, so it is refused without `confirm:true`
+(`confirm-required-to-delete-canvas`, returning the canvas ID to show the human); `dryRun`
+previews every write.
+
+### Pins and bookmarks (PLAN D72)
+
+`slack_pin` (`add` / `remove` / `list`; `pins:write`, `pins:read`) and `slack_bookmark`
+(`add` / `list` / `edit` / `remove`; `bookmarks:write`, `bookmarks:read`) act as the locally
+authorized human. Bookmarks accept `http(s)` URLs only. Both are visible to the whole
+conversation, so only change them on request.
+
+### Reminders (PLAN D72)
+
+`slack_reminder` (`add` / `list` / `complete` / `delete`; `reminders:write`, `reminders:read`).
+User token only — Slack does not let a bot own a reminder. `time` accepts ISO 8601, a Unix
+timestamp, seconds from now (converted to an absolute time, lifting Slack's 24h limit), or
+natural language ("tomorrow at 9am"); times in the past or over 365 days out are refused.
+Reminding **another** user (`userId`) refuses without `confirm:true`, because it appears in
+their Slackbot DM under your name.
+
+### User groups (PLAN D72)
+
+`slack_usergroup_lookup` finds a group by handle, name or ID and returns its mention string
+(`<!subteam^ID>`), optionally with member IDs (`usergroups:read`). More than one exact match
+refuses with `ambiguous-usergroup`; partial matches are listed; member expansion is limited to
+5 groups. Either token works (`tokenSource`, default `user`, echoed).
+
+### Reading files and canvases (PLAN D72)
+
+`slack_file` (`files:read`): `info` (metadata; the private URL is not echoed), `list`
+(optionally per `channel`/`userId`/`types`) and `read`. Text, code and canvases come back inline
+(HTML converted to text, truncated to `maxChars`, default 20000); anything else is saved under
+`<install home>/downloads/` (0700 dir, 0600 file, sanitized name) and returned as `localPath`.
+Safeguards: downloads go only to `https://*.slack.com`, redirects are never followed (the bearer
+token is not replayed, and a redirect is how Slack answers a missing scope — reported as
+`file-download-not-authorized-check-files-read-scope`), and files over 5 MB are refused. A
+message's `files[].id` (from `slack_get_thread` / `slack_query_messages`) is the file ID.
+
+### Status, presence and Do Not Disturb (PLAN D72)
+
+`slack_set_status` (text ≤ 100 chars, emoji, `expiresInMinutes`, or `clear`;
+`users.profile:write`), `slack_set_presence` (`auto` / `away`; `users:write`) and `slack_dnd`
+(`snooze` 1–1440 minutes / `end` / `info`; `dnd:write`, `dnd:read`). User token only; these
+change how you appear to everyone, so only on request.
+
+### Running any local tool from the shell (PLAN D72)
+
+`cli/tool.js <tool> --args '<json>' [--company <alias>] [--dry-run] [--json]` (also `tsb-tool`
+from a global install; `--list` prints every tool). It calls the same handler and the same
+argument validation as the MCP server, against the account chosen by `--company` (or the
+registry default), so the CLI cannot behave differently from MCP.
+
+### Identity and visibility for the D72 tools
+
+All writes (`slack_call`, `slack_canvas`, `slack_pin`, `slack_bookmark`, `slack_reminder`,
+`slack_set_status`, `slack_set_presence`, `slack_dnd`) use `SLACK_USER_TOKEN` and fail with
+`user-token-required` if it is absent — they never fall back to the bot. None of them is in
+`mcp/tools.remote.js` (the hosted profile has no user tokens, D20). The MCP `initialize`
+instructions tell agents that these actions are visible to others, must be requested for that
+specific purpose, and that huddles cannot be started, joined or recorded.
+
+**Scope changes need a reinstall:** the manifest template and `get-user-token.js` now request
+the scopes above. Existing tokens keep the scopes they were minted with, so re-run
+`npm run get-user-token` for each account (and reinstall the app) before these tools work; a
+missing scope surfaces as Slack's `missing_scope`.
+
 ### Scheduling
 
 Default: available locally.

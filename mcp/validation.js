@@ -31,6 +31,12 @@ export function validateArguments(schema, args = {}) {
     if (!(required in args)) return `missing required argument: ${required}`
   }
 
+  // `x-linkProvides` (mcp/links.js): arguments a Slack permalink can supply,
+  // so they are only required when no `link` was passed.
+  for (const key of schema['x-linkProvides'] || []) {
+    if (!(key in args) && !('link' in args)) return `missing required argument: ${key} (or pass link)`
+  }
+
   const properties = schema.properties || {}
   if (schema.additionalProperties === false) {
     for (const key of Object.keys(args)) {

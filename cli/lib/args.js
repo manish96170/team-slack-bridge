@@ -1,3 +1,5 @@
+import { applyLinkToArgs } from '../../core/links.js'
+
 // Shared CLI argument parsing and output formatting. Every command supports
 // --json (three of the four surfaces parse CLI output — §4.5) and, where it
 // applies, --dry-run (§4.5).
@@ -29,4 +31,19 @@ export function output(result, { json } = {}) {
     console.log('OK')
   }
   process.exitCode = result.ok ? 0 : 1
+}
+
+// D72 — `--link <slack permalink>` fills the conversation/timestamp flags a
+// command would otherwise need, without overriding any the caller passed.
+// `mapping` is flag → 'channel' | 'ts' | 'thread' (see core/links.js).
+export function applyLinkFlag(flags, mapping, { exit = true } = {}) {
+  if (flags.link === undefined) return flags
+  const parsed = applyLinkToArgs({ link: flags.link, ...Object.fromEntries(Object.keys(mapping).map(key => [key, flags[key]]).filter(([, value]) => value !== undefined)) }, mapping)
+  if (!parsed.ok) {
+    console.error(`Error: ${parsed.error}`)
+    if (exit) process.exit(1)
+    return flags
+  }
+  for (const key of Object.keys(mapping)) if (flags[key] === undefined && parsed.args[key] !== undefined) flags[key] = parsed.args[key]
+  return flags
 }

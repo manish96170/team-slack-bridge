@@ -9,6 +9,8 @@
 // asserts these three keys are absent so a future refactor that forwards
 // unknown fields to Slack fails here, not in a channel.
 
+import { featureSchemas } from './schema.features.js'
+
 // Used only by the local multi-account MCP daemon (listen/mcp-http.js,
 // PLAN D21/D22) to add an optional `account` selector on top of every
 // existing schema, without touching the schemas used by the stdio server
@@ -50,6 +52,7 @@ const AS_USER_READ = {
 }
 
 export const schemas = {
+  ...featureSchemas,
   slack_post: {
     type: 'object',
     properties: {

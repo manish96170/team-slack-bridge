@@ -2,10 +2,11 @@
 // node cli/thread.js --channel '#x' --thread-ts '169…' [--as-user] [--json]
 
 import { getThread } from '../core/query.js'
-import { parseFlags, output } from './lib/args.js'
+import { parseFlags, output, applyLinkFlag } from './lib/args.js'
 import { loadContext } from './context.js'
 
 const flags = parseFlags(process.argv.slice(2), ['as-user', 'json'])
+applyLinkFlag(flags, { channel: 'channel', 'thread-ts': 'thread' })
 const { env } = loadContext()
 
 if (!flags.channel || !flags['thread-ts']) {

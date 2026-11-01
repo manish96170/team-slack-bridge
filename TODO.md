@@ -1,10 +1,33 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D71) and architecture; this file is the scannable done/pending list.
+log (D1–D72) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
 ## Done
+
+- [x] **Pending feature set built (D72)** — Slack permalinks (`link`/`--link`,
+      `slack_resolve_link`), `slack_call` (Calls API call cards), `slack_huddle_status` +
+      opt-in `huddleWatch` listener, `slack_canvas`, `slack_pin`, `slack_bookmark`,
+      `slack_reminder`, `slack_usergroup_lookup`, `slack_file` (info/list/read, incl.
+      canvases), `slack_set_status`/`slack_set_presence`/`slack_dnd`, and `cli/tool.js`
+      (any tool from the shell). 12 new local-only tools (35 → 47), user-token-only
+      writes, `confirm:true` for canvas delete and reminding another user, 54 new tests
+      (398 → 452). Huddles cannot be started/joined/recorded via Slack's API — documented,
+      not faked.
+
+- [ ] **D72 live verification (needs the owner)** — (1) re-run `npm run get-user-token`
+      for each account and reinstall the app so tokens carry the new scopes (calls,
+      canvases, pins, bookmarks, reminders, usergroups, files:read, users.profile:write,
+      users:write, dnd, plus the history scopes from the previous change); (2) restart the
+      MCP server/daemon — a running one predates these tools; (3) try `slack_call
+      start` on a real workspace (non-partner apps may need the slash-command route),
+      `slack_canvas create/read`, and `slack_file read` on a canvas; (4) optionally enable
+      `huddleWatch` and subscribe to `user_huddle_changed`. Unit tests use faked Slack
+      transports only. **Already live-checked read-only (2026-11-01, Hornblower):**
+      `slack_huddle_status` (user token) and `slack_usergroup_lookup` (bot token, 69 groups)
+      work; `slack_file list` and `slack_reminder list` correctly return `missing_scope`
+      until the user token is re-minted.
 
 - [x] **Claude Sonnet 5 + Opus 5 India review fixes (D71)** — cache ambiguity,
       browser-drive protection for the local daemon, request-body limits, account

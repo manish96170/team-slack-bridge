@@ -51,6 +51,19 @@ const forbiddenRemoteToolNames = [
   'slack_unreact_as_user',
   'slack_upload_file',
   'slack_upload_file_as_user',
+  // D72 feature tools — each acts as, or reads for, the locally authorized human.
+  'slack_bookmark',
+  'slack_call',
+  'slack_canvas',
+  'slack_dnd',
+  'slack_file',
+  'slack_huddle_status',
+  'slack_pin',
+  'slack_reminder',
+  'slack_resolve_link',
+  'slack_set_presence',
+  'slack_set_status',
+  'slack_usergroup_lookup',
 ]
 const signingSecret = 'test-signing-secret'
 

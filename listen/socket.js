@@ -33,6 +33,8 @@ import {
 } from '../core/acp-sessions.js'
 import { listBackendNames } from '../core/acp-backends.js'
 import { reply } from '../core/post.js'
+import { handleHuddleChange } from '../core/huddle.js'
+import { dm } from '../core/dm.js'
 
 const SESSION_STOP_WORDS = new Set(['stop', 'exit'])
 
@@ -406,6 +408,25 @@ export function createListener({ env, botToken, appToken, config, configPath, db
   app.event('app_home_opened', async ({ event }) => {
     const result = await publishHome({ token: botToken, userId: event.user })
     if (!result.ok && onError) onError(new Error(`publishHome failed: ${result.error}`))
+  })
+
+  // D72 — opt-in (config.huddleWatch). Tracks only the watched users' huddle
+  // state in memory and emits huddle-started / huddle-ended; with
+  // huddleWatch.promptRecap it also DMs the owner a recap prompt on end.
+  const huddleStates = new Map()
+  app.event('user_huddle_changed', async ({ event }) => {
+    try {
+      await handleHuddleChange({
+        event,
+        config,
+        states: huddleStates,
+        onClassified,
+        sendDm: ({ userId, text }) => dm({ botToken, userId, text, asUser: false, config, dbPath }),
+      })
+    } catch (err) {
+      if (onError) onError(err)
+      else throw err
+    }
   })
 
   app.error(err => {

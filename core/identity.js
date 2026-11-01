@@ -51,6 +51,12 @@ export function loadConfig(path) {
       // (core/directory.js); 10 minutes by default. Never applies to error
       // results, which are never cached.
       directoryLookup: { cacheTtlMs: 10 * 60 * 1000 },
+      // D72 — slack_call generates a Jitsi room when no joinUrl is given;
+      // point this at a self-hosted Jitsi to avoid the public instance.
+      calls: { jitsiBaseUrl: 'https://meet.jit.si' },
+      // D72 — opt-in huddle awareness for the Socket Mode listener
+      // (user_huddle_changed). Off by default. userIds defaults to the owner.
+      huddleWatch: { enabled: false, userIds: [], promptRecap: false },
     }
   }
   const raw = JSON.parse(readFileSync(path, 'utf8'))
@@ -138,6 +144,14 @@ export function loadConfig(path) {
     },
     directoryLookup: {
       cacheTtlMs: Number.isFinite(raw.directoryLookup?.cacheTtlMs) ? raw.directoryLookup.cacheTtlMs : 10 * 60 * 1000,
+    },
+    calls: {
+      jitsiBaseUrl: typeof raw.calls?.jitsiBaseUrl === 'string' && raw.calls.jitsiBaseUrl ? raw.calls.jitsiBaseUrl : 'https://meet.jit.si',
+    },
+    huddleWatch: {
+      enabled: raw.huddleWatch?.enabled === true,
+      userIds: Array.isArray(raw.huddleWatch?.userIds) ? raw.huddleWatch.userIds : [],
+      promptRecap: raw.huddleWatch?.promptRecap === true,
     },
   }
 }

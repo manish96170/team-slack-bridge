@@ -633,7 +633,12 @@ refuses with `ambiguous-usergroup`; partial matches are listed; member expansion
 `<install home>/downloads/` (0700 dir, 0600 file, sanitized name) and returned as `localPath`.
 Safeguards: downloads go only to `https://*.slack.com`, redirects are never followed (the bearer
 token is not replayed, and a redirect is how Slack answers a missing scope — reported as
-`file-download-not-authorized-check-files-read-scope`), and files over 5 MB are refused. A
+`file-download-not-authorized-check-files-read-scope`), and files over 5 MB are refused — enforced
+while streaming (a `Content-Length` over the cap is rejected before reading, and the body read
+stops at the cap), so a response that lies about its size cannot be buffered whole. The file ID
+from the API response must be plain alphanumerics (`invalid-file-id-in-response` otherwise), the
+target must resolve inside the downloads directory, and bytes are written to an exclusive temp file
+then renamed over the target, so a planted symlink is replaced rather than followed. A
 message's `files[].id` (from `slack_get_thread` / `slack_query_messages`) is the file ID.
 
 ### Status, presence and Do Not Disturb (PLAN D72)

@@ -50,7 +50,7 @@ test('shareCanvas needs a target and a valid access level; sections lookup needs
   assert.deepEqual(calls[0].body, { canvas_id: 'F1', access_level: 'write', channel_ids: ['C1'], user_ids: ['U1'] })
   assert.equal((await lookupCanvasSections({ token: 't', canvasId: 'F1', slackCall })).error, 'containsText-or-sectionTypes-required')
   await lookupCanvasSections({ token: 't', canvasId: 'F1', containsText: 'Todo', sectionTypes: ['h2'], slackCall })
-  assert.deepEqual(JSON.parse(calls[1].body.criteria), { contains_text: 'Todo', section_types: ['h2'] })
+  assert.deepEqual(calls[1].body.criteria, { contains_text: 'Todo', section_types: ['h2'] }, 'criteria is passed as an object, as Slack documents it')
 })
 
 test('deleteCanvas is refused without confirm:true, previews with dryRun, and deletes only when confirmed', async () => {
@@ -106,6 +106,10 @@ test('normalizeReminderTime handles ISO, unix, seconds-from-now and natural lang
   assert.deepEqual(normalizeReminderTime(nowSec + 600, now), { value: nowSec + 600 })
   assert.deepEqual(normalizeReminderTime(900, now), { value: nowSec + 900 })
   assert.deepEqual(normalizeReminderTime(String(nowSec + 60), now), { value: nowSec + 60 })
+  assert.deepEqual(normalizeReminderTime('600', now), { value: nowSec + 600 }, 'a numeric string means the same as the number')
+  assert.deepEqual(normalizeReminderTime(' 900 ', now), { value: nowSec + 900 })
+  assert.equal(normalizeReminderTime('0', now).error, 'invalid-time')
+  assert.equal(normalizeReminderTime(String(nowSec - 60), now).error, 'time-must-be-in-the-future')
   assert.deepEqual(normalizeReminderTime('in 15 minutes', now), { value: 'in 15 minutes', natural: true })
   assert.equal(normalizeReminderTime('2020-01-01T00:00:00Z', now).error, 'time-must-be-in-the-future')
   assert.equal(normalizeReminderTime('2030-01-01T00:00:00Z', now).error, 'time-too-far-in-the-future-max-365-days')

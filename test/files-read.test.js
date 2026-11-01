@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { getFileInfo, listFiles, readFile, htmlToText } from '../core/files.js'
@@ -16,14 +16,9 @@ function fakeSlack(files) {
   return { calls, slackCall }
 }
 
-function response(body, { status = 200, contentType = 'application/octet-stream' } = {}) {
-  const bytes = typeof body === 'string' ? Buffer.from(body) : body
-  return {
-    status,
-    ok: status >= 200 && status < 300,
-    headers: { get: name => (name.toLowerCase() === 'content-type' ? contentType : null) },
-    arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-  }
+// A real Response, so the code under test sees the same body-stream/headers API it gets from fetch.
+function response(body, { status = 200, contentType = 'application/octet-stream', headers = {} } = {}) {
+  return new Response(body, { status, headers: { 'content-type': contentType, ...headers } })
 }
 
 const TEXT_FILE = { id: 'F1', name: 'notes.txt', mimetype: 'text/plain', filetype: 'text', size: 11, url_private: 'https://files.slack.com/files-pri/T1-F1/notes.txt' }
@@ -91,7 +86,7 @@ test('readFile saves binary files under destDir with a sanitized name and 0600 p
     const destDir = join(dir, 'downloads')
     const result = await readFile({ token: 't', fileId: 'F2', destDir, fetchImpl: async () => response(Buffer.from([1, 2, 3, 4])), slackCall })
     assert.equal(result.kind, 'binary')
-    assert.equal(result.localPath, join(destDir, 'F2-shot_one.png'))
+    assert.equal(result.localPath, join(realpathSync(destDir), 'F2-shot_one.png'))
     assert.deepEqual([...readFileSync(result.localPath)], [1, 2, 3, 4])
     assert.equal(statSync(result.localPath).mode & 0o777, 0o600)
     assert.equal((await readFile({ token: 't', fileId: 'F2', fetchImpl: async () => response(Buffer.from([1])), slackCall })).error, 'destDir-required-for-binary-files')
@@ -130,4 +125,61 @@ test('readFile rejects a login page served for a binary file, oversize files, mi
   assert.equal(transport.retryable, true)
   assert.equal((await readFile({ fileId: 'F2', slackCall })).error, 'no-token')
   assert.equal((await readFile({ token: 't', slackCall })).error, 'fileId-required')
+})
+
+test('readFile refuses a hostile file id instead of using it as a path component', async () =>
+  withTempDir(async dir => {
+    const destDir = join(dir, 'downloads')
+    for (const id of ['../escaped', 'a/b', '..', 'F2/../../x', '']) {
+      const { slackCall } = fakeSlack({ [id || 'blank']: { ...PNG_FILE, id } })
+      const result = await readFile({ token: 't', fileId: id || 'blank', destDir, fetchImpl: async () => response(Buffer.from([1])), slackCall })
+      assert.equal(result.error, 'invalid-file-id-in-response', JSON.stringify(id))
+    }
+    assert.equal(existsSync(join(dir, 'escaped-shot_one.png')), false)
+    assert.equal(existsSync(destDir) ? readdirSync(destDir).length : 0, 0, 'nothing was written')
+  }))
+
+test('readFile does not follow a pre-existing symlink at the target: the link is replaced, the victim is untouched', async () =>
+  withTempDir(async dir => {
+    const destDir = join(dir, 'downloads')
+    mkdirSync(destDir)
+    const victim = join(dir, 'victim.bin')
+    symlinkSync(victim, join(destDir, 'F2-shot_one.png'))
+    const { slackCall } = fakeSlack({ F2: PNG_FILE })
+    const result = await readFile({ token: 't', fileId: 'F2', destDir, fetchImpl: async () => response(Buffer.from([42])), slackCall })
+    assert.equal(result.ok, true)
+    assert.equal(existsSync(victim), false, 'the symlink target must not be written')
+    assert.equal(lstatSync(result.localPath).isSymbolicLink(), false)
+    assert.deepEqual([...readFileSync(result.localPath)], [42])
+    assert.deepEqual(readdirSync(destDir).filter(name => name.startsWith('.tmp-')), [], 'no temp files left behind')
+  }))
+
+test('readFile enforces maxBytes while streaming: a lying size does not get buffered', async () => {
+  const lying = { ...PNG_FILE, size: 1 }
+  const { slackCall } = fakeSlack({ F2: lying })
+  let pulled = 0
+  const chunk = new Uint8Array(1024)
+  const stream = new ReadableStream({
+    pull(controller) {
+      pulled++
+      if (pulled > 1000) return controller.close()
+      controller.enqueue(chunk)
+    },
+  })
+  const result = await readFile({ token: 't', fileId: 'F2', maxBytes: 4096, destDir: tmpdir(), fetchImpl: async () => response(stream), slackCall })
+  assert.equal(result.error, 'file-too-large')
+  assert.ok(pulled < 20, `stopped reading early (pulled ${pulled} of 1000 chunks)`)
+})
+
+test('readFile rejects an oversize Content-Length before reading the body', async () => {
+  const { slackCall } = fakeSlack({ F2: { ...PNG_FILE, size: 1 } })
+  let bodyTouched = false
+  const fetchImpl = async () => {
+    const res = response(Buffer.from([1]), { headers: { 'content-length': '999999999' } })
+    Object.defineProperty(res, 'body', { get() { bodyTouched = true; return null } })
+    return res
+  }
+  const result = await readFile({ token: 't', fileId: 'F2', destDir: tmpdir(), fetchImpl, slackCall })
+  assert.equal(result.error, 'file-too-large')
+  assert.equal(bodyTouched, false)
 })

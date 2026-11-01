@@ -23,7 +23,8 @@ export function normalizeReminderTime(time, now = Date.now()) {
   }
   if (typeof time !== 'string' || !time.trim()) return { error: 'time-required' }
   const trimmed = time.trim()
-  if (/^\d{10}$/.test(trimmed)) return checkWindow(Number(trimmed), nowSeconds)
+  // A digits-only string is a number that happened to arrive as text (JSON callers do this): same rules as a number.
+  if (/^\d+$/.test(trimmed)) return normalizeReminderTime(Number(trimmed), now)
   if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
     const parsed = Date.parse(trimmed)
     if (Number.isNaN(parsed)) return { error: 'invalid-time' }

@@ -69,7 +69,7 @@ export async function lookupCanvasSections({ token, canvasId, containsText, sect
     ...(sectionTypes?.length && { section_types: sectionTypes }),
   }
   if (!Object.keys(criteria).length) return { ok: false, error: 'containsText-or-sectionTypes-required', retryable: false }
-  return slackCall('canvases.sections.lookup', token, { canvas_id: canvasId, criteria: JSON.stringify(criteria) })
+  return slackCall('canvases.sections.lookup', token, { canvas_id: canvasId, criteria })
 }
 
 // Deleting a canvas is permanent for everyone it is shared with.

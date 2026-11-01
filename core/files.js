@@ -7,8 +7,9 @@
 // also share the finished upload straight into a channel/thread in the same
 // call.
 
-import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { basename, join, relative, isAbsolute } from 'node:path'
 import { callSlack } from './slack.js'
 
 export async function uploadFile({ token, filePath, filename, title, channel, threadTs, dryRun }) {
@@ -123,9 +124,58 @@ function isSlackHost(hostname) {
   return hostname === 'slack.com' || hostname.endsWith('.slack.com')
 }
 
+// Slack file IDs are plain alphanumerics (F0123ABCD). The ID comes from an API
+// response, so it is validated rather than trusted as a path component.
+const FILE_ID_PATTERN = /^[A-Za-z0-9]{1,40}$/
+
 function safeName(file) {
-  const base = basename(file.name || file.title || 'file').replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 80) || 'file'
+  const base = basename(file.name || file.title || 'file').replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^\.+/, '').slice(0, 80) || 'file'
   return `${file.id}-${base}`
+}
+
+// Reads the body while counting bytes and stops as soon as maxBytes is
+// exceeded, so a response that lies about (or omits) its size cannot make us
+// buffer an arbitrary amount of memory. Content-Length, when present, is
+// checked before reading anything.
+async function readBodyCapped(response, maxBytes) {
+  const declared = Number(response.headers.get('content-length'))
+  if (Number.isFinite(declared) && declared > maxBytes) return { tooLarge: true }
+  if (!response.body) return { bytes: Buffer.alloc(0) }
+  const reader = response.body.getReader()
+  const chunks = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {})
+      return { tooLarge: true }
+    }
+    chunks.push(Buffer.from(value))
+  }
+  return { bytes: Buffer.concat(chunks, total) }
+}
+
+// Writes inside destDir only: the target must resolve under the real
+// destDir, and the bytes go to a fresh exclusive temp file that is then
+// renamed over the target. rename() replaces a pre-existing symlink at the
+// target instead of following it, so a planted link cannot redirect the write.
+function saveInsideDir(destDir, name, bytes) {
+  mkdirSync(destDir, { recursive: true, mode: 0o700 })
+  const root = realpathSync(destDir)
+  const target = join(root, name)
+  const rel = relative(root, target)
+  if (!rel || rel.startsWith('..') || isAbsolute(rel) || rel.includes('/') || rel.includes('\\')) return null
+  const temp = join(root, `.tmp-${randomBytes(8).toString('hex')}`)
+  try {
+    writeFileSync(temp, bytes, { mode: 0o600, flag: 'wx' })
+    renameSync(temp, target)
+  } catch (err) {
+    rmSync(temp, { force: true })
+    throw err
+  }
+  return target
 }
 
 // Text-like files (and canvases) come back inline, truncated to maxChars.
@@ -141,6 +191,7 @@ export async function readFile({ token, fileId, destDir, maxBytes = DEFAULT_MAX_
   if (!info.ok) return info
   const file = info.file
   const meta = summarize(file)
+  if (!FILE_ID_PATTERN.test(String(file.id || ''))) return { ok: false, error: 'invalid-file-id-in-response', retryable: false }
   if (!file.url_private) return { ok: false, error: 'file-has-no-downloadable-content', retryable: false, file: meta }
   if (file.size && file.size > maxBytes) return { ok: false, error: 'file-too-large', retryable: false, file: meta, maxBytes }
 
@@ -161,8 +212,14 @@ export async function readFile({ token, fileId, destDir, maxBytes = DEFAULT_MAX_
   if (response.status >= 300 && response.status < 400) return { ok: false, error: 'file-download-not-authorized-check-files-read-scope', retryable: false, file: meta }
   if (!response.ok) return { ok: false, error: `download-failed: HTTP ${response.status}`, retryable: response.status >= 500, file: meta }
 
-  const bytes = Buffer.from(await response.arrayBuffer())
-  if (bytes.length > maxBytes) return { ok: false, error: 'file-too-large', retryable: false, file: meta, maxBytes }
+  let body
+  try {
+    body = await readBodyCapped(response, maxBytes)
+  } catch (err) {
+    return { ok: false, error: `download-transport-error: ${err.message}`, retryable: true, file: meta }
+  }
+  if (body.tooLarge) return { ok: false, error: 'file-too-large', retryable: false, file: meta, maxBytes }
+  const bytes = body.bytes
   const contentType = (response.headers.get('content-type') || '').toLowerCase()
   if (contentType.includes('text/html') && !isTextLike(file)) {
     return { ok: false, error: 'file-download-not-authorized-check-files-read-scope', retryable: false, file: meta }
@@ -176,8 +233,12 @@ export async function readFile({ token, fileId, destDir, maxBytes = DEFAULT_MAX_
   }
 
   if (!destDir) return { ok: false, error: 'destDir-required-for-binary-files', retryable: false, file: meta }
-  mkdirSync(destDir, { recursive: true, mode: 0o700 })
-  const localPath = join(destDir, safeName(file))
-  writeFileSync(localPath, bytes, { mode: 0o600 })
+  let localPath
+  try {
+    localPath = saveInsideDir(destDir, safeName(file), bytes)
+  } catch (err) {
+    return { ok: false, error: `could-not-save-file: ${err.message}`, retryable: false, file: meta }
+  }
+  if (!localPath) return { ok: false, error: 'refusing-path-outside-downloads-dir', retryable: false, file: meta }
   return { ok: true, file: meta, kind: 'binary', localPath, bytes: bytes.length }
 }

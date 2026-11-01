@@ -664,6 +664,19 @@ the scopes above. Existing tokens keep the scopes they were minted with, so re-r
 `npm run get-user-token` for each account (and reinstall the app) before these tools work; a
 missing scope surfaces as Slack's `missing_scope`.
 
+### Reading reactions (PLAN D73)
+
+`slack_reactions` (`reactions:read`, **user and bot tokens**; local MCP only) is the read side of
+`slack_react` / `slack_unreact`. `action:"get"` returns who reacted with which emoji on one
+message (`channel` + `ts`, or a message `link`), optionally narrowed to one `emoji` (colons and
+skin-tone suffixes tolerated). `action:"list"` returns the messages a user has reacted to
+(default: the token's own user; `userId` for someone else's), with text truncated to 200
+characters, `count` (default 20, max 100) and a `nextCursor`; file and file-comment reactions are
+not reported. `tokenSource` defaults to `user`; `bot` is explicit, never a fallback, and the source
+used is echoed back. The bot only sees conversations it is a member of. Needs a re-minted user
+token and a reinstall to carry the new scope (a missing scope surfaces as `missing_scope`).
+Reacting *to* reactions is a separate, deferred idea — see TODO.md "Decision Pending".
+
 ### Scheduling
 
 Default: available locally.

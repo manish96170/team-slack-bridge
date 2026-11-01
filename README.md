@@ -128,6 +128,7 @@ and the exact flag/config key that changes it:
 | Remote/hosted `mcp/tools.remote.js` (`slack_post`, `slack_react`, `slack_update_message`, etc.) | **Always the bot** — no user tokens exist remotely at all | not configurable, by design | D20 |
 | `slack_call`, `slack_canvas`, `slack_pin`, `slack_bookmark`, `slack_reminder`, `slack_set_status`, `slack_set_presence`, `slack_dnd` (MCP) | **As you** (`SLACK_USER_TOKEN`), never silently the bot | not configurable — no `viaBot` | D72 |
 | `slack_huddle_status`, `slack_usergroup_lookup`, `slack_file` (MCP, read-only) | **As you** (`SLACK_USER_TOKEN`) | `tokenSource:"bot"` | D72 |
+| `slack_reactions` — read reactions (MCP, read-only) | **As you** (`SLACK_USER_TOKEN`) | `tokenSource:"bot"` | D73 |
 | Deleting a canvas; reminding another user | **Refused** | `confirm:true` after explicit approval | D72 |
 | Huddle watching (`user_huddle_changed`) | **Off** | `huddleWatch.enabled:true` | D72 |
 | Message tools accept a pasted Slack permalink | **Yes** — `link` argument / `--link` flag | — | D72 |
@@ -271,6 +272,7 @@ the gap away mode fills (PLAN D34).
    - `users:read` — resolve handles to user IDs (also `users.info`, which carries `huddle_state`)
    - `files:read`, `usergroups:read` — read files other people posted / look up user groups
      with the bot token (`slack_file`, `slack_usergroup_lookup` with `tokenSource:"bot"`)
+   - `reactions:read` — `slack_reactions` with `tokenSource:"bot"` (only conversations the bot is in)
    - Subscribe to the `user_huddle_changed` bot event only if you turn on `huddleWatch`
      (see FEATURES.md "Huddles")
 
@@ -295,6 +297,7 @@ the gap away mode fills (PLAN D34).
      `slack_upload_file_as_user`) or delete an authorized file (`cli/delete-file.js`/`slack_delete_file`)
    - `reactions:write` — add/remove a reaction as the user (`cli/react.js --as-user`/
      `slack_react_as_user`/`slack_unreact_as_user`)
+   - `reactions:read` — read who reacted with what, and list a user's reactions (`slack_reactions`)
    - `calls:write`, `calls:read` — register a call and post it as a native call card
      (`slack_call`); see FEATURES.md "Call cards" (huddles themselves have no API)
    - `canvases:write`, `canvases:read` — create/edit/share/read canvases (`slack_canvas`)

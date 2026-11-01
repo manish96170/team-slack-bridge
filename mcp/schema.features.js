@@ -135,6 +135,21 @@ export const featureSchemas = {
     required: ['action'],
     additionalProperties: false,
   },
+  slack_reactions: {
+    type: 'object',
+    properties: {
+      action: { type: 'string', enum: ['get', 'list'], description: 'get: who reacted with what on one message; list: messages a user has reacted to.' },
+      channel: { type: 'string', description: 'get: conversation ID of the message' },
+      ts: { type: 'string', description: 'get: timestamp of the message' },
+      emoji: { type: 'string', description: 'Only report this emoji (e.g. "white_check_mark" or ":white_check_mark:"). For list, messages without it are dropped.' },
+      userId: { type: 'string', description: 'list: whose reactions to list (default: the token\'s own user)' },
+      count: { type: 'number', description: 'list: items per page (default 20, max 100)' },
+      cursor: { type: 'string', description: 'list: pagination cursor from a previous nextCursor' },
+      tokenSource: TOKEN_SOURCE,
+    },
+    required: ['action'],
+    additionalProperties: false,
+  },
   slack_set_status: {
     type: 'object',
     properties: {

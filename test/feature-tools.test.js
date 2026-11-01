@@ -12,7 +12,7 @@ import { loadConfig } from '../core/identity.js'
 
 const FEATURE_NAMES = [
   'slack_resolve_link', 'slack_call', 'slack_huddle_status', 'slack_canvas', 'slack_pin', 'slack_bookmark',
-  'slack_reminder', 'slack_usergroup_lookup', 'slack_file', 'slack_set_status', 'slack_set_presence', 'slack_dnd',
+  'slack_reminder', 'slack_usergroup_lookup', 'slack_file', 'slack_reactions', 'slack_set_status', 'slack_set_presence', 'slack_dnd',
 ]
 const manifest = JSON.parse(readFileSync(new URL('../config/slack-app-manifest.template.json', import.meta.url), 'utf8'))
 const userScopes = readFileSync(new URL('../get-user-token.js', import.meta.url), 'utf8').match(/USER_SCOPES = '([^']+)'/)[1].split(',')

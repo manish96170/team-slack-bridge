@@ -59,6 +59,7 @@ const forbiddenRemoteToolNames = [
   'slack_file',
   'slack_huddle_status',
   'slack_pin',
+  'slack_reactions',
   'slack_reminder',
   'slack_resolve_link',
   'slack_set_presence',

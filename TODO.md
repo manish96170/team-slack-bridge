@@ -1,10 +1,94 @@
 # TODO
 
 Status snapshot, most recent work at the top. See `PLAN.md` for the full decisions
-log (D1–D72) and architecture; this file is the scannable done/pending list.
+log (D1–D73) and architecture; this file is the scannable done/pending list.
 `ROADMAP.md` is the longer-horizon direction.
 
+## Decision Pending
+
+Ideas that were researched and deliberately NOT built. Each entry records why it was
+deferred, how to build it, and the safety questions to settle first, so nobody has to
+re-derive any of it. Nothing here is scheduled; none of it is a bug.
+
+### 1. Reaction watch — react to reactions (`reaction_added` / `reaction_removed`)
+
+- **Use case:** an emoji as a trigger, e.g. the owner reacting ✅ on an MR announcement means
+  "approved" (the `slack-request-review` / push-mr-to-slack lifecycle already does this by
+  hand with `:greenflag:` / `:white_check_mark:`), or 👀 meaning "I'm looking at it".
+- **How:** mirror the huddle watch (D72). (a) Manifest: add bot events `reaction_added` and
+  `reaction_removed` (`reactions:read` is already requested). (b) Config, **off by default**:
+  `reactionWatch: { enabled:false, userIds:[], emojis:[], channels:[] }` parsed in
+  `core/identity.js`. (c) A pure, testable `handleReactionEvent({ event, config, onClassified })`
+  in `core/reactions.js`, wired in `listen/socket.js` as `app.event('reaction_added', …)`. The
+  payload carries `user`, `reaction`, `item_user`, `item: { type, channel, ts }`, `event_ts`.
+  (d) Emit `{ kind:'reaction-added' | 'reaction-removed', … }` to `onClassified` only — "emit, do
+  not act" (PLAN §4.2), same as `huddle-started`/`huddle-ended`. Do NOT call
+  `maybeCreateAgentSessionForEvent` for it (it assumes a message event shape).
+- **Safety to settle first:** (1) *Feedback loops* — a reaction the bridge adds as the human
+  (`slack_react`) fires `reaction_added` as that human; ignore events whose `(channel, ts,
+  emoji, user)` the bridge just wrote (small in-memory/ledger set), or require an emoji allow-list
+  the bridge itself never sends. (2) *Authorization* — only configured `userIds` may trigger
+  anything, an unlisted reactor is dropped silently; never trust the emoji alone. (3) *Scope of
+  reach* — bots only receive events for conversations they are a member of, so say so in docs;
+  filter by `channels` early because busy channels produce a flood. (4) *Idempotency* — Slack
+  redelivers unacked events; dedupe on `event_ts` + user + emoji. (5) *No automatic
+  consequence* — a consumer that acts (approving an MR, merging) must re-verify state itself
+  (`glab`/`gh`) as the Slack skills already require; a reaction is a hint, not proof.
+- **Open decision:** which consumer acts on these events, and whether the owner must confirm.
+- **Tests to write:** disabled by default; unwatched user/emoji/channel ignored; dedupe; own-write
+  suppression; removed event; no agent-session side effect.
+
+### 2. Resolve `@group` in outgoing message text
+
+- **Use case:** write `@reviewers` and have it become `<!subteam^S0123ABC>` (a real notifying
+  group mention) the way a configured `@handle` already becomes `<@U…>`. Today
+  `resolveMentions` (sync, `core/identity.js`) only knows configured users, so the caller must
+  run `slack_usergroup_lookup` and paste the mention string.
+- **How:** add an async `resolveGroupMentions(text, { token, ttlMs })` in `core/usergroups.js`
+  and call it in the send paths (`postToChannel`, `reply`, `dm`, scheduling, progress) *before*
+  the existing `resolveMentions`, so a configured user handle always wins. Reuse
+  `lookupUserGroup`'s `usergroups.list` and cache the list per workspace for
+  `directoryLookup.cacheTtlMs` (positive and negative). Only exact handle matches; skip text
+  inside code spans/blocks and already-formatted `<…>` tokens. Surface the resolved text in
+  `dryRun` so it can be reviewed.
+- **Safety to settle first:** (1) *Accidental mass-notify* — a group mention pings every member,
+  so require opt-in (`mentions.resolveUserGroups:true`, default off) and consider a distinct
+  syntax (`@group:reviewers`) instead of a bare `@word`, which collides with ordinary text and
+  user handles. (2) Cap the number of group mentions per message (e.g. 3). (3) *Fail safe* — a
+  failed or slow lookup must leave the text unchanged and still send, never block or error the
+  send. (4) Needs `usergroups:read` on the token used to send (already requested). (5) Disabled
+  groups (`date_delete`) must not resolve. (6) Remote/hosted profile must not gain it (no extra
+  Slack reads behind a hosted post).
+- **Tests to write:** user handle beats group; exact-only; code-block skip; cap; cache hit/miss;
+  lookup failure still sends; disabled by default; `dryRun` shows resolved text.
+
+### 3. User-group management (`usergroups:write`)
+
+- **Use case:** create/rename/disable a group or change its members from Slack tooling.
+- **How:** `usergroups.create`, `usergroups.update`, `usergroups.enable`, `usergroups.disable`,
+  `usergroups.users.update`; new user scope `usergroups:write`; a `slack_usergroup_manage` tool
+  (user token only) with per-action `confirm:true`.
+- **Why deferred / safety:** `usergroups.users.update` **replaces the entire member list**, so a
+  mistake silently removes everyone else; membership can also grant default-channel access and
+  changes who gets pinged. Many workspaces restrict this to admins/owners, so it often fails
+  anyway. If ever built: read the current members first, show an explicit add/remove diff, require
+  `confirm:true` for the exact diff, refuse to write an empty list, and never expose it remotely.
+  Current leaning: **do not build**; ask the workspace admin instead.
+
+### 4. Reactions on files and file comments
+
+`slack_reactions` reports messages only (file and file-comment items are filtered out of
+`reactions.list`, and `reactions.get` is called with `channel` + `timestamp`). Supporting
+`file` / `file_comment` targets means accepting `fileId`/`fileCommentId` in the schema and
+mapping them to `reactions.get`'s `file` / `file_comment` parameters. Low value until someone
+asks; no safety concerns beyond the existing read-only posture.
+
 ## Done
+
+- [x] **`slack_reactions` — read reactions with user or bot token (D73)** —
+      `reactions.get` / `reactions.list` behind one local-only MCP tool, explicit
+      `tokenSource`, message `link` support, `reactions:read` on user and bot scopes.
+      Read-only. Tool count 47 → 48. Needs the same re-mint/reinstall as the D72 scopes.
 
 - [x] **Pending feature set built (D72)** — Slack permalinks (`link`/`--link`,
       `slack_resolve_link`), `slack_call` (Calls API call cards), `slack_huddle_status` +

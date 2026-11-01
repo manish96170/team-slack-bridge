@@ -20,6 +20,7 @@ import { addReminder, listReminders, completeReminder, deleteReminder } from '..
 import { lookupUserGroup } from '../core/usergroups.js'
 import { getFileInfo, listFiles, readFile } from '../core/files.js'
 import { setStatus, setPresence, manageDnd } from '../core/status.js'
+import { getReactions, listReactions } from '../core/reactions.js'
 import { schemas } from './schema.js'
 
 const missing = field => ({ ok: false, error: `${field}-required`, retryable: false })
@@ -204,6 +205,28 @@ export const featureTools = {
           break
         default:
           return badAction(['info', 'list', 'read'])
+      }
+      return { ...result, tokenSource }
+    },
+  },
+
+  slack_reactions: {
+    name: 'slack_reactions',
+    description:
+      'Read reactions (reactions:read, user or bot token). action "get": who reacted with which emoji on one message (channel + ts, or a message `link`); optionally only one emoji. action "list": the messages a user has reacted to (default: the token\'s own user), newest first, with a pagination cursor. Read-only; the resolved tokenSource is echoed back (default the locally authorized human; "bot" is explicit). The bot can only see messages in conversations it is a member of. To ADD or REMOVE a reaction use slack_react / slack_unreact.',
+    inputSchema: schemas.slack_reactions,
+    handler: async (args, ctx) => {
+      const { tokenSource, token } = readToken(args, ctx)
+      let result
+      switch (args.action) {
+        case 'get':
+          result = await getReactions({ token, channel: args.channel, ts: args.ts, emoji: args.emoji })
+          break
+        case 'list':
+          result = await listReactions({ token, userId: args.userId, count: args.count, cursor: args.cursor, emoji: args.emoji })
+          break
+        default:
+          return badAction(['get', 'list'])
       }
       return { ...result, tokenSource }
     },

@@ -32,6 +32,7 @@ export const LINK_SUPPORT = {
   slack_call: { channel: '?channel', threadTs: '?thread' },
   slack_pin: { channel: 'channel', ts: '?ts' },
   slack_bookmark: { channel: 'channel' },
+  slack_reactions: { channel: '?channel', ts: '?ts' },
 }
 
 export function withLinkSupport(tool, mapping) {

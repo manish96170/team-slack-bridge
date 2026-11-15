@@ -21,7 +21,10 @@
     "tsb-group-dm": "cli/group-dm-by-name.js",
     "tsb-group-dm-create": "cli/group-dm-create.js",
     "tsb-group-topic": "cli/group-topic.js",
-    "tsb-tool": "cli/tool.js"
+    "tsb-tool": "cli/tool.js",
+    "tsb-hub": "cli/hub.js",
+    "tsb-hub-server": "cli/hub-server.js",
+    "tsb-hub-connect": "cli/hub-connect.js"
   },
   "scripts": {
     "get-user-token": "node get-user-token.js",
@@ -33,6 +36,7 @@
     "group-dm-create": "node cli/group-dm-create.js",
     "group-topic": "node cli/group-topic.js",
     "tool": "node cli/tool.js",
+    "hub": "node cli/hub.js",
     "post": "node post.js",
     "verify-dm": "node verify-dm.js",
     "doctor": "node cli/doctor.js",

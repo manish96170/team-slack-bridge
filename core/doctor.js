@@ -9,6 +9,11 @@ import { getOpenAcpStatus } from './openacp.js'
 import { getSlackbotMcpStatus } from './slackbot-mcp.js'
 import { listAccounts } from './accounts.js'
 import { listRepos } from './repos.js'
+import { listListenableAccounts } from './accounts.js'
+import { loadContextForHome } from '../cli/context.js'
+import { planListeners } from './supervisor.js'
+import { statusAll } from '../listen/daemon.js'
+import { sandboxAvailable } from './hub/sandbox.js'
 
 function uniqueChannels(config) {
   return [
@@ -105,6 +110,27 @@ export async function doctor({ env, config, profile = 'local', slackCall = callS
       ready: !!env.SLACK_BOT_TOKEN,
       cacheTtlMs: config.directoryLookup?.cacheTtlMs ?? null,
     },
+  }
+
+  // D75 — per-account listener readiness and the shared-app trap: two accounts
+  // on one app token would split events, and the supervisor refuses the second.
+  try {
+    const planned = planListeners({ accounts: listListenableAccounts(), load: loadContextForHome })
+    report.listeners = {
+      willListen: planned.plan.map(item => item.name),
+      skipped: planned.skipped,
+      running: statusAll().listeners.filter(item => item.running).map(item => item.name),
+    }
+  } catch (err) {
+    report.listeners = { error: err.message }
+  }
+  report.hub = {
+    enabled: !!config.hub?.enabled,
+    mode: config.hub?.mode,
+    needsOwner: !!config.hub?.enabled && !config.owner?.slackUserId,
+    needsAgentSessions: !!config.hub?.enabled && !config.agentSessions?.enabled,
+    sandboxAvailable: sandboxAvailable(),
+    sandboxMode: config.hub?.delegatedSandbox,
   }
 
   if (env.SLACK_BOT_TOKEN) {

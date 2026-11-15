@@ -38,10 +38,32 @@ export function assertInsideRepo(repoRoot, requestedPath) {
   return resolvedPath
 }
 
-export function createFsHandlers(repoRoot) {
+// A registered repo may legitimately sit above the bridge's own home (a repo
+// registered as ~ is the usual way), so repo scoping alone would let an agent
+// read the policy file or tokens. Delegated sessions refuse those paths even
+// when they fall inside the repo root (PLAN D74).
+export function assertNotProtected(requestedPath, protectedList) {
+  const resolved = resolve(requestedPath)
+  for (const root of protectedList) {
+    const protectedRoot = resolve(root)
+    if (resolved === protectedRoot || resolved.startsWith(protectedRoot + sep)) {
+      throw new Error(`path is protected: ${requestedPath}`)
+    }
+  }
+}
+
+export function createFsHandlers(repoRoot, { protectedList = [] } = {}) {
+  const check = path => {
+    const resolved = assertInsideRepo(repoRoot, path)
+    if (protectedList.length) {
+      assertNotProtected(resolved, protectedList)
+      assertNotProtected(realpathOfExistingAncestor(resolved), protectedList)
+    }
+    return resolved
+  }
   return {
     async readTextFile({ path, line, limit }) {
-      const resolved = assertInsideRepo(repoRoot, path)
+      const resolved = check(path)
       const content = await readFile(resolved, 'utf8')
       if (line == null && limit == null) return { content }
       const lines = content.split('\n')
@@ -50,7 +72,7 @@ export function createFsHandlers(repoRoot) {
       return { content: lines.slice(start, end).join('\n') }
     },
     async writeTextFile({ path, content }) {
-      const resolved = assertInsideRepo(repoRoot, path)
+      const resolved = check(path)
       await mkdir(dirname(resolved), { recursive: true })
       await writeFile(resolved, content, 'utf8')
       return {}

@@ -7,6 +7,7 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { assertInsideRepo } from './acp-fs.js'
+import { scrubEnv, wrapForSandbox, protectedPaths } from './hub/sandbox.js'
 
 function appendOutput(entry, chunk, byteLimit) {
   entry.output += chunk
@@ -18,16 +19,24 @@ function appendOutput(entry, chunk, byteLimit) {
   }
 }
 
-export function createTerminalHandlers(repoRoot) {
+// `delegated` (PLAN D74) marks a session someone else started on this
+// machine: its commands get the strict environment scrub and, when
+// `sandbox` is not 'off', run under the sandbox that denies the bridge's
+// home directory. Every session, delegated or not, never inherits the
+// listener's own SLACK_*/TSB_* variables.
+export function createTerminalHandlers(repoRoot, { delegated = false, sandbox = 'auto', extraProtectedPaths = [] } = {}) {
   const terminals = new Map()
 
   return {
     async createTerminal({ command, args = [], env = [], cwd, outputByteLimit }) {
       const resolvedCwd = assertInsideRepo(repoRoot, cwd || repoRoot)
       const terminalId = randomUUID()
-      const childEnv = { ...process.env }
+      const childEnv = scrubEnv(process.env, delegated ? 'strict' : 'base')
       for (const { name, value } of env) childEnv[name] = value
-      const child = spawn(command, args, { cwd: resolvedCwd, env: childEnv })
+      const target = delegated
+        ? wrapForSandbox({ command, args, mode: sandbox, paths: protectedPaths(extraProtectedPaths) })
+        : { command, args }
+      const child = spawn(target.command, target.args, { cwd: resolvedCwd, env: childEnv })
       const entry = { child, output: '', truncated: false, exitStatus: null }
       child.stdout.on('data', chunk => appendOutput(entry, chunk.toString('utf8'), outputByteLimit))
       child.stderr.on('data', chunk => appendOutput(entry, chunk.toString('utf8'), outputByteLimit))

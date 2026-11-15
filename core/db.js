@@ -65,6 +65,31 @@ export function getDb(path) {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS hub_requests (
+      id TEXT PRIMARY KEY,
+      requester_id TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      backend TEXT,
+      model TEXT,
+      task TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      thread_ts TEXT,
+      card_channel TEXT,
+      card_ts TEXT,
+      status TEXT NOT NULL,
+      level TEXT,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      decided_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS thread_routes (
+      channel TEXT NOT NULL,
+      thread_ts TEXT NOT NULL,
+      host_user_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (channel, thread_ts)
+    );
     CREATE TABLE IF NOT EXISTS remote_audit (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       created_at TEXT NOT NULL,

@@ -94,6 +94,8 @@ terminal, an MCP client, or `skill/SKILL.md`.
 | **App Home tab** | Publish/refresh a per-user App Home view | `cli/home.js` | App Home |
 | **Output mode** | Low/medium/high verbosity, settable locally or via a Slack slash command | `cli/output-mode.js` | Output mode |
 | **Socket Mode listener** | Real-time events (approvals, free-text answers, ACP triggers) — foreground (`cli/listen.js`) or a managed daemon (`cli/daemon.js`) | `cli/daemon.js start` | Socket Mode listener |
+| **Delegated sessions (hub)** | `start session on <person>: <task>` runs on that person's machine after their approval, with per-repo grants, stop/restart/block controls and a sandboxed agent. Embedded or via a network hub. Opt-in (`hub.enabled`) | `cli/hub.js`, `cli/hub-server.js`, `cli/hub-connect.js`, `HUB.md` | Hub |
+| **Multi-account listener** | One supervisor serving every workspace (`cli/daemon.js start --all`), per-account state under `TSB_HOME/run/` | `cli/daemon.js`, `HUB.md` | Hub |
 | **HTTP Events API / slash commands** | An alternative to Socket Mode for webhook-style delivery, off by default | `cli/http.js` | HTTP Events API and slash commands |
 | **ACP agent sessions** | A Slack thread becomes a live coding-agent session (Claude/Codex/OpenCode/Gemini CLI) — start, converse, hand off at the context limit, close, reopen | `/agent-session start`, `cli/agent-session.js` | Agent sessions |
 | **Away mode** | Route a *local* coding session's permission prompts to a Slack DM so you can step away | `cli/away.js`, `cli/hooks-install.js` | Away mode |

@@ -22,6 +22,8 @@ import { spawn } from 'node:child_process'
 import { Writable, Readable } from 'node:stream'
 import { client, ndJsonStream, methods, PROTOCOL_VERSION } from '@agentclientprotocol/sdk'
 
+import { scrubEnv } from './hub/sandbox.js'
+
 const backendConnections = new Map() // backendName -> Promise<{ connection, child, sessions }>
 
 function forSession(sessions, sessionId, what) {
@@ -40,7 +42,7 @@ function connectBackend(backend, env) {
   // Confirmed the hard way: without this, claude-agent-acp silently fell
   // back to its own OAuth flow and failed with a stale/expired session
   // instead of using the configured Bedrock credentials.
-  const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'inherit'], env: { ...process.env, ...env } })
+  const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'inherit'], env: { ...scrubEnv(process.env, 'base'), ...scrubEnv(env, 'base') } })
   const stream = ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout))
   const sessions = new Map()
 
@@ -71,9 +73,13 @@ function connectBackend(backend, env) {
     .then(initializeResponse => ({ connection, child, sessions, initializeResponse }))
 }
 
-export function getBackendConnection(backend, env) {
-  if (!backendConnections.has(backend.name)) backendConnections.set(backend.name, connectBackend(backend, env))
-  return backendConnections.get(backend.name)
+// Keyed per account (`scope`, the account's database path) as well as backend:
+// one process can serve several workspaces (PLAN D75), and a backend child
+// spawned with workspace A's environment must never serve workspace B.
+export function getBackendConnection(backend, env, scope = '') {
+  const key = `${scope}\u0000${backend.name}`
+  if (!backendConnections.has(key)) backendConnections.set(key, connectBackend(backend, env))
+  return backendConnections.get(key)
 }
 
 // Called once a session/new (or resumed/loaded) session is established,

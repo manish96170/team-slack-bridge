@@ -16,6 +16,8 @@ Opt-in. Off by default. Nothing here changes how a session on your own machine w
 
 Starting a session on your own machine is unchanged: `start session <task>`.
 
+The two setups, with flow diagrams, are in the README section *Delegated sessions*.
+
 ## Syntax
 
 | You type | Meaning |

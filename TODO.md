@@ -592,3 +592,10 @@ asks; no safety concerns beyond the existing read-only posture.
       state entirely; the session just resumes normally, ungated, no follow-up
       questions pending. Same lazy-resume tradeoff as D29, just not called out
       separately before now.
+- [ ] **Hub: live verification.** D74/D75 are verified only against a faked Slack client and
+      the existing suite; no dedicated tests were written. Run it for real against the
+      workspace (approval card, control card, offline reply, `--all` with two accounts) and
+      add tests before relying on it.
+- [ ] **Hub: slash commands / message shortcut over the network hub**, and WebSocket
+      transport, are not built (HTTP streaming is used).
+

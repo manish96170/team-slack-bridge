@@ -1316,3 +1316,16 @@ write (D44) — if any of these were created before this protection existed, run
 chmod 600 ~/.team-slack-bridge/.env ~/.team-slack-bridge/slack-config.json \
   ~/.team-slack-bridge/accounts.json ~/.team-slack-bridge/repos.json
 ```
+
+## Delegated sessions, multi-account listener, limits (PLAN D74/D75)
+
+- `start session on <person>: <task>` runs on that person's machine after their approval.
+  Per-repo grants (`always`/`ask`/`readonly`), owner Stop/Restart/Block, sandboxed agent,
+  scrubbed environment. Embedded (one app per person) or network hub (one shared app).
+  Config `hub`; CLI `tsb-hub`, `tsb-hub-server`, `tsb-hub-connect`. See `HUB.md`.
+- `cli/daemon.js start --all` runs one supervisor serving every workspace; state is under
+  `<TSB_HOME>/run/<name>/`; `"listen": false` on an account opts it out.
+- `agentSessions.maxConcurrentSessions`, `maxSessionsPerUser`, `idleTimeoutMinutes`,
+  `worktrees` (`off|delegated|all`).
+- `doctor` reports per-account listener readiness, skipped accounts and hub setup.
+

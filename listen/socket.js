@@ -76,7 +76,7 @@ export function createListener({ env, botToken, appToken, config, configPath, db
         startSession: request => startAgentSession({ env, config, dbPath, ...request }),
         stopSession: ({ id }) => closeAgentSessionById({ dbPath, config, id, requestedBy: ownerId }),
         restartSession: ({ id }) => reopenAgentSession({ dbPath, config, id, requestedBy: ownerId }),
-        stopAllFor: requesterId => closeSessionsByRequester({ dbPath, config, requesterId, ownerId }),
+        stopAllFor: (requesterId, repos) => closeSessionsByRequester({ dbPath, config, requesterId, ownerId, repos }),
       })
     )
     hub = createHub({ env, config, dbPath, store: createPolicyStore({ home: homeDir || dirname(dbPath), ownerId }), hosts, ownerId })

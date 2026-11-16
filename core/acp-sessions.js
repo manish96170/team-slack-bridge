@@ -383,7 +383,7 @@ async function tryResumeSession({ env, config, dbPath, channel, threadTs, reques
   }
   const workPath = persisted.metadata?.repoPath || repoPath
   try {
-    const backendConnection = await getBackendConnection(backend, env, dbPath)
+    const backendConnection = await getBackendConnection(backend, env, dbPath, { delegatedPaths: delegation && config.hub?.delegatedSandbox !== 'off' ? protectedPaths([sessionHome(env, dbPath)]) : undefined })
     connection = backendConnection.connection
     sessions = backendConnection.sessions
     const caps = backendConnection.initializeResponse?.agentCapabilities
@@ -398,8 +398,8 @@ async function tryResumeSession({ env, config, dbPath, channel, threadTs, reques
 
     const updateQueue = createUpdateQueue()
     registerSession(sessions, acpSessionId, {
-      fsHandlers: createFsHandlers(workPath, { protectedList: delegation ? protectedPaths() : [] }),
-      terminalHandlers: createTerminalHandlers(workPath, { delegated: Boolean(delegation), sandbox: config.hub?.delegatedSandbox }),
+      fsHandlers: createFsHandlers(workPath, { protectedList: delegation ? protectedPaths([sessionHome(env, dbPath)]) : [] }),
+      terminalHandlers: createTerminalHandlers(workPath, { delegated: Boolean(delegation), sandbox: config.hub?.delegatedSandbox, extraProtectedPaths: [sessionHome(env, dbPath)] }),
       onPermissionRequest: params => handlePermissionRequest({ env, dbPath, channel, threadTs, requestedBy, params, delegation, repoName }),
       updateQueue,
     })
@@ -941,7 +941,7 @@ async function startAgentSessionBody({ env, config, dbPath, channel, backend, re
   // sees. Anything past this point that fails now updates the Slack
   // message with the real error instead of hanging silently.
   try {
-    const { connection, sessions } = await getBackendConnection(backend, env, dbPath)
+    const { connection, sessions } = await getBackendConnection(backend, env, dbPath, { delegatedPaths: delegation && config.hub?.delegatedSandbox !== 'off' ? protectedPaths([sessionHome(env, dbPath)]) : undefined })
     let workPath = repo.path
     let worktree
     const wantWorktree = config.agentSessions?.worktrees === 'all' || (config.agentSessions?.worktrees === 'delegated' && delegation)
@@ -1006,8 +1006,8 @@ async function startAgentSessionBody({ env, config, dbPath, channel, backend, re
     notifySessionBound(dbPath, { channel, threadTs: anchorThreadTs })
 
     registerSession(sessions, activeSession.sessionId, {
-      fsHandlers: createFsHandlers(workPath, { protectedList: delegation ? protectedPaths() : [] }),
-      terminalHandlers: createTerminalHandlers(workPath, { delegated: Boolean(delegation), sandbox: config.hub?.delegatedSandbox }),
+      fsHandlers: createFsHandlers(workPath, { protectedList: delegation ? protectedPaths([sessionHome(env, dbPath)]) : [] }),
+      terminalHandlers: createTerminalHandlers(workPath, { delegated: Boolean(delegation), sandbox: config.hub?.delegatedSandbox, extraProtectedPaths: [sessionHome(env, dbPath)] }),
       onPermissionRequest: params => handlePermissionRequest({ env, dbPath, channel, threadTs: anchorThreadTs, requestedBy, params, delegation, repoName: repo.name }),
     })
 
@@ -1331,9 +1331,12 @@ export function reopenAgentSession({ dbPath, config, id, requestedBy }) {
 // thread each stopped session lived in so the hub can tell the requester why
 // their session went quiet. Delegated sessions only: a user's sessions on
 // their own machine are not the hub's to stop.
-export async function closeSessionsByRequester({ dbPath, config, requesterId, ownerId }) {
+export async function closeSessionsByRequester({ dbPath, config, requesterId, ownerId, repos }) {
   const candidates = listAgentSessions({ dbPath, kind: 'acp-session', limit: 1000 }).filter(
-    row => row.status !== 'closed' && row.metadata?.requestedBy === requesterId && row.metadata?.delegation
+    row => row.status !== 'closed' &&
+      row.metadata?.requestedBy === requesterId &&
+      row.metadata?.delegation &&
+      (!repos?.length || repos.includes(row.metadata?.repoName))
   )
   const stopped = []
   for (const row of candidates) {

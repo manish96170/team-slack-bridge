@@ -22,7 +22,7 @@ import { spawn } from 'node:child_process'
 import { Writable, Readable } from 'node:stream'
 import { client, ndJsonStream, methods, PROTOCOL_VERSION } from '@agentclientprotocol/sdk'
 
-import { scrubEnv } from './hub/sandbox.js'
+import { scrubEnv, wrapForSandbox } from './hub/sandbox.js'
 
 const backendConnections = new Map() // backendName -> Promise<{ connection, child, sessions }>
 
@@ -32,7 +32,7 @@ function forSession(sessions, sessionId, what) {
   return entry
 }
 
-function connectBackend(backend, env) {
+function connectBackend(backend, env, { sandboxPaths } = {}) {
   const command = backend.command()
   const args = backend.args()
   // Without this, the spawned backend only sees the LISTENER process's own
@@ -42,7 +42,11 @@ function connectBackend(backend, env) {
   // Confirmed the hard way: without this, claude-agent-acp silently fell
   // back to its own OAuth flow and failed with a stale/expired session
   // instead of using the configured Bedrock credentials.
-  const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'inherit'], env: { ...scrubEnv(process.env, 'base'), ...scrubEnv(env, 'base') } })
+  // A backend serving delegated sessions runs under the sandbox that denies the
+  // bridge's home directories (D76), so its OWN tools cannot read the policy
+  // file, key or tokens either. It keeps model credentials (it needs them).
+  const target = sandboxPaths ? wrapForSandbox({ command, args, mode: 'auto', paths: sandboxPaths }) : { command, args }
+  const child = spawn(target.command, target.args, { stdio: ['pipe', 'pipe', 'inherit'], env: { ...scrubEnv(process.env, 'base'), ...scrubEnv(env, 'base') } })
   const stream = ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout))
   const sessions = new Map()
 
@@ -76,9 +80,12 @@ function connectBackend(backend, env) {
 // Keyed per account (`scope`, the account's database path) as well as backend:
 // one process can serve several workspaces (PLAN D75), and a backend child
 // spawned with workspace A's environment must never serve workspace B.
-export function getBackendConnection(backend, env, scope = '') {
-  const key = `${scope}\u0000${backend.name}`
-  if (!backendConnections.has(key)) backendConnections.set(key, connectBackend(backend, env))
+// `delegatedPaths` (D76) selects a SEPARATE, sandboxed backend process for
+// delegated sessions, so they never share an unrestricted agent process with
+// the owner's own sessions.
+export function getBackendConnection(backend, env, scope = '', { delegatedPaths } = {}) {
+  const key = `${scope}\u0000${delegatedPaths ? 'delegated\u0000' : ''}${backend.name}`
+  if (!backendConnections.has(key)) backendConnections.set(key, connectBackend(backend, env, { sandboxPaths: delegatedPaths }))
   return backendConnections.get(key)
 }
 

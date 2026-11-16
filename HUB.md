@@ -65,10 +65,20 @@ At the machine: `tsb-hub status|grants|grant|revoke|block|unblock|resign`.
 2. Terminal commands get a scrubbed environment: no `SLACK_*`/`TSB_*` ever; delegated
    sessions also lose anything token/secret/password/key shaped and AWS credentials.
 3. Only the owner's Slack id changes a grant. A requester can never raise their own access.
-4. Block or revoke stops the requester's running sessions and refuses their next message.
+4. Block stops all of the requester's running delegated sessions and refuses their next message; revoke stops those on the revoked repos. A command already running inside the agent's own tools may finish.
 5. Every grant change is appended to the signed policy's audit list.
 
 ## What this does NOT protect against (read this)
+
+- **Delegated sessions use their own sandboxed backend process** (D76), so the agent's built-in
+  tools cannot read the bridge's home directory either. That backend still holds your model
+  credentials (it needs them) and runs as your OS user; `sandbox-exec` is the only barrier,
+  it is deprecated, and it does not exist off macOS. For stronger isolation run delegated
+  sessions under a separate OS user, container or VM. Treat approving a session as granting
+  that agent real access to the repo you chose.
+- The network hub serves ONE Slack workspace; host tokens and thread routes are keyed by user
+  id and channel, not workspace. A host can only bind a thread the hub just forwarded to it.
+
 
 - The sandbox covers commands the **bridge** runs for the agent (ACP `terminal/*`). If an
   agent backend runs its own tools outside those handlers, that code is not sandboxed.

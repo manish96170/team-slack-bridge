@@ -10,7 +10,7 @@
 //   startSession(request)       start a session; resolves to the session result
 //   stopSession({ id })         close one session row
 //   restartSession({ id })      reopen a closed session row
-//   stopAllFor(requesterId)     close every open session that requester started
+//   stopAllFor(requesterId, repos?)  close that requester's open delegated sessions (optionally only those on `repos`)
 
 export function createHostRegistry() {
   const hosts = new Map()

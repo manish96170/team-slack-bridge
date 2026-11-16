@@ -44,7 +44,7 @@ export function resolveAnonymousMessage(argValue, config) {
 
 // Footer format (on request, 2026-10-27): plain name first, "(@handle, memberId)"
 // second, a bold "no-reply" marker last — e.g.
-//   "— sent via bot by Manish Sharma (@manish.sharma, U055NFSGF88) *no-reply*"
+//   "— sent via bot by John Smith (@john.smith, U0123ABC) *no-reply*"
 // `*no-reply*` is Slack mrkdwn bold (single asterisks, not markdown's **),
 // since this text is sent as a chat.postMessage `text` body, not rendered
 // through a markdown processor — it tells the recipient a reply here goes

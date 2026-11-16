@@ -56,8 +56,8 @@ a configured default company, just "DM `<person>`: `<text>`") into a real Slack 
 without the raw `cli/dm.js` capability's bare `--user U0123ABC` assumption above:
 
 ```bash
-node cli/dm-by-name.js --to "pulkit.jain" --company anchor --text "hi" --json
-node cli/dm-by-name.js --to "pulkit.jain" --text "hi" --json   # uses the registered default company
+node cli/dm-by-name.js --to "daniel.reed" --company work --text "hi" --json
+node cli/dm-by-name.js --to "daniel.reed" --text "hi" --json   # uses the registered default company
 ```
 
 **If this refuses with `error:"no-company-specified-and-no-default-configured"`, ask
@@ -74,11 +74,11 @@ header or the README's "Plain-English cross-company messaging" section for
 
 ## Existing group DM by name (PLAN D70)
 
-For "Message Shrestha, Manish, and Alex: hi", use the existing-MPIM command:
+For "Message Jeremy, John, and Alex: hi", use the existing-MPIM command:
 
 ```bash
-node cli/group-dm-by-name.js --to "Shrestha,Manish,Alex" --text "hi" --json          # preview + approval prompt
-node cli/group-dm-by-name.js --to "Shrestha,Manish,Alex" --text "hi" --confirm --json  # only after the user approved
+node cli/group-dm-by-name.js --to "Jeremy,John,Alex" --text "hi" --json          # preview + approval prompt
+node cli/group-dm-by-name.js --to "Jeremy,John,Alex" --text "hi" --confirm --json  # only after the user approved
 ```
 
 **Group communication always needs the user's approval.** Without `--confirm` the command
@@ -96,7 +96,7 @@ If (and only if) the user says yes, create it explicitly. This needs `--confirm`
 as-user only, and never modifies an already-existing group:
 
 ```bash
-node cli/group-dm-create.js --to "Shrestha,Manish,Alex" [--topic "Release sync"] [--text "hi"] --confirm --json
+node cli/group-dm-create.js --to "Jeremy,John,Alex" [--topic "Release sync"] [--text "hi"] --confirm --json
 node cli/group-topic.js --channel G0123ABCD --topic "Release sync" --confirm --json   # existing group DM only; approval needed too
 ```
 

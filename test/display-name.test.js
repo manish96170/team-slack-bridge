@@ -11,14 +11,14 @@ const makeConfig = users => ({
 })
 
 const team = () => makeConfig([
-  { name: 'Pulkit Jain', slackHandle: '@pulkit.jain', displayName: '@PJ', slackUserId: 'U_PJ' },
+  { name: 'Daniel Reed', slackHandle: '@daniel.reed', displayName: '@DR', slackUserId: 'U_DR' },
   { name: 'Shuhao Pang', slackHandle: '@shuhao.pang', displayName: '@portia.p', slackUserId: 'U_PORTIA' },
 ])
 
 test('resolveUser resolves a configured displayName, case-insensitively and with or without "@"', () => {
   const config = team()
-  assert.deepEqual(resolveUser('@PJ', config), { ok: true, userId: 'U_PJ', name: 'Pulkit Jain' })
-  assert.deepEqual(resolveUser('pj', config), { ok: true, userId: 'U_PJ', name: 'Pulkit Jain' })
+  assert.deepEqual(resolveUser('@DR', config), { ok: true, userId: 'U_DR', name: 'Daniel Reed' })
+  assert.deepEqual(resolveUser('dr', config), { ok: true, userId: 'U_DR', name: 'Daniel Reed' })
   assert.deepEqual(resolveUser('Portia.P', config), { ok: true, userId: 'U_PORTIA', name: 'Shuhao Pang' })
 })
 
@@ -26,7 +26,7 @@ test('resolveUser still resolves name and slackHandle when a displayName is also
   const config = team()
   assert.equal(resolveUser('Shuhao Pang', config).userId, 'U_PORTIA')
   assert.equal(resolveUser('@shuhao.pang', config).userId, 'U_PORTIA')
-  assert.equal(resolveUser('U_PJ', config).userId, 'U_PJ')
+  assert.equal(resolveUser('U_DR', config).userId, 'U_DR')
 })
 
 test("a name/slackHandle match wins over another user's identical displayName", () => {
@@ -49,7 +49,7 @@ test('a displayName shared by two configured users is refused as ambiguous, neve
 })
 
 test('resolveMentions turns a configured @displayName into a real mention', () => {
-  assert.equal(resolveMentions('Reviewer: @PJ @portia.p', team()), 'Reviewer: <@U_PJ> <@U_PORTIA>')
+  assert.equal(resolveMentions('Reviewer: @DR @portia.p', team()), 'Reviewer: <@U_DR> <@U_PORTIA>')
 })
 
 test('resolveMentions leaves an ambiguous @displayName exactly as typed', () => {
@@ -61,7 +61,7 @@ test('resolveMentions leaves an ambiguous @displayName exactly as typed', () => 
 })
 
 test('users without a displayName behave exactly as before', () => {
-  const config = makeConfig([{ name: 'PJ', slackHandle: '@pj', slackUserId: 'U_PJ' }])
-  assert.equal(resolveUser('@pj', config).userId, 'U_PJ')
+  const config = makeConfig([{ name: 'PJ', slackHandle: '@pj', slackUserId: 'U_DR' }])
+  assert.equal(resolveUser('@pj', config).userId, 'U_DR')
   assert.equal(resolveUser('@nobody', config).error, 'user-not-configured')
 })

@@ -265,8 +265,8 @@ An MPIM belongs to the participating users, not the shared bot; this feature has
 Use:
 
 ```bash
-node cli/group-dm-by-name.js --to "Shrestha Srivastava,Manish,Alex" --text "hi" --confirm [--company anchor] [--dry-run] [--json]
-tsb-group-dm --to "Shrestha Srivastava,Manish,Alex" --text "hi" --confirm [--company anchor] [--dry-run] [--json]  # global install
+node cli/group-dm-by-name.js --to "Jeremy Smith,John,Alex" --text "hi" --confirm [--company work] [--dry-run] [--json]
+tsb-group-dm --to "Jeremy Smith,John,Alex" --text "hi" --confirm [--company work] [--dry-run] [--json]  # global install
 ```
 
 The names mean **other recipients**; the locally authorized sender is added
@@ -323,9 +323,9 @@ exposes either tool. Requires the user token's `mpim:write` (create) and
 `mpim:write.topic` (topic) scopes. Every real action needs approval -- see above.
 
 ```bash
-node cli/group-dm-create.js --to "Shrestha,Manish,Alex" [--topic "Release sync"] [--text "first message"] --confirm [--company anchor] [--dry-run] [--json]
-tsb-group-dm-create --to "Shrestha,Manish,Alex" --confirm ...      # global install
-node cli/group-topic.js --channel G0123ABCD --topic "Release sync" --confirm [--company anchor] [--dry-run] [--json]
+node cli/group-dm-create.js --to "Jeremy,John,Alex" [--topic "Release sync"] [--text "first message"] --confirm [--company work] [--dry-run] [--json]
+tsb-group-dm-create --to "Jeremy,John,Alex" --confirm ...      # global install
+node cli/group-topic.js --channel G0123ABCD --topic "Release sync" --confirm [--company work] [--dry-run] [--json]
 tsb-group-topic --channel G0123ABCD --topic "..." --confirm        # global install
 ```
 
@@ -356,8 +356,8 @@ a combined resolve-and-send wrapper around it, not a separate send path.
 Use:
 
 ```bash
-node cli/dm-by-name.js --to "pulkit.jain" --company anchor --text "hi" [--as-user] [--dry-run] [--json]
-tsb-dm --to "pulkit.jain" --company anchor --text "hi" [--as-user] [--dry-run] [--json]   # global install
+node cli/dm-by-name.js --to "daniel.reed" --company work --text "hi" [--as-user] [--dry-run] [--json]
+tsb-dm --to "daniel.reed" --company work --text "hi" [--as-user] [--dry-run] [--json]   # global install
 ```
 
 `core/people.js`'s `dmByName({ accountName, personName, text, asUser, dryRun })` resolves
@@ -366,10 +366,10 @@ multi-account registry, deliberately kept separate from `core/tenant-store.js`'s
 team_id-keyed one (D54), which resolves an incoming *signed webhook*, not a *human-typed
 name*. An install where a company is only registered in `tenants.json` so far needs it
 registered in `accounts.json` under a friendly name too (`node cli/accounts.js add
-anchor --home <that tenant's home>`) before `--company anchor` means anything.
+work --home <that tenant's home>`) before `--company work` means anything.
 
 `--company` omitted uses the registry's own registered default
-(`node cli/accounts.js set-default anchor`). Resolves the person via
+(`node cli/accounts.js set-default work`). Resolves the person via
 `core/directory.js`'s live `lookupUser` (live-first — a config-file-first attempt would
 only save one Slack round trip for someone already in that account's
 `slack-config.json`, and this feature's whole point is reaching people who are not) and
@@ -459,7 +459,7 @@ reinstall/re-authorize to take effect live — same outstanding step as "DM as u
 ### Configured users — `slack_resolve_user` display names (PLAN D55)
 
 Default: on. A `slack-config.json` user entry may carry an optional `displayName`
-(Slack's short/display name, e.g. `@PJ`) next to `name` and `slackHandle`:
+(Slack's short/display name, e.g. `@DR`) next to `name` and `slackHandle`:
 
 ```json
 { "name": "Jane Doe", "slackHandle": "@jane.doe", "displayName": "@JD", "slackUserId": "U0123ABC" }
@@ -481,16 +481,16 @@ fast, and deterministic, and is unaffected by any of this.
 Use:
 
 ```text
-slack_lookup_user { "query": "U055NFSGF88" }                       -> users.info
+slack_lookup_user { "query": "U0123ABC" }                       -> users.info
 slack_lookup_user { "query": "jane.doe@example.com" } -> users.lookupByEmail
-slack_lookup_user { "query": "@manish.sharma" }                    -> paginated users.list, matched
+slack_lookup_user { "query": "@john.smith" }                    -> paginated users.list, matched
 slack_lookup_user { "query": "Jane Doe", "mode": "name" }     -> same directory search
 ```
 
 ```bash
-node cli/lookup-user.js --query U055NFSGF88 --json
+node cli/lookup-user.js --query U0123ABC --json
 node cli/lookup-user.js --query jane.doe@example.com --json
-node cli/lookup-user.js --query @manish.sharma --as-user --json   # SLACK_USER_TOKEN instead of the bot token
+node cli/lookup-user.js --query @john.smith --as-user --json   # SLACK_USER_TOKEN instead of the bot token
 node cli/lookup-user.js --query "Jane Doe" --mode name --include-email --json
 ```
 

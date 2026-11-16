@@ -44,13 +44,13 @@ test('loadContext resolves to raw TSB_HOME when accounts.json does not exist (un
 
 test('loadContext follows the registered default account, not just raw TSB_HOME (D66)', () =>
   withTempHome(async dir => {
-    const otherHome = join(dir, 'anchor')
+    const otherHome = join(dir, 'work')
     mkdirSync(otherHome, { recursive: true })
-    writeFileSync(join(otherHome, '.env'), 'SLACK_BOT_TOKEN=xoxb-anchor-token\n')
-    writeFileSync(join(otherHome, 'slack-config.json'), JSON.stringify({ owner: { slackUserId: 'U0ANCHOR' } }))
+    writeFileSync(join(otherHome, '.env'), 'SLACK_BOT_TOKEN=xoxb-work-token\n')
+    writeFileSync(join(otherHome, 'slack-config.json'), JSON.stringify({ owner: { slackUserId: 'U0WORK' } }))
     writeFileSync(
       join(dir, 'accounts.json'),
-      JSON.stringify({ default: 'anchor', accounts: { default: { home: dir }, anchor: { home: otherHome } } })
+      JSON.stringify({ default: 'work', accounts: { default: { home: dir }, work: { home: otherHome } } })
     )
 
     const { REPO_ROOT, CONFIG_PATH, LEDGER_PATH, loadContext } = await freshContext()
@@ -59,8 +59,8 @@ test('loadContext follows the registered default account, not just raw TSB_HOME 
     assert.equal(LEDGER_PATH, join(otherHome, '.ledger.sqlite'))
 
     const context = loadContext()
-    assert.equal(context.env.SLACK_BOT_TOKEN, 'xoxb-anchor-token')
-    assert.equal(context.config.owner.slackUserId, 'U0ANCHOR')
+    assert.equal(context.env.SLACK_BOT_TOKEN, 'xoxb-work-token')
+    assert.equal(context.config.owner.slackUserId, 'U0WORK')
     assert.equal(context.dbPath, join(otherHome, '.ledger.sqlite'))
   }))
 

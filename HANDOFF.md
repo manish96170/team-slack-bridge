@@ -6,7 +6,7 @@ Paste everything below into a new session to start implementation.
 
 ## Repo and context
 
-Work in `/Users/Manish.Sharma/hornblower/team-slack-bridge` (git repo, `main` branch,
+Work in `~/projects/team-slack-bridge` (git repo, `main` branch,
 public on GitHub as `manish96170/team-slack-bridge`, also published to npm as
 `team-slack-bridge`). This is a Slack bridge library: CLI scripts + a local/remote MCP
 server, built as thin adapters over plain functions in `core/`.
@@ -25,10 +25,10 @@ server, built as thin adapters over plain functions in `core/`.
 ## The task, in one paragraph
 
 Let a human (or the `skill/SKILL.md` natural-language skill) send a DM by saying
-something like "DM pulkit.jain in anchor: hi" — resolving `anchor` to a registered
-local account (`core/accounts.js`, already built) and `pulkit.jain` to that account's
+something like "DM daniel.reed in work: hi" — resolving `work` to a registered
+local account (`core/accounts.js`, already built) and `daniel.reed` to that account's
 real Slack user ID via a live directory lookup (`core/directory.js`'s `lookupUser`,
-already built) — or, with a configured default account, just "DM pulkit.jain: hi"
+already built) — or, with a configured default account, just "DM daniel.reed: hi"
 with no company named at all. If no company is named **and** no default account is
 configured, the underlying tool must refuse with a specific, distinct error code so
 the skill layer (not application code) can ask the user which company, rather than

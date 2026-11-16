@@ -26,7 +26,7 @@ function withTempHome(fn) {
 // into another's assertions.
 let tokenCounter = 0
 function writeAccountEnv(home) {
-  const token = `xoxb-anchor-token-${++tokenCounter}`
+  const token = `xoxb-work-token-${++tokenCounter}`
   mkdirSync(home, { recursive: true })
   writeFileSync(join(home, '.env'), `SLACK_BOT_TOKEN=${token}\n`)
   return token
@@ -70,13 +70,13 @@ function withMockSlack(fn, options) {
 test('dmByName resolves the account, looks up the person, and sends with an explicit --company', () =>
   withTempHome(dir =>
     withMockSlack(async calls => {
-      const anchorHome = join(dir, 'anchor')
-      const token = writeAccountEnv(anchorHome)
-      addAccount('anchor', anchorHome)
+      const workHome = join(dir, 'work')
+      const token = writeAccountEnv(workHome)
+      addAccount('work', workHome)
 
-      const result = await dmByName({ accountName: 'anchor', personName: 'jane.doe', text: 'hi' })
+      const result = await dmByName({ accountName: 'work', personName: 'jane.doe', text: 'hi' })
       assert.equal(result.ok, true)
-      assert.equal(result.account, 'anchor')
+      assert.equal(result.account, 'work')
       assert.equal(result.person.id, 'U0JANE001')
       assert.equal(result.send.ok, true)
       assert.ok(calls.some(c => c.method === 'users.list' && c.token === token))
@@ -87,14 +87,14 @@ test('dmByName resolves the account, looks up the person, and sends with an expl
 test('dmByName falls back to the registered default account when --company is omitted', () =>
   withTempHome(dir =>
     withMockSlack(async () => {
-      const anchorHome = join(dir, 'anchor')
-      writeAccountEnv(anchorHome)
-      addAccount('anchor', anchorHome)
-      setDefaultAccount('anchor')
+      const workHome = join(dir, 'work')
+      writeAccountEnv(workHome)
+      addAccount('work', workHome)
+      setDefaultAccount('work')
 
       const result = await dmByName({ personName: 'jane.doe', text: 'hi' })
       assert.equal(result.ok, true)
-      assert.equal(result.account, 'anchor')
+      assert.equal(result.account, 'work')
     })
   ))
 
@@ -123,11 +123,11 @@ test('dmByName propagates ambiguous-user from lookupUser without swallowing it',
   withTempHome(dir =>
     withMockSlack(
       async () => {
-        const anchorHome = join(dir, 'anchor')
-        writeAccountEnv(anchorHome)
-        addAccount('anchor', anchorHome)
+        const workHome = join(dir, 'work')
+        writeAccountEnv(workHome)
+        addAccount('work', workHome)
 
-        const result = await dmByName({ accountName: 'anchor', personName: 'jane.doe', text: 'hi' })
+        const result = await dmByName({ accountName: 'work', personName: 'jane.doe', text: 'hi' })
         assert.equal(result.ok, false)
         assert.equal(result.error, 'ambiguous-user')
         assert.equal(result.matches.length, 2)
@@ -139,11 +139,11 @@ test('dmByName propagates ambiguous-user from lookupUser without swallowing it',
 test('dmByName --dry-run resolves the person but sends nothing and touches no ledger row', () =>
   withTempHome(dir =>
     withMockSlack(async calls => {
-      const anchorHome = join(dir, 'anchor')
-      writeAccountEnv(anchorHome)
-      addAccount('anchor', anchorHome)
+      const workHome = join(dir, 'work')
+      writeAccountEnv(workHome)
+      addAccount('work', workHome)
 
-      const result = await dmByName({ accountName: 'anchor', personName: 'jane.doe', text: 'hi', dryRun: true })
+      const result = await dmByName({ accountName: 'work', personName: 'jane.doe', text: 'hi', dryRun: true })
       assert.equal(result.ok, true)
       assert.equal(result.send.dryRun, true)
       assert.equal(result.person.id, 'U0JANE001')
@@ -154,13 +154,13 @@ test('dmByName --dry-run resolves the person but sends nothing and touches no le
 
 test('dmByName requires personName and text', () =>
   withTempHome(async dir => {
-    const anchorHome = join(dir, 'anchor')
-    writeAccountEnv(anchorHome)
-    addAccount('anchor', anchorHome)
+    const workHome = join(dir, 'work')
+    writeAccountEnv(workHome)
+    addAccount('work', workHome)
 
-    const noName = await dmByName({ accountName: 'anchor', text: 'hi' })
+    const noName = await dmByName({ accountName: 'work', text: 'hi' })
     assert.deepEqual(noName, { ok: false, error: 'person-name-required', retryable: false })
 
-    const noText = await dmByName({ accountName: 'anchor', personName: 'jane.doe' })
+    const noText = await dmByName({ accountName: 'work', personName: 'jane.doe' })
     assert.deepEqual(noText, { ok: false, error: 'text-required', retryable: false })
   }))

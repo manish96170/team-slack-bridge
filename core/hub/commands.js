@@ -89,8 +89,8 @@ export function parseApprovalReply(text, { requestedRepo, knownRepos }) {
   return { ok: true, decision: 'grant', repos: unique, level }
 }
 
-// "on Nikhil Jain: fix the login bug", "- Nikhil Jain: ...", "on <@U123>: ...",
-// `--on "Nikhil Jain" ...`. `explicit` is true for forms that cannot be a
+// "on Daniel Reed: fix the login bug", "- Daniel Reed: ...", "on <@U123>: ...",
+// `--on "Daniel Reed" ...`. `explicit` is true for forms that cannot be a
 // normal task sentence (mention, quotes, --on, leading dash); a bare
 // "on <words>:" is ambiguous with a task that merely starts with "on", so the
 // caller falls back to a local start when such a name matches no one.

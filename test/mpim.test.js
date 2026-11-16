@@ -7,7 +7,7 @@ import { messageGroupByName, createGroupByName, setGroupTopic } from '../core/mp
 import { clearDirectoryCache } from '../core/directory.js'
 
 const SELF = { id: 'U0SELF001', name: 'me', real_name: 'Me' }
-const SHRESTHA = { id: 'U0SHRE001', name: 'shrestha', real_name: 'Shrestha Srivastava', profile: { display_name: 'Shrestha Srivastava' } }
+const JEREMY = { id: 'U0JERE001', name: 'jeremy', real_name: 'Jeremy Smith', profile: { display_name: 'Jeremy Smith' } }
 const ALEX = { id: 'U0ALEX001', name: 'alex', real_name: 'Alex Doe', profile: { display_name: 'Alex Doe' } }
 
 function withTempDb(fn) {
@@ -21,12 +21,12 @@ function withTempDb(fn) {
     })
 }
 
-function transport({ mpims = [{ id: 'G0EXIST', members: [SELF.id, SHRESTHA.id, ALEX.id] }] } = {}) {
+function transport({ mpims = [{ id: 'G0EXIST', members: [SELF.id, JEREMY.id, ALEX.id] }] } = {}) {
   const calls = []
   const slackCall = async (method, token, body = {}) => {
     calls.push({ method, token, body })
     if (method === 'auth.test') return { ok: true, team_id: 'T0EXAMPLE', user_id: SELF.id, team: 'Example' }
-    if (method === 'users.list') return { ok: true, members: [SELF, SHRESTHA, ALEX], response_metadata: {} }
+    if (method === 'users.list') return { ok: true, members: [SELF, JEREMY, ALEX], response_metadata: {} }
     if (method === 'users.conversations') return { ok: true, channels: mpims.map(({ id }) => ({ id, is_mpim: true })), response_metadata: {} }
     if (method === 'conversations.members') return { ok: true, members: mpims.find(group => group.id === body.channel)?.members || [] }
     if (method === 'chat.postMessage') return { ok: true, channel: body.channel, ts: '1.1' }
@@ -39,7 +39,7 @@ test('messageGroupByName resolves two named recipients, finds an existing exact 
   withTempDb(async dbPath => {
     const { calls, slackCall } = transport()
     const result = await messageGroupByName({
-      peopleNames: ['Shrestha Srivastava', 'Alex Doe'],
+      peopleNames: ['Jeremy Smith', 'Alex Doe'],
       text: 'hi',
       confirm: true,
       userToken: 'xoxp-authorized-human',
@@ -58,9 +58,9 @@ test('messageGroupByName resolves two named recipients, finds an existing exact 
 test('messageGroupByName indexes people and exact MPIM membership so a later identical send stays local until chat.postMessage', async () =>
   withTempDb(async dbPath => {
     const first = transport()
-    await messageGroupByName({ peopleNames: ['Shrestha Srivastava', 'Alex Doe'], text: 'first', confirm: true, userToken: 'xoxp-authorized-human', dbPath, slackCall: first.slackCall })
+    await messageGroupByName({ peopleNames: ['Jeremy Smith', 'Alex Doe'], text: 'first', confirm: true, userToken: 'xoxp-authorized-human', dbPath, slackCall: first.slackCall })
     const second = transport()
-    const result = await messageGroupByName({ peopleNames: ['Shrestha Srivastava', 'Alex Doe'], text: 'second', confirm: true, userToken: 'xoxp-authorized-human', dbPath, slackCall: second.slackCall })
+    const result = await messageGroupByName({ peopleNames: ['Jeremy Smith', 'Alex Doe'], text: 'second', confirm: true, userToken: 'xoxp-authorized-human', dbPath, slackCall: second.slackCall })
     assert.equal(result.ok, true)
     assert.deepEqual(second.calls.map(call => call.method), ['auth.test', 'chat.postMessage'])
   }))
@@ -89,7 +89,7 @@ test('persistent directory cache preserves ambiguous-user refusal instead of sel
 test('messageGroupByName asks before creating anything when no exact existing MPIM exists', async () =>
   withTempDb(async dbPath => {
     const { calls, slackCall } = transport({ mpims: [] })
-    const result = await messageGroupByName({ peopleNames: ['Shrestha Srivastava', 'Alex Doe'], text: 'hi', userToken: 'xoxp-authorized-human', dbPath, slackCall })
+    const result = await messageGroupByName({ peopleNames: ['Jeremy Smith', 'Alex Doe'], text: 'hi', userToken: 'xoxp-authorized-human', dbPath, slackCall })
     assert.equal(result.ok, false)
     assert.equal(result.error, 'mpim-not-found-confirm-create-first')
     assert.ok(!calls.some(call => call.method === 'chat.postMessage'))
@@ -99,7 +99,7 @@ test('messageGroupByName asks before creating anything when no exact existing MP
 test('messageGroupByName dry-run performs safe reads but sends nothing and creates no database file', async () =>
   withTempDb(async dbPath => {
     const { calls, slackCall } = transport()
-    const result = await messageGroupByName({ peopleNames: ['Shrestha Srivastava', 'Alex Doe'], text: 'hi', userToken: 'xoxp-authorized-human', dbPath, dryRun: true, slackCall })
+    const result = await messageGroupByName({ peopleNames: ['Jeremy Smith', 'Alex Doe'], text: 'hi', userToken: 'xoxp-authorized-human', dbPath, dryRun: true, slackCall })
     assert.equal(result.ok, true)
     assert.equal(result.dryRun, true)
     assert.equal(result.request.body.channel, 'G0EXIST')
@@ -108,9 +108,9 @@ test('messageGroupByName dry-run performs safe reads but sends nothing and creat
   }))
 
 test('messageGroupByName requires at least two other recipients and never bot-falls-back without a user token', async () => {
-  const one = await messageGroupByName({ peopleNames: ['Shrestha Srivastava'], text: 'hi', userToken: 'xoxp-authorized-human', slackCall: async () => { throw new Error('not called') } })
+  const one = await messageGroupByName({ peopleNames: ['Jeremy Smith'], text: 'hi', userToken: 'xoxp-authorized-human', slackCall: async () => { throw new Error('not called') } })
   assert.deepEqual(one, { ok: false, error: 'at-least-two-mpim-recipients-required', retryable: false })
-  const missing = await messageGroupByName({ peopleNames: ['Shrestha Srivastava', 'Alex Doe'], text: 'hi' })
+  const missing = await messageGroupByName({ peopleNames: ['Jeremy Smith', 'Alex Doe'], text: 'hi' })
   assert.deepEqual(missing, { ok: false, error: 'user-token-required', retryable: false })
 })
 
@@ -134,7 +134,7 @@ function createTransport({ mpims = [], openError, alreadyOpen } = {}) {
   return { calls: base.calls, slackCall }
 }
 
-const PEOPLE = ['Shrestha Srivastava', 'Alex Doe']
+const PEOPLE = ['Jeremy Smith', 'Alex Doe']
 
 test('createGroupByName refuses without confirm:true and opens nothing, listing who would be included', async () =>
   withTempDb(async dbPath => {
@@ -144,7 +144,7 @@ test('createGroupByName refuses without confirm:true and opens nothing, listing 
     assert.equal(result.error, 'confirm-required-to-create-group-dm')
     assert.equal(result.topic, 'Sync')
     assert.equal(result.text, 'first')
-    assert.deepEqual(result.recipients.map(r => r.id).sort(), [SHRESTHA.id, ALEX.id].sort())
+    assert.deepEqual(result.recipients.map(r => r.id).sort(), [JEREMY.id, ALEX.id].sort())
     assert.ok(!calls.some(call => call.method === 'conversations.open'))
   }))
 
@@ -159,7 +159,7 @@ test('createGroupByName with confirm:true opens the group with the user token, s
     assert.equal(created.textSent, true)
     const open = calls.find(call => call.method === 'conversations.open')
     assert.equal(open.token, 'xoxp-authorized-human')
-    assert.deepEqual(open.body.users.split(',').sort(), [SHRESTHA.id, ALEX.id].sort())
+    assert.deepEqual(open.body.users.split(',').sort(), [JEREMY.id, ALEX.id].sort())
     assert.deepEqual(calls.find(call => call.method === 'conversations.setTopic').body, { channel: 'G0NEW001', topic: 'Release sync' })
     assert.equal(calls.find(call => call.method === 'chat.postMessage').body.channel, 'G0NEW001')
     // The new group is now an "existing" one for later by-name messaging, with no listing needed.
@@ -171,7 +171,7 @@ test('createGroupByName with confirm:true opens the group with the user token, s
 
 test('createGroupByName never touches an already-existing exact group', async () =>
   withTempDb(async dbPath => {
-    const { calls, slackCall } = createTransport({ mpims: [{ id: 'G0EXIST', members: [SELF.id, SHRESTHA.id, ALEX.id] }] })
+    const { calls, slackCall } = createTransport({ mpims: [{ id: 'G0EXIST', members: [SELF.id, JEREMY.id, ALEX.id] }] })
     const result = await createGroupByName({ peopleNames: PEOPLE, topic: 'New topic', text: 'hi', confirm: true, userToken: 'xoxp-authorized-human', dbPath, slackCall })
     assert.equal(result.ok, true)
     assert.equal(result.created, false)
@@ -253,7 +253,7 @@ test('messageGroupByName refuses a real send without confirm:true and returns th
     assert.equal(result.error, 'confirm-required-to-message-group-dm')
     assert.equal(result.text, 'ship it')
     assert.equal(result.conversationId, 'G0EXIST')
-    assert.deepEqual(result.recipients.map(r => r.id).sort(), [SHRESTHA.id, ALEX.id].sort())
+    assert.deepEqual(result.recipients.map(r => r.id).sort(), [JEREMY.id, ALEX.id].sort())
     assert.ok(!calls.some(call => call.method === 'chat.postMessage'))
     const approved = await messageGroupByName({ peopleNames: PEOPLE, text: 'ship it', confirm: true, userToken: 'xoxp-authorized-human', dbPath, slackCall })
     assert.equal(approved.ok, true)

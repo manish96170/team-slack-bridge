@@ -209,12 +209,22 @@ export function createHub({ env, config, dbPath, store, hosts, ownerId, now = ()
     await notifyRequester(row, `<@${row.target_id}> did not answer in time, so nothing was started. Ask again when they are around.`)
   }
 
+  // The pending -> decided transition is one conditional UPDATE, so a duplicate
+  // Slack delivery, or a button click racing a thread reply, can only win once.
+  function claimDecision(id, status) {
+    const result = db()
+      .prepare("UPDATE hub_requests SET status = ?, decided_at = ? WHERE id = ? AND status = 'pending' AND expires_at > ?")
+      .run(status, new Date(now()).toISOString(), id, new Date(now()).toISOString())
+    return result.changes === 1
+  }
+
   async function decide(row, { decision, repos, level, by }) {
     if (row.status !== 'pending') return { ok: false, error: 'already-handled' }
     if (Date.parse(row.expires_at) <= now()) {
       await expire(row.id)
       return { ok: false, error: 'expired' }
     }
+    if (!claimDecision(row.id, 'deciding')) return { ok: false, error: 'already-handled' }
     const chosenLevel = level || hubConfig.defaultGrantLevel
 
     if (decision === 'deny') {
@@ -232,7 +242,10 @@ export function createHub({ env, config, dbPath, store, hosts, ownerId, now = ()
 
     const toGrant = repos?.length ? repos : [row.repo]
     const granted = store.grant({ userId: row.requester_id, repos: toGrant, level: chosenLevel, by })
-    if (!granted.ok) return granted
+    if (!granted.ok) {
+      db().prepare("UPDATE hub_requests SET status = 'pending', decided_at = NULL WHERE id = ?").run(row.id)
+      return granted
+    }
     if (!toGrant.includes(row.repo)) {
       setStatus(row.id, 'denied')
       await refreshCard(row.id)
@@ -311,7 +324,10 @@ export function createHub({ env, config, dbPath, store, hosts, ownerId, now = ()
     if (command.name === 'revoke') {
       const result = store.revoke({ userId: command.userId, repos: command.repos, by: ownerId })
       if (!result.ok) return `Could not revoke: ${result.error}`
-      return result.revoked.length ? `Revoked ${result.revoked.map(repo => `\`${repo}\``).join(', ')} for <@${command.userId}>.` : 'Nothing to revoke.'
+      if (!result.revoked.length) return 'Nothing to revoke.'
+      const stopped = (await hosts.get(ownerId)?.stopAllFor(command.userId, result.revoked)) || []
+      for (const item of stopped) await say({ channel: item.channel, threadTs: item.threadTs, text: `<@${ownerId}> removed your access to this repo, so this session was stopped.` })
+      return `Revoked ${result.revoked.map(repo => `\`${repo}\``).join(', ')} for <@${command.userId}> and stopped ${stopped.length} running session(s).`
     }
     if (command.name === 'grant') {
       const known = knownRepoNames()

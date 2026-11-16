@@ -1,3 +1,6 @@
+// Network hub server (PLAN D75/D76). ONE Slack workspace only: host tokens, streams
+// and routes are keyed by user id and channel, not by workspace.
+//
 // Network hub server (PLAN D75): the one process that holds the shared Slack
 // app's single Socket Mode connection and forwards each event to the right
 // person's machine. It runs no agent and holds no policy: the owner's own host
@@ -74,6 +77,10 @@ export function createHostTokenStore(home) {
 export function createHubServer({ env, config, dbPath, home, port = 8920, host = '127.0.0.1', log = line => console.error(line), onError, createSlackApp }) {
   const tokens = createHostTokenStore(home)
   const streams = new Map() // userId -> { res, ping }
+  // A host may only bind a thread the hub itself just forwarded a start to it
+  // for (channel match, short window); it can never take over another host's route.
+  const expectedStarts = new Map() // hostUserId -> [{ channel, at }]
+  const EXPECT_MS = 10 * 60_000
   let httpServer = null
   let slackApp = null
   const botToken = env.SLACK_BOT_TOKEN
@@ -146,12 +153,22 @@ export function createHubServer({ env, config, dbPath, home, port = 8920, host =
       if (data?.type === 'session' && data.channel && data.threadTs) {
         // The reporting host is whoever authenticated; it can never claim a
         // thread for another host.
-        getDb(dbPath)
-          .prepare(
-            `INSERT INTO thread_routes (channel, thread_ts, host_user_id, created_at) VALUES (?, ?, ?, ?)
-             ON CONFLICT(channel, thread_ts) DO UPDATE SET host_user_id = excluded.host_user_id`
-          )
-          .run(String(data.channel), String(data.threadTs), userId, new Date().toISOString())
+        const db = getDb(dbPath)
+        const existing = db.prepare('SELECT host_user_id FROM thread_routes WHERE channel = ? AND thread_ts = ?').get(String(data.channel), String(data.threadTs))
+        const fresh = (expectedStarts.get(userId) || []).filter(item => Date.now() - item.at < EXPECT_MS)
+        const index = fresh.findIndex(item => item.channel === String(data.channel))
+        const allowed = existing ? existing.host_user_id === userId : index >= 0
+        if (!allowed) {
+          expectedStarts.set(userId, fresh)
+          res.writeHead(403).end()
+          return
+        }
+        if (index >= 0) fresh.splice(index, 1)
+        expectedStarts.set(userId, fresh)
+        db.prepare(
+          `INSERT INTO thread_routes (channel, thread_ts, host_user_id, created_at) VALUES (?, ?, ?, ?)
+           ON CONFLICT(channel, thread_ts) DO NOTHING`
+        ).run(String(data.channel), String(data.threadTs), userId, new Date().toISOString())
       }
       res.writeHead(204).end()
       return
@@ -159,8 +176,11 @@ export function createHubServer({ env, config, dbPath, home, port = 8920, host =
     res.writeHead(404).end()
   }
 
-  async function forwardTo(userId, forwarded, { channel, threadTs, label }) {
-    if (send(userId, { type: 'event', event: forwarded })) return true
+  async function forwardTo(userId, forwarded, { channel, threadTs, label, expectStart }) {
+    if (send(userId, { type: 'event', event: forwarded })) {
+      if (expectStart) expectedStarts.set(userId, [...(expectedStarts.get(userId) || []), { channel, at: Date.now() }])
+      return true
+    }
     await say(channel, threadTs, `${label} is offline (their machine is not connected to the hub), so nothing was started.`)
     return false
   }
@@ -183,7 +203,7 @@ export function createHubServer({ env, config, dbPath, home, port = 8920, host =
         return
       }
     }
-    await forwardTo(target, forwarded, { channel, threadTs, label })
+    await forwardTo(target, forwarded, { channel, threadTs, label, expectStart: true })
   }
 
   function buildSlackApp() {

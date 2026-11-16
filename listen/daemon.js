@@ -6,7 +6,7 @@
 //   name '<account>'-> a single-account listener for that registered account
 //   name 'default'  -> the registry's default account (the pre-D75 behaviour)
 
-import { existsSync, readFileSync, writeFileSync, unlinkSync, openSync, closeSync, mkdirSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, unlinkSync, openSync, closeSync, mkdirSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { execFileSync, spawn } from 'node:child_process'
@@ -78,7 +78,41 @@ function listenerArgs(name) {
   return [LISTENER_SCRIPT, '--account', name]
 }
 
+// Atomic start guard: two simultaneous starts (cron racing a manual start) must
+// not both spawn a listener. An exclusive lock file is held across the
+// check-and-spawn; a lock older than 30s is treated as stale and replaced.
+function withStartLock(name, fn) {
+  const { dir } = runPaths(name)
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const lockPath = join(dir, 'start.lock')
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      closeSync(openSync(lockPath, 'wx'))
+      break
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err
+      let stale = false
+      try {
+        stale = Date.now() - statSync(lockPath).mtimeMs > 30_000
+      } catch {}
+      if (!stale || attempt === 1) return { ok: false, name, error: 'start-already-in-progress', retryable: true }
+      unlinkSync(lockPath)
+    }
+  }
+  try {
+    return fn()
+  } finally {
+    try {
+      unlinkSync(lockPath)
+    } catch {}
+  }
+}
+
 export function start(name = 'default') {
+  return withStartLock(name, () => startLocked(name))
+}
+
+function startLocked(name) {
   const current = status(name)
   if (current.running) return { ...current, alreadyRunning: true }
   // Two listeners on one Slack app split its events between them (Slack picks a

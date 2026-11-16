@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// node cli/group-dm-create.js --to "Shrestha,Manish,Alex" [--company <alias>] [--topic "<text>"] [--text "<first message>"] --confirm [--dry-run] [--json]
+// node cli/group-dm-create.js --to "Jeremy,John,Alex" [--company <alias>] [--topic "<text>"] [--text "<first message>"] --confirm [--dry-run] [--json]
 //
 // Starts a NEW group DM (MPIM) as the account's authorized human. Opening a
 // group is visible to every member, so a real creation needs --confirm; without

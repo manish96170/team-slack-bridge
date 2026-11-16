@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// node cli/group-dm-by-name.js --to "Shrestha,Manish,Alex" [--company <alias>] --text "hi" --confirm [--dry-run] [--json]
+// node cli/group-dm-by-name.js --to "Jeremy,John,Alex" [--company <alias>] --text "hi" --confirm [--dry-run] [--json]
 //
 // Existing group-DM (MPIM) messaging only. Resolves people in one local
 // account and sends AS that account's authorized human; it never uses the

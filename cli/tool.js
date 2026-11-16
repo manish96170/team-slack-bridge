@@ -10,7 +10,7 @@
 // so the CLI cannot behave differently from it.
 //
 //   node cli/tool.js slack_resolve_link --args '{"link":"https://x.slack.com/archives/C1/p1793337025613279"}'
-//   node cli/tool.js slack_pin --args '{"action":"list","channel":"C0123ABCD"}' --company anchor
+//   node cli/tool.js slack_pin --args '{"action":"list","channel":"C0123ABCD"}' --company work
 //   node cli/tool.js --list
 //
 // --company selects a registered account alias (core/accounts.js); omitted

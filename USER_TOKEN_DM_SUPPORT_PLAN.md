@@ -3,7 +3,7 @@
 ## Problem observed (2026-10-22)
 
 `node cli/dm.js --as-user` is intended to send a direct message as the local
-authorized Slack user. It failed while attempting to DM `U01GDDF0NDR`:
+authorized Slack user. It failed while attempting to DM `U0456DEF`:
 
 ```text
 { "ok": false, "error": "channel_not_found" }

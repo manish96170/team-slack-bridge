@@ -19,7 +19,7 @@ const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 // resolveAccountHome() with no accounts.json synthesizes a single "default"
 // account pointing at exactly the same TSB_HOME-or-homedir path this file
 // always computed directly, so this is byte-identical for an untouched
-// install (D66, found live: a registered default of "anchor" had no effect
+// install (D66, found live: a registered default of "work" had no effect
 // on mcp/server.js or any other cli/*.js command, only on the account-aware
 // functions above — this closes that gap).
 const resolvedAccount = resolveAccountHome()

@@ -5,14 +5,14 @@ Opt-in. Off by default. Nothing here changes how a session on your own machine w
 
 ## The idea
 
-- You message the shared Slack app: `start session on Nikhil Jain: fix the login bug`.
+- You message the shared Slack app: `start session on Daniel Reed: fix the login bug`.
 - The **hub** checks who you are (Slack asserts your user id), whether you are blocked,
-  and whether Nikhil has granted you that repo.
-- If there is no grant, Nikhil gets a card in his own DM with the bot: **Allow always /
+  and whether Daniel has granted you that repo.
+- If there is no grant, Daniel gets a card in his own DM with the bot: **Allow always /
   Allow once / Deny**, or he can reply in the thread with repos (`api, web`), `all`, or `no`.
-- Once approved, the session runs on **Nikhil's machine**. The thread lives in **your** DM,
+- Once approved, the session runs on **Daniel's machine**. The thread lives in **your** DM,
   so you see everything you sent and everything it answered.
-- Nikhil keeps a control card: **Stop / Restart / Block user**.
+- Daniel keeps a control card: **Stop / Restart / Block user**.
 
 Starting a session on your own machine is unchanged: `start session <task>`.
 
@@ -22,10 +22,10 @@ The two setups, with flow diagrams, are in the README section *Delegated session
 
 | You type | Meaning |
 |---|---|
-| `start session on Nikhil Jain: <task>` | delegate; the colon ends the name |
-| `start session - Nikhil Jain: <task>` | same |
+| `start session on Daniel Reed: <task>` | delegate; the colon ends the name |
+| `start session - Daniel Reed: <task>` | same |
 | `start session on <@U123ABC> <task>` | by mention (no ambiguity) |
-| `start session --on "Nikhil Jain" <task>` | quoted name |
+| `start session --on "Daniel Reed" <task>` | quoted name |
 | `... --repo api --backend claude --model x` | same flags as always, after the colon |
 
 A bare `on <words>:` that matches nobody is treated as an ordinary task, so a task like

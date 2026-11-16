@@ -194,8 +194,8 @@ Today, sending a DM to someone requires knowing two things no human carries arou
 their head: their raw Slack user ID (different per workspace — confirmed live, the
 same person has a different ID in each of this install's two companies) and either the
 right `TSB_HOME` path or a `--account <name>` argument. Goal: let a human (or the
-`skill/SKILL.md` natural-language skill) say "DM pulkit.jain in anchor: hi" or, using a
-configured default, just "DM pulkit.jain: hi" — no path, no ID, no `TSB_HOME` in sight.
+`skill/SKILL.md` natural-language skill) say "DM daniel.reed in work: hi" or, using a
+configured default, just "DM daniel.reed: hi" — no path, no ID, no `TSB_HOME` in sight.
 
 **Most of the needed mapping infrastructure already exists — this is mostly wiring, not
 new state.** `core/accounts.js` (D21) already does exactly "human-chosen name → home
@@ -245,10 +245,10 @@ this request" with "which account does a human mean by a short name."
 4. **One-time setup note, not new code**: for an existing install where a company is
    only registered in `tenants.json` (team_id-keyed, D54) and not yet in `accounts.json`
    under a friendly name, a human has to register it there too —
-   `node cli/accounts.js add anchor --home <that tenant's home>` — before "in anchor"
+   `node cli/accounts.js add work --home <that tenant's home>` — before "in anchor"
    means anything. Document this in the feature's own usage text, not a new migration.
 
-**Deliberately generic, not hardcoded to any company name** — "anchor" above is only an
+**Deliberately generic, not hardcoded to any company name** — "work" above is only an
 example alias one install's owner chose for themselves via `setDefaultAccount`/
 `addAccount`; nothing in `core/accounts.js` or the new `dmByName()` ever hardcodes a
 specific company. Any install picks its own aliases and its own default, or configures

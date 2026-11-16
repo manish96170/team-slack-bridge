@@ -108,7 +108,7 @@ asks; no safety concerns beyond the existing read-only posture.
       start` on a real workspace (non-partner apps may need the slash-command route),
       `slack_canvas create/read`, and `slack_file read` on a canvas; (4) optionally enable
       `huddleWatch` and subscribe to `user_huddle_changed`. Unit tests use faked Slack
-      transports only. **Already live-checked read-only (2026-11-01, Hornblower):**
+      transports only. **Already live-checked read-only (2026-11-01, Company A):**
       `slack_huddle_status` (user token) and `slack_usergroup_lookup` (bot token, 69 groups)
       work; `slack_file list` and `slack_reminder list` correctly return `missing_scope`
       until the user token is re-minted.
@@ -133,8 +133,8 @@ asks; no safety concerns beyond the existing read-only posture.
       `fetchAllMembers`/`searchDirectoryByHandleOrName` now track and surface
       `truncated:true` when the cap (not a genuinely exhausted directory) is what
       stopped the walk. 2 new tests (`test/directory.test.js`). Also fixed on the
-      same install (a credential-setup mistake, not a code bug): Hornblower's and
-      Anchor's `.env` had the identical `SLACK_USER_TOKEN` — re-authorized correctly.
+      same install (a credential-setup mistake, not a code bug): Company A's and
+      Company B's `.env` had the identical `SLACK_USER_TOKEN` — re-authorized correctly.
 
 - [x] **GPT-5.6 Terra adversarial review of D64–D67 (D68)** — found and fixed:
       a real pre-existing bug where `mcp/tools.remote.js` reused local schemas
@@ -160,7 +160,7 @@ asks; no safety concerns beyond the existing read-only posture.
 
 - [x] **`cli/context.js` now resolves through `core/accounts.js`'s registered default,
       not just a raw `TSB_HOME` read (D66)** — found live: `cli/accounts.js
-      set-default anchor` had no effect on `mcp/server.js` or any other `cli/*.js`
+      set-default work` had no effect on `mcp/server.js` or any other `cli/*.js`
       command, only on the already account-aware functions. Fixed in `cli/context.js`
       alone (`mcp/server.js`, every CLI command, `cli/listen.js`/`cli/http.js` all
       inherit it with no changes of their own); byte-identical for any install that
@@ -275,7 +275,7 @@ asks; no safety concerns beyond the existing read-only posture.
       `cli/tls.js generate|path` wraps it. 6 new tests
       (`test/local-tls.test.js`), full suite still green.
 - [x] **Display-name matching in `slack_resolve_user`/`resolveMentions` (D55)** —
-      an optional `displayName` per configured user (e.g. `@PJ`) resolves as a
+      an optional `displayName` per configured user (e.g. `@DR`) resolves as a
       fallback, only when `name`/`slackHandle`/`slackUserId` don't match. Two
       users sharing a `displayName` refuses as `ambiguous-user`, never picked.
       Config-only, synchronous, no network call — unchanged from before this.
@@ -512,7 +512,7 @@ asks; no safety concerns beyond the existing read-only posture.
         close-all-in-this-channel option, D31-gated per session
 - [x] **Live-verified on this machine**: Socket Mode listener connected, DM from the
       bot to the owner, an ACP session started against the `dashboard` repo
-      (`/Users/Manish.Sharma/company-a/UI/dashboard`), one session per thread with
+      (`~/projects/dashboard`), one session per thread with
       working follow-up replies, Claude via Bedrock (`CLAUDE_CODE_USE_BEDROCK=1`) and
       OpenCode (native `AWS_REGION` detection, OpenCode Zen credentials) both
       confirmed reachable as backends

@@ -200,8 +200,8 @@ the gap away mode fills (PLAN D34).
 
 ## Delegated sessions — start a session on someone else's machine (PLAN D74/D75)
 
-`start session on Nikhil Jain: fix the login bug` runs the session on **Nikhil's** machine,
-but only after **Nikhil** approves. The thread lives in *your* DM with the bot, so you see
+`start session on Daniel Reed: fix the login bug` runs the session on **Daniel's** machine,
+but only after **Daniel** approves. The thread lives in *your* DM with the bot, so you see
 everything. Opt-in (`hub.enabled`); plain `start session <task>` is unchanged. Full detail,
 limits and caveats are in [`HUB.md`](HUB.md).
 
@@ -214,26 +214,26 @@ Each developer runs their own listener (their own Slack app and app token). The 
 library inside that listener, so there is nothing extra to deploy.
 
 ```
-   Requester (Manish)                     Nikhil's machine
+   Requester (John)                     Daniel's machine
   ┌────────────────────┐        ┌──────────────────────────────────────────┐
-  │ DM to Nikhil's bot │        │  listener (Socket Mode, Nikhil's app)    │
+  │ DM to Daniel's bot │        │  listener (Socket Mode, Daniel's app)    │
   │ "start session on  │ Slack  │                                          │
-  │  Nikhil: fix login"│───────►│  1 parse "on <name>"  (listen/socket.js) │
+  │  Daniel: fix login"│───────►│  1 parse "on <name>"  (listen/socket.js) │
   └─────────▲──────────┘        │  2 hub: blocked? grant for this repo?    │
             │                   │       │ no grant                         │
             │                   │       ▼                                  │
-            │   "asked Nikhil"  │  3 approval card ──► Nikhil's own DM     │
+            │   "asked Daniel"  │  3 approval card ──► Daniel's own DM     │
             │◄──────────────────│       Allow always / once / Deny,        │
             │                   │       or reply "api, web" / "no"         │
             │                   │       │ approved                         │
             │                   │       ▼                                  │
             │   session output  │  4 startAgentSession (own git worktree,  │
             └───────────────────│     sandbox, scrubbed env, owner-level   │
-              in Manish's DM    │     permission prompts)                  │
+              in John's DM    │     permission prompts)                  │
                                 │  5 control card: Stop / Restart / Block  │
                                 └──────────────────────────────────────────┘
    Setup per person: own Slack app + app token, hub.enabled, owner = you.
-   Nikhil offline  =  his listener is not running: the message gets no reply.
+   Daniel offline  =  his listener is not running: the message gets no reply.
 ```
 
 ### 2. Network hub — one shared app, one small server
@@ -261,7 +261,7 @@ the right person's machine. Machines dial **out** to the hub, so laptops need no
             outbound HTTP stream  │                      │  outbound HTTP stream
           (tsb-hub-connect, token)│                      │ (tsb-hub-connect, token)
                   ┌───────────────┴────────┐    ┌────────┴───────────────┐
-                  │  Manish's machine      │    │  Nikhil's machine      │
+                  │  John's machine      │    │  Daniel's machine      │
                   │  host: runs HIS own    │    │  host: runs HIS own    │
                   │  sessions; grants,     │    │  sessions; grants,     │
                   │  approval cards and    │    │  approval cards and    │
@@ -562,21 +562,21 @@ coding harnesses / multiple Slack accounts" below (`core/accounts.js`, D21); reg
 one first if it isn't already:
 
 ```bash
-node cli/accounts.js add anchor --home ~/.team-slack-bridge-anchor
+node cli/accounts.js add work --home ~/.team-slack-bridge-work
 ```
 
 (`cli/accounts.js` has no `bin` entry of its own yet — from a global install, run
-`node $(npm root -g)/team-slack-bridge/cli/accounts.js add anchor --home …` instead.)
+`node $(npm root -g)/team-slack-bridge/cli/accounts.js add work --home …` instead.)
 
 Then:
 
 ```bash
-node cli/dm-by-name.js --to "pulkit.jain" --company anchor --text "hi" [--as-user] [--dry-run] [--json]   # from a git clone
-tsb-dm --to "pulkit.jain" --company anchor --text "hi" [--as-user] [--dry-run] [--json]                   # from a global npm install
+node cli/dm-by-name.js --to "daniel.reed" --company work --text "hi" [--as-user] [--dry-run] [--json]   # from a git clone
+tsb-dm --to "daniel.reed" --company work --text "hi" [--as-user] [--dry-run] [--json]                   # from a global npm install
 ```
 
 `--company` omitted falls back to the registry's own default
-(`node cli/accounts.js set-default anchor`). The person's real Slack user ID is resolved
+(`node cli/accounts.js set-default work`). The person's real Slack user ID is resolved
 live via `core/directory.js`'s `lookupUser` — the same ambiguous-match refusal that
 command already has (`error:"ambiguous-user"`, every match listed) applies here
 unchanged. If no company is named **and** no default is configured either, this refuses
@@ -620,22 +620,22 @@ node cli/dm.js --user U0123ABC --text 'hi' [--as-user] [--dry-run] [--json]
 **DM someone by name, across companies** (no raw ID, see "Plain-English cross-company
 messaging" above for the full picture):
 ```bash
-node cli/dm-by-name.js --to "pulkit.jain" [--company anchor] --text 'hi' [--as-user] [--dry-run] [--json]
-tsb-dm --to "pulkit.jain" [--company anchor] --text 'hi' [--as-user] [--dry-run] [--json]   # global install
+node cli/dm-by-name.js --to "daniel.reed" [--company work] --text 'hi' [--as-user] [--dry-run] [--json]
+tsb-dm --to "daniel.reed" [--company work] --text 'hi' [--as-user] [--dry-run] [--json]   # global install
 ```
 
 **Message an existing group DM by names** (MPIM; always as the locally authorized
 human, never the bot):
 ```bash
-node cli/group-dm-by-name.js --to "Shrestha Srivastava,Manish,Alex" [--company anchor] --text 'hi' --confirm [--dry-run] [--json]
-tsb-group-dm --to "Shrestha Srivastava,Manish,Alex" [--company anchor] --text 'hi' --confirm [--dry-run] [--json]   # global install
+node cli/group-dm-by-name.js --to "Jeremy Smith,John,Alex" [--company work] --text 'hi' --confirm [--dry-run] [--json]
+tsb-group-dm --to "Jeremy Smith,John,Alex" [--company work] --text 'hi' --confirm [--dry-run] [--json]   # global install
 ```
 
 **Start a new group DM / set its topic** (as the locally authorized human, never the bot;
 needs the user scopes `mpim:write` and `mpim:write.topic`). Real creation needs `--confirm`:
 ```bash
-node cli/group-dm-create.js --to "Shrestha Srivastava,Manish,Alex" [--topic 'Release sync'] [--text 'hi'] --confirm [--company anchor] [--dry-run] [--json]
-node cli/group-topic.js --channel G0123ABCD --topic 'Release sync' --confirm [--company anchor] [--dry-run] [--json]
+node cli/group-dm-create.js --to "Jeremy Smith,John,Alex" [--topic 'Release sync'] [--text 'hi'] --confirm [--company work] [--dry-run] [--json]
+node cli/group-topic.js --channel G0123ABCD --topic 'Release sync' --confirm [--company work] [--dry-run] [--json]
 ```
 MCP (stdio and local HTTP): `slack_create_group_dm`, `slack_set_group_topic`.
 
@@ -646,7 +646,7 @@ tool can be run from the shell with `cli/tool.js` (same handler, same validation
 node cli/thread.js --link 'https://x.slack.com/archives/C0123ABCD/p1793337025613279' --as-user --json
 node cli/tool.js --list
 node cli/tool.js slack_call --args '{"action":"start","channel":"C0123ABCD","title":"Release sync"}' --dry-run
-node cli/tool.js slack_pin --args '{"action":"list","channel":"C0123ABCD"}' --company anchor
+node cli/tool.js slack_pin --args '{"action":"list","channel":"C0123ABCD"}' --company work
 node cli/tool.js slack_file --args '{"action":"read","fileId":"F0123ABCD"}'
 ```
 See FEATURES.md for each tool; huddles can be *detected* but not started, joined or recorded.
@@ -678,7 +678,7 @@ node cli/query.js --channel '#x' [--since-minutes 60] [--limit 20] [--as-user] [
 node cli/thread.js --channel '#x' --thread-ts '169…' [--as-user] [--json]
 node cli/search.js --query 'from:@bob deploy' [--json]
 node cli/resolve-user.js --handle @jane [--json]  # configured-only, config-file lookup — never a network call
-node cli/lookup-user.js --query U055NFSGF88 [--mode auto|id|email|handle|name] [--as-user] [--include-email] [--json]  # live Slack-directory lookup, for anyone NOT in slack-config.json (D50/D51)
+node cli/lookup-user.js --query U0123ABC [--mode auto|id|email|handle|name] [--as-user] [--include-email] [--json]  # live Slack-directory lookup, for anyone NOT in slack-config.json (D50/D51)
 node cli/channels.js [--types 'public_channel,private_channel'] [--limit 100] [--cursor …] [--json]  # requires a user token — which channels the authorized user is actually in, not the whole workspace
 ```
 

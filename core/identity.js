@@ -204,7 +204,7 @@ function matchesUser(user, handleOrName) {
   )
 }
 
-// `displayName` (Slack's short/display name, e.g. "@PJ") is a FALLBACK,
+// `displayName` (Slack's short/display name, e.g. "@DR") is a FALLBACK,
 // consulted only when no `name`/`slackHandle`/`slackUserId` matches —
 // D55, 2026-10-26, on request: teams configure a person's full name, full
 // username, AND display name side by side, and people refer to each other
@@ -260,7 +260,7 @@ export function resolveUser(handleOrName, config) {
 }
 
 // Turns literal "@handle" text into a real Slack mention (`<@USERID>`) —
-// added 2026-09-09 because a plain "@PJ" in posted text is never rendered
+// added 2026-09-09 because a plain "@DR" in posted text is never rendered
 // as a tag by Slack; only the `<@USERID>` syntax is. Only handles present
 // in slack-config.json's `users` list resolve — an unmatched "@word" is
 // left exactly as typed rather than guessed at or stripped, since a wrong

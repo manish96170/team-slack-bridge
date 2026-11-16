@@ -18,11 +18,11 @@ import { tools } from '../mcp/tools.local.js'
 
 const configWithOwner = {
   owner: { slackUserId: 'U0OWNER' },
-  users: [{ name: 'Manish Sharma', slackHandle: '@manish.sharma', slackUserId: 'U0OWNER' }],
+  users: [{ name: 'John Smith', slackHandle: '@john.smith', slackUserId: 'U0OWNER' }],
 }
 
 test('getSenderInfo resolves handle/name from users against owner.slackUserId', () => {
-  assert.deepEqual(getSenderInfo(configWithOwner), { slackUserId: 'U0OWNER', slackHandle: '@manish.sharma', name: 'Manish Sharma' })
+  assert.deepEqual(getSenderInfo(configWithOwner), { slackUserId: 'U0OWNER', slackHandle: '@john.smith', name: 'John Smith' })
 })
 
 test('getSenderInfo returns nulls when no owner is configured', () => {
@@ -32,14 +32,14 @@ test('getSenderInfo returns nulls when no owner is configured', () => {
 test('withSenderAttribution leads with the plain name, then (@handle, memberId), then a bold no-reply marker', () => {
   const out = withSenderAttribution('hello', configWithOwner)
   assert.ok(out.startsWith('hello\n\n'))
-  assert.match(out, /sent via bot by Manish Sharma \(@manish\.sharma, U0OWNER\)/)
+  assert.match(out, /sent via bot by John Smith \(@john\.smith, U0OWNER\)/)
   assert.match(out, /\*no-reply\*/)
   assert.doesNotMatch(out, /<@U0OWNER>/) // no mention markup anymore, by request
 })
 
 test('withSenderAttribution falls back to handle (id) when no name is configured, without repeating the handle', () => {
-  const out = withSenderAttribution('hello', { owner: { slackUserId: 'U0OWNER' }, users: [{ slackHandle: '@manish.sharma', slackUserId: 'U0OWNER' }] })
-  assert.match(out, /sent via bot by @manish\.sharma \(U0OWNER\)/)
+  const out = withSenderAttribution('hello', { owner: { slackUserId: 'U0OWNER' }, users: [{ slackHandle: '@john.smith', slackUserId: 'U0OWNER' }] })
+  assert.match(out, /sent via bot by @john\.smith \(U0OWNER\)/)
 })
 
 test('withSenderAttribution falls back to the bare id when neither name nor handle is configured', () => {
@@ -59,7 +59,7 @@ test('local_audit round-trips through recordLocalAudit/queryLocalAudit', () => {
   try {
     recordLocalAudit({
       dbPath,
-      sender: { slackUserId: 'U0OWNER', slackHandle: '@manish.sharma', name: 'Manish Sharma' },
+      sender: { slackUserId: 'U0OWNER', slackHandle: '@john.smith', name: 'John Smith' },
       tool: 'slack_post',
       viaBot: true,
       ok: true,
@@ -69,7 +69,7 @@ test('local_audit round-trips through recordLocalAudit/queryLocalAudit', () => {
     const rows = queryLocalAudit({ dbPath, limit: 10 })
     assert.equal(rows.length, 1)
     assert.equal(rows[0].sender_user_id, 'U0OWNER')
-    assert.equal(rows[0].sender_handle, '@manish.sharma')
+    assert.equal(rows[0].sender_handle, '@john.smith')
     assert.equal(rows[0].tool, 'slack_post')
     assert.equal(rows[0].via_bot, 1)
     assert.equal(rows[0].channel, '#eng')

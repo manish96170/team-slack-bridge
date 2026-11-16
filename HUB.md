@@ -118,8 +118,12 @@ Slack app (the manifest template now sets it) so people can DM the bot.
 - `node cli/daemon.js start --all` runs ONE supervisor with one Socket
   Mode connection per account that has a bot token, app token and owner. `--account <name>`
   runs one account; no flag keeps the old default-account behaviour.
-- Accounts without an app token, or that share one with an earlier account, are skipped with
-  the reason logged (Slack would split an app's events between two connections).
+- **The same Slack app installed in several workspaces** (one OAuth client id, one app token,
+  a bot token per workspace) is served over ONE shared Socket Mode connection. An account
+  with no app token of its own borrows the one from an account with the same client id.
+  Events are routed to the right account by workspace id and never to another account.
+  Each account keeps its own tokens, database, sessions and hub.
+- Accounts with no usable app token at all are skipped with the reason logged.
 - Pid and log files live in `<TSB_HOME>/run/<name>/`, not in the package folder.
   `daemon status` lists every listener. An `--all` supervisor and a single-account listener
   refuse to run together.

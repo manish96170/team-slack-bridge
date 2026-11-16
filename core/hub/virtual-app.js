@@ -39,6 +39,21 @@ export function createVirtualApp() {
         }
         return { handled }
       }
+      if (forwarded?.type === 'event') {
+        const fn = handlers.events.get(forwarded.name)
+        if (fn) await fn({ event: forwarded.event, body: forwarded.body, client: forwarded.client })
+        return { handled: Boolean(fn) }
+      }
+      if (forwarded?.type === 'command') {
+        const fn = handlers.commands.get(forwarded.name)
+        if (fn) await fn(forwarded.payload)
+        return { handled: Boolean(fn) }
+      }
+      if (forwarded?.type === 'shortcut' || forwarded?.type === 'view') {
+        const fn = (forwarded.type === 'shortcut' ? handlers.shortcuts : handlers.views).get(forwarded.id)
+        if (fn) await fn(forwarded.payload)
+        return { handled: Boolean(fn) }
+      }
       return { handled: false }
     },
   }

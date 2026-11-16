@@ -12,6 +12,7 @@
   "http": { "enabled": false, "port": 8917, "verifySlackSignatures": true },
   "slashCommands": { "enabled": false, "outputModeCommand": "/outputmode" },
   "agentSessions": { "enabled": false, "autoCreateSession": false, "provider": "none" },
+  "hub": { "enabled": false, "mode": "embedded", "defaultGrantLevel": "always", "approvalTimeoutSeconds": 600, "delegatedSandbox": "auto" },
   "openacp": { "enabled": false, "adapterPackage": "@openacp/slack-adapter", "autoCreateSession": false },
   "slackbotMcp": {
     "enabled": false,

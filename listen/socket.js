@@ -26,13 +26,21 @@ import {
   routeThreadReply,
   closeAgentSession,
   closeAgentSessionById,
+  closeSessionsByRequester,
   closeAllAgentSessions,
+  parkIdleSessions,
   reopenAgentSession,
   parseAgentSessionCommand,
   matchesMentionKeyword,
 } from '../core/acp-sessions.js'
 import { listBackendNames } from '../core/acp-backends.js'
-import { reply } from '../core/post.js'
+import { reply, postToChannel } from '../core/post.js'
+import { dirname } from 'node:path'
+import { createHub } from '../core/hub/hub.js'
+import { createPolicyStore } from '../core/hub/policy.js'
+import { createHostRegistry, createLoopbackHost } from '../core/hub/transport.js'
+import { registerHub, unregisterHub } from '../core/hub/registry.js'
+import { parseDelegation } from '../core/hub/commands.js'
 import { handleHuddleChange } from '../core/huddle.js'
 import { dm } from '../core/dm.js'
 
@@ -47,11 +55,71 @@ export function stripMentionPrefix(text) {
 // `dbPath` is optional — pass it to capture ask/approval answers
 // (core/ask.js) as they arrive. Without it the listener still classifies
 // events exactly as before; the ask feature is additive.
-export function createListener({ env, botToken, appToken, config, configPath, dbPath, onClassified, onError }) {
+// `app` is injectable (PLAN D75): a network-hub host feeds Slack events in
+// through a virtual app instead of opening its own Socket Mode connection.
+export function createListener({ env, botToken, appToken, config, configPath, dbPath, homeDir, onClassified, onError, app: injectedApp }) {
   if (!botToken) throw new Error('botToken required')
-  if (!appToken) throw new Error('appToken required — Socket Mode needs the app-level xapp- token alongside the bot token')
+  if (!appToken && !injectedApp) throw new Error('appToken required — Socket Mode needs the app-level xapp- token alongside the bot token')
 
-  const app = new App({ token: botToken, appToken, socketMode: true })
+  const app = injectedApp || new App({ token: botToken, appToken, socketMode: true })
+
+  // D74 — the embedded hub: this listener is the owner's machine, and the hub
+  // decides whether someone else may start a session on it. Opt-in
+  // (config.hub.enabled); needs a configured owner and a database.
+  const ownerId = config.owner?.slackUserId
+  let hub = null
+  if (config.hub?.enabled && config.agentSessions?.enabled && dbPath && ownerId) {
+    const hosts = createHostRegistry()
+    hosts.register(
+      createLoopbackHost({
+        userId: ownerId,
+        startSession: request => startAgentSession({ env, config, dbPath, ...request }),
+        stopSession: ({ id }) => closeAgentSessionById({ dbPath, config, id, requestedBy: ownerId }),
+        restartSession: ({ id }) => reopenAgentSession({ dbPath, config, id, requestedBy: ownerId }),
+        stopAllFor: requesterId => closeSessionsByRequester({ dbPath, config, requesterId, ownerId }),
+      })
+    )
+    hub = createHub({ env, config, dbPath, store: createPolicyStore({ home: homeDir || dirname(dbPath), ownerId }), hosts, ownerId })
+    registerHub(dbPath, hub)
+  }
+
+  let idleTimer = null
+
+  const say = (channel, threadTs, text) => postToChannel({ token: botToken, channel, text, threadTs, config })
+
+  // Every session-start trigger funnels through here. Plain text starts a
+  // session on this machine exactly as before; "on <person>: <task>" asks that
+  // person's hub instead (D74). Returns true once it has handled the message.
+  async function startOrDelegate({ afterKeyword, channel, threadTs, requestedBy }) {
+    let text = afterKeyword
+    const delegation = hub ? parseDelegation(text) : null
+    if (delegation) {
+      const resolved = await hub.resolveTarget(delegation.target)
+      if (resolved.ok && resolved.userId !== requestedBy) {
+        const { backendName, repoName, modelName, task } = parseAgentSessionCommand(delegation.rest)
+        if (!task) {
+          await say(channel, threadTs, 'A task is required: `start session on <person>: <task>`')
+          return true
+        }
+        await hub.handleStartRequest({ requesterId: requestedBy, channel, threadTs, targetUserId: resolved.userId, repoName, backendName, modelName, task })
+        return true
+      }
+      if (resolved.ok) {
+        text = delegation.rest
+      } else if (delegation.explicit) {
+        const detail =
+          resolved.error === 'ambiguous-user'
+            ? `More than one person matches: ${(resolved.matches || []).map(match => `${match.displayName} (<@${match.id}>)`).join(', ')}. Mention the person instead.`
+            : `I could not find anyone called that (${resolved.error}).`
+        await say(channel, threadTs, detail)
+        return true
+      }
+    }
+    const { backendName, repoName, modelName, task } = parseAgentSessionCommand(text)
+    if (!task) return false
+    await startAgentSession({ env, config, dbPath, channel, threadTs, backendName, repoName, modelName, task, requestedBy })
+    return true
+  }
 
   const dispatch = async result => {
     try {
@@ -71,22 +139,8 @@ export function createListener({ env, botToken, appToken, config, configPath, db
     const stripped = stripMentionPrefix(event.text)
     const afterKeyword = dbPath && config.agentSessions?.enabled ? matchesMentionKeyword(stripped, config) : null
     if (afterKeyword !== null) {
-      const { backendName, repoName, modelName, task } = parseAgentSessionCommand(afterKeyword)
-      if (task) {
-        await startAgentSession({
-          env,
-          config,
-          dbPath,
-          channel: event.channel,
-          threadTs: event.thread_ts,
-          backendName,
-          repoName,
-          modelName,
-          task,
-          requestedBy: event.user,
-        })
-        return
-      }
+      const started = await startOrDelegate({ afterKeyword, channel: event.channel, threadTs: event.thread_ts, requestedBy: event.user })
+      if (started) return
     }
 
     await dispatch(
@@ -131,6 +185,13 @@ export function createListener({ env, botToken, appToken, config, configPath, db
     // the bot's own identity instead of the human it's mapped to act as.
     const requestedBy = trustedActingAs || message.user
 
+    // D74 — the owner answering an approval card, or typing a hub command.
+    // Only a human's own Slack-asserted id counts (never a trusted app's).
+    if (hub && message.channel_type === 'im' && !trustedActingAs && message.user === ownerId) {
+      const owned = await hub.handleOwnerMessage({ userId: message.user, text: message.text, channel: message.channel, threadTs: message.thread_ts })
+      if (owned.handled) return
+    }
+
     // A free-text reply in a pending ask's thread is an answer, not a new
     // inbound proposal — capture it and stop, so it never also shows up as
     // a self-dm/dm-request event.
@@ -169,22 +230,8 @@ export function createListener({ env, botToken, appToken, config, configPath, db
       const text = message.text || ''
       const afterKeyword = matchesMentionKeyword(text, config)
       if (afterKeyword !== null) {
-        const { backendName, repoName, modelName, task } = parseAgentSessionCommand(afterKeyword)
-        if (task) {
-          await startAgentSession({
-            env,
-            config,
-            dbPath,
-            channel: message.channel,
-            threadTs: message.thread_ts,
-            backendName,
-            repoName,
-            modelName,
-            task,
-            requestedBy,
-          })
-          return
-        }
+        const started = await startOrDelegate({ afterKeyword, channel: message.channel, threadTs: message.thread_ts, requestedBy })
+        if (started) return
       }
     }
 
@@ -215,6 +262,17 @@ export function createListener({ env, botToken, appToken, config, configPath, db
         config
       )
     )
+  })
+
+  // D74 — approval-card and control-card buttons. The hub itself checks that the
+  // clicker is the owner; a click from anyone else does nothing.
+  app.action(/^hub_/, async ({ action, body, ack }) => {
+    await ack()
+    if (!hub) return
+    const result = await hub.handleAction({ userId: body.user?.id, value: action.value })
+    if (!result.ok && result.error !== 'already-handled' && result.error !== 'not-owner') {
+      await say(body.container?.channel_id, body.container?.message_ts, `Could not apply that: ${result.error}`)
+    }
   })
 
   // Approve/Deny button clicks (core/ask.js's `kind: 'approval'`). The
@@ -310,6 +368,10 @@ export function createListener({ env, botToken, appToken, config, configPath, db
         response_type: 'ephemeral',
         text: 'Usage: /agent-session start [--backend name] [--repo name] [--model name] <task> | /agent-session close <id> | /agent-session close all | /agent-session reopen <id>',
       })
+      return
+    }
+    if (hub && parseDelegation(rest.join(' '))) {
+      await startOrDelegate({ afterKeyword: rest.join(' '), channel: command.channel_id, threadTs: command.thread_ts, requestedBy: command.user_id })
       return
     }
     const { backendName, repoName, modelName, task } = parseAgentSessionCommand(rest.join(' '))
@@ -434,7 +496,18 @@ export function createListener({ env, botToken, appToken, config, configPath, db
   })
 
   return {
-    start: () => app.start(),
-    stop: () => app.stop(),
+    start: async () => {
+      const idleMs = (config.agentSessions?.idleTimeoutMinutes || 0) * 60_000
+      if (dbPath && config.agentSessions?.enabled && idleMs > 0) {
+        idleTimer = setInterval(() => parkIdleSessions({ dbPath, idleMs }), Math.min(idleMs, 60_000))
+        idleTimer.unref?.()
+      }
+      return app.start()
+    },
+    stop: async () => {
+      if (idleTimer) clearInterval(idleTimer)
+      if (hub) unregisterHub(dbPath)
+      return app.stop()
+    },
   }
 }

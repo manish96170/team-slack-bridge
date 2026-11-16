@@ -7,10 +7,10 @@ orchestration system, AI agent framework, or dashboard.
 Runtime: **Node >=26** (`package.json`'s `engines`). `.nvmrc` pins `26` for local dev on
 this machine so the bridge stays on the current Node line rather than LTS.
 
-**Install**: `npm install team-slack-bridge` (or `-g` for direct binaries — nine of
-them, see `package.json`'s `bin`: `team-slack-bridge`, `tsb-hook`, `tsb-setup`,
-`tsb-tls`, `tsb-tenants`, `tsb-get-user-token`, `tsb-get-workspace-token`,
-`tsb-archive`, `tsb-dm`) for normal use. `npm run build:sea` (standalone-binary
+**Install**: `npm install team-slack-bridge` (or `-g` for direct binaries — see
+`package.json`'s `bin`: `team-slack-bridge`, `tsb-hook`, `tsb-setup`, `tsb-tls`,
+`tsb-tenants`, `tsb-get-user-token`, `tsb-get-workspace-token`, `tsb-archive`, `tsb-dm`,
+and the hub tools `tsb-hub`, `tsb-hub-server`, `tsb-hub-connect`) for normal use. `npm run build:sea` (standalone-binary
 packaging) and `npm test` only work from a git clone with `devDependencies`
 installed — they bundle this repo's own source/tests, which aren't part of the
 published package.
@@ -94,6 +94,8 @@ terminal, an MCP client, or `skill/SKILL.md`.
 | **App Home tab** | Publish/refresh a per-user App Home view | `cli/home.js` | App Home |
 | **Output mode** | Low/medium/high verbosity, settable locally or via a Slack slash command | `cli/output-mode.js` | Output mode |
 | **Socket Mode listener** | Real-time events (approvals, free-text answers, ACP triggers) — foreground (`cli/listen.js`) or a managed daemon (`cli/daemon.js`) | `cli/daemon.js start` | Socket Mode listener |
+| **Delegated sessions (hub)** | `start session on <person>: <task>` runs on that person's machine after their approval, with per-repo grants, stop/restart/block controls and a sandboxed agent. Embedded or via a network hub. Opt-in (`hub.enabled`) | `cli/hub.js`, `cli/hub-server.js`, `cli/hub-connect.js`, `HUB.md` | Hub |
+| **Multi-account listener** | One supervisor serving every workspace (`cli/daemon.js start --all`), per-account state under `TSB_HOME/run/` | `cli/daemon.js`, `HUB.md` | Hub |
 | **HTTP Events API / slash commands** | An alternative to Socket Mode for webhook-style delivery, off by default | `cli/http.js` | HTTP Events API and slash commands |
 | **ACP agent sessions** | A Slack thread becomes a live coding-agent session (Claude/Codex/OpenCode/Gemini CLI) — start, converse, hand off at the context limit, close, reopen | `/agent-session start`, `cli/agent-session.js` | Agent sessions |
 | **Away mode** | Route a *local* coding session's permission prompts to a Slack DM so you can step away | `cli/away.js`, `cli/hooks-install.js` | Away mode |
@@ -195,6 +197,92 @@ about which one you want:
 A session the bridge did **not** spawn can never be adopted into ACP mid-way — ACP
 installs its permission callback at spawn, when it owns the agent's stdio. That is exactly
 the gap away mode fills (PLAN D34).
+
+## Delegated sessions — start a session on someone else's machine (PLAN D74/D75)
+
+`start session on Nikhil Jain: fix the login bug` runs the session on **Nikhil's** machine,
+but only after **Nikhil** approves. The thread lives in *your* DM with the bot, so you see
+everything. Opt-in (`hub.enabled`); plain `start session <task>` is unchanged. Full detail,
+limits and caveats are in [`HUB.md`](HUB.md).
+
+There are two ways to run it. The session code, grants, approval cards and sandbox are the
+same in both; only how a Slack event reaches the right machine differs.
+
+### 1. Embedded hub — one app per person, no server
+
+Each developer runs their own listener (their own Slack app and app token). The hub is a
+library inside that listener, so there is nothing extra to deploy.
+
+```
+   Requester (Manish)                     Nikhil's machine
+  ┌────────────────────┐        ┌──────────────────────────────────────────┐
+  │ DM to Nikhil's bot │        │  listener (Socket Mode, Nikhil's app)    │
+  │ "start session on  │ Slack  │                                          │
+  │  Nikhil: fix login"│───────►│  1 parse "on <name>"  (listen/socket.js) │
+  └─────────▲──────────┘        │  2 hub: blocked? grant for this repo?    │
+            │                   │       │ no grant                         │
+            │                   │       ▼                                  │
+            │   "asked Nikhil"  │  3 approval card ──► Nikhil's own DM     │
+            │◄──────────────────│       Allow always / once / Deny,        │
+            │                   │       or reply "api, web" / "no"         │
+            │                   │       │ approved                         │
+            │                   │       ▼                                  │
+            │   session output  │  4 startAgentSession (own git worktree,  │
+            └───────────────────│     sandbox, scrubbed env, owner-level   │
+              in Manish's DM    │     permission prompts)                  │
+                                │  5 control card: Stop / Restart / Block  │
+                                └──────────────────────────────────────────┘
+   Setup per person: own Slack app + app token, hub.enabled, owner = you.
+   Nikhil offline  =  his listener is not running: the message gets no reply.
+```
+
+### 2. Network hub — one shared app, one small server
+
+One process holds the shared app's single Socket Mode connection and forwards each event to
+the right person's machine. Machines dial **out** to the hub, so laptops need no open port.
+
+```
+                     ┌──────────────── Slack (one shared app) ────────────────┐
+                     └───────────────────────────┬────────────────────────────┘
+                                                 │ ONE Socket Mode connection
+                                                 ▼
+                          ┌──────────────────────────────────────┐
+                          │  HUB SERVER   (tsb-hub-server start) │
+                          │  routes only: no policy, no agent    │
+                          │                                      │
+                          │  start "on <person>" ─► that host    │
+                          │  start (no target)   ─► sender's host│
+                          │  thread reply        ─► host that    │
+                          │                         owns it      │
+                          │  button / owner DM   ─► clicker's    │
+                          │  host offline ─► replies "offline",  │
+                          │                  nothing is queued   │
+                          └───────▲──────────────────────▲───────┘
+            outbound HTTP stream  │                      │  outbound HTTP stream
+          (tsb-hub-connect, token)│                      │ (tsb-hub-connect, token)
+                  ┌───────────────┴────────┐    ┌────────┴───────────────┐
+                  │  Manish's machine      │    │  Nikhil's machine      │
+                  │  host: runs HIS own    │    │  host: runs HIS own    │
+                  │  sessions; grants,     │    │  sessions; grants,     │
+                  │  approval cards and    │    │  approval cards and    │
+                  │  sandbox stay here     │    │  sandbox stay here     │
+                  └────────────────────────┘    └────────────────────────┘
+   Same approve / run / control flow as the embedded hub, on the TARGET's machine.
+   Setup: tsb-hub-server add-host <U…> (token shown once), then tsb-hub-connect on each laptop.
+```
+
+| | Embedded hub | Network hub |
+|---|---|---|
+| Slack apps | one per person | one shared app |
+| Server to run | none | one small always-on process (put TLS in front) |
+| Who decides access | the target's own listener | the target's own host (same code) |
+| Target offline | no reply (listener down) | immediate "offline" reply |
+| Don't mix | — | never also run a Socket Mode listener on the shared app: Slack would split its events |
+
+Both modes keep per-repo grants (`always` / `ask` / `readonly`), the owner's Stop / Restart /
+Block controls, the session limits, and the agent sandbox. Owner commands: `hub grants`,
+`hub grant @user repo=a,b`, `hub revoke`, `hub block`, `hub unblock`, or `tsb-hub …` at the
+machine.
 
 ## Design principles
 
@@ -641,6 +729,8 @@ free-text answers, and every ACP agent-session trigger below:
 ```bash
 node cli/daemon.js start --json      # idempotent — safe as a cron entry for auto-restart-on-crash
 node cli/daemon.js status --json
+node cli/daemon.js start --all --json  # ONE supervisor, a Socket Mode connection per account (D75)
+node cli/daemon.js start --account work --json   # just one registered account
 node cli/daemon.js logs --lines 80
 node cli/daemon.js restart --json
 node cli/daemon.js stop --json

@@ -7,7 +7,7 @@ import { isAway, getAwayConfig } from './away.js'
 import { shouldGate, failMode } from './away-policy.js'
 import { ask } from './ask.js'
 import { dm } from './dm.js'
-import { status as daemonStatus } from '../listen/daemon.js'
+import { statusAll as daemonStatusAll } from '../listen/daemon.js'
 import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, basename } from 'node:path'
@@ -49,8 +49,10 @@ function preflight(config, { skipDaemonCheck } = {}) {
   const ownerId = config?.owner?.slackUserId
   if (!ownerId) return { skip: true, reason: 'no-owner-configured' }
   if (!skipDaemonCheck) {
-    const daemon = daemonStatus()
-    if (!daemon.running) return { failOpen: true, reason: 'listener-not-running' }
+    // Any running listener (single-account or the --all supervisor) can
+    // capture the approval answer: they all share the account's database.
+    const anyRunning = daemonStatusAll().listeners.some(listener => listener.running)
+    if (!anyRunning) return { failOpen: true, reason: 'listener-not-running' }
   }
   return { ok: true, ownerId }
 }

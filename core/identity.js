@@ -6,6 +6,25 @@ import { normalizeSlackbotMcp } from './slackbot-mcp.js'
 
 const resolutionCache = new WeakMap()
 
+function nonNegative(value, fallback) {
+  return Number.isFinite(value) && value >= 0 ? value : fallback
+}
+
+const HUB_LEVELS = ['always', 'ask', 'readonly']
+
+// D74 — mode 'embedded' runs the hub inside the listener (one owner, one
+// machine). 'network' is reserved for the deployed hub transport and is
+// accepted but not yet acted on.
+export function normalizeHub(raw = {}) {
+  return {
+    enabled: raw?.enabled === true,
+    mode: raw?.mode === 'network' ? 'network' : 'embedded',
+    defaultGrantLevel: HUB_LEVELS.includes(raw?.defaultGrantLevel) ? raw.defaultGrantLevel : 'always',
+    approvalTimeoutSeconds: Number.isFinite(raw?.approvalTimeoutSeconds) && raw.approvalTimeoutSeconds > 0 ? raw.approvalTimeoutSeconds : 600,
+    delegatedSandbox: raw?.delegatedSandbox === 'off' ? 'off' : 'auto',
+  }
+}
+
 export function loadConfig(path) {
   if (!existsSync(path)) {
     return {
@@ -27,7 +46,12 @@ export function loadConfig(path) {
         repoAccess: {},
         trustedApps: {},
         contextWarningThreshold: 0.8,
+        maxConcurrentSessions: 10,
+        maxSessionsPerUser: 3,
+        idleTimeoutMinutes: 120,
+        worktrees: 'delegated',
       },
+      hub: normalizeHub(),
       awayMode: {
         gatedTools: ['Bash', 'Edit', 'Write', 'NotebookEdit'],
         hookTimeoutSeconds: 300,
@@ -109,7 +133,18 @@ export function loadConfig(path) {
       // used/size) at which the bridge triggers the handoff-file warning —
       // see maybeWarnContextFull in core/acp-sessions.js.
       contextWarningThreshold: raw.agentSessions?.contextWarningThreshold ?? 0.8,
+      // D75 — safety limits. 0 disables a limit. Counts are live in-memory
+      // sessions for this account; an idle session is parked (its agent is
+      // released, the thread keeps its history) and resumes on the next reply.
+      maxConcurrentSessions: nonNegative(raw.agentSessions?.maxConcurrentSessions, 10),
+      maxSessionsPerUser: nonNegative(raw.agentSessions?.maxSessionsPerUser, 3),
+      idleTimeoutMinutes: nonNegative(raw.agentSessions?.idleTimeoutMinutes, 120),
+      // 'off' | 'delegated' | 'all' — give sessions their own git worktree.
+      worktrees: ['off', 'delegated', 'all'].includes(raw.agentSessions?.worktrees) ? raw.agentSessions.worktrees : 'delegated',
     },
+    // D74 — delegated sessions: someone else starting a session on this
+    // owner's machine ("start session on <person>: ..."). Off by default.
+    hub: normalizeHub(raw.hub),
     // D39/D40 — away-mode policy lives in the bridge, not harness config.
     // hookTimeoutSeconds was previously read as config.hookTimeoutSeconds
     // (core/hooks.js:75, :171) but never listed here, so it was permanently

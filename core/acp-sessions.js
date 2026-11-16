@@ -12,6 +12,12 @@ import { createAgentSession, findAgentSessionBySlackThread, updateAgentSession, 
 import { startProgress, updateProgress, finishProgress } from './progress.js'
 import { ask } from './ask.js'
 import { writeHandoffFile } from './handoff.js'
+import { getHub, notifySessionBound } from './hub/registry.js'
+import { protectedPaths } from './hub/sandbox.js'
+import { createWorktree, removeWorktreeIfClean } from './worktrees.js'
+import { homedir } from 'node:os'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 
 const DEBOUNCE_MS = 1500
 // chat.update (unlike chat.postMessage, which merely truncates past 40,000)
@@ -80,8 +86,8 @@ export function parseRewindDetail(text) {
   return null
 }
 
-function sessionKey(channel, threadTs) {
-  return `${channel}:${threadTs}`
+function sessionKey(channel, threadTs, dbPath = '') {
+  return `${dbPath}|${channel}:${threadTs}`
 }
 
 // Two rapid-fire messages in the same thread (e.g. right after a listener
@@ -193,7 +199,107 @@ export function isAllowedToUseRepo(config, userId, repoName) {
   return (repoAccess[userId] || []).includes(repoName)
 }
 
-async function handlePermissionRequest({ env, dbPath, channel, threadTs, requestedBy, params }) {
+function selectedOption(option) {
+  return { outcome: { outcome: 'selected', optionId: option.optionId } }
+}
+
+// Where per-account working state (worktrees) lives: beside the account's database.
+function sessionHome(env, dbPath) {
+  return dbPath ? join(dbPath, '..') : join(homedir(), '.team-slack-bridge')
+}
+
+function liveEntries(dbPath) {
+  return [...activeSessionsByKey.values()].filter(entry => entry.dbPath === dbPath)
+}
+
+// D75 — refuses a new session once this account (or this person) is at its
+// cap. The owner is exempt from the per-user cap on their own machine.
+export function checkSessionLimits({ config, dbPath, requestedBy }) {
+  const { maxConcurrentSessions: total, maxSessionsPerUser: perUser } = config.agentSessions || {}
+  const live = liveEntries(dbPath)
+  if (total > 0 && live.length >= total) {
+    return { ok: false, error: 'too-many-sessions', message: `This machine is already running ${live.length} sessions (limit ${total}). Stop one, or try again shortly.` }
+  }
+  if (perUser > 0 && requestedBy && config.owner?.slackUserId !== requestedBy) {
+    const mine = live.filter(entry => entry.startedBy === requestedBy).length
+    if (mine >= perUser) return { ok: false, error: 'too-many-sessions-for-user', message: `You already have ${mine} running sessions here (limit ${perUser}). Stop one first.` }
+  }
+  return { ok: true }
+}
+
+// D75 — releases agents that have been idle for `idleTimeoutMinutes`. Only the
+// in-memory entry and the agent process go; the database row stays open, so the
+// next reply in the thread resumes it through the normal restart-recovery path.
+export function parkIdleSessions({ dbPath, idleMs, now = Date.now() }) {
+  const parked = []
+  if (!(idleMs > 0)) return parked
+  for (const [key, entry] of activeSessionsByKey) {
+    if (entry.dbPath !== dbPath || now - (entry.lastActiveAt || 0) < idleMs || entry.pendingRewind) continue
+    try {
+      entry.activeSession.dispose()
+      unregisterSession(entry.sessions, entry.activeSession.sessionId)
+    } catch {}
+    activeSessionsByKey.delete(key)
+    parked.push({ channel: entry.channel, threadTs: entry.threadTs })
+  }
+  return parked
+}
+
+async function cleanupWorktree(persistedOrEntry, { channel, threadTs, env, config } = {}) {
+  const worktree = persistedOrEntry?.worktree || persistedOrEntry?.metadata?.worktree
+  if (!worktree) return
+  const result = removeWorktreeIfClean(worktree)
+  if (result.kept && channel && env?.SLACK_BOT_TOKEN) {
+    await startProgress({
+      token: env.SLACK_BOT_TOKEN,
+      channel,
+      label: 'Agent session',
+      detail: `Kept this session's worktree because it holds ${result.reason === 'uncommitted-changes' ? 'uncommitted changes' : 'new commits'}: \`${result.kept}\``,
+      threadTs,
+      config,
+    })
+  }
+}
+
+const READ_ONLY_TOOL_KINDS = ['read', 'search', 'fetch', 'think']
+
+// D74 — a delegated session runs on the OWNER's machine, so the owner (not the
+// requester typing into their own DM) decides what the agent may do. The level
+// is read live from the hub on every request, so an owner changing a grant or
+// blocking someone takes effect mid-session. 'always' only ever picks a
+// one-shot allow option, never allow_always, so the agent cannot talk the
+// backend into remembering a blanket permission.
+async function handleDelegatedPermission({ env, dbPath, requestedBy, params, delegation, repoName }) {
+  const cancelled = { outcome: { outcome: 'cancelled' } }
+  const hub = getHub(dbPath)
+  if (!hub) return cancelled
+  const level = hub.levelFor({ requestId: delegation.requestId, userId: requestedBy, repo: repoName })
+  if (level === 'blocked') return cancelled
+
+  const allow = params.options.find(option => option.kind === 'allow_once') || params.options.find(option => String(option.kind || '').startsWith('allow'))
+  const reject = params.options.find(option => option.kind === 'reject_once') || params.options.find(option => String(option.kind || '').startsWith('reject'))
+
+  if (level === 'always') return allow ? selectedOption(allow) : cancelled
+  if (level === 'readonly') {
+    if (allow && READ_ONLY_TOOL_KINDS.includes(params.toolCall?.kind)) return selectedOption(allow)
+    return reject ? selectedOption(reject) : cancelled
+  }
+
+  const result = await ask({
+    botToken: env.SLACK_BOT_TOKEN,
+    userId: delegation.ownerId,
+    question: `Permission requested by <@${requestedBy}> on \`${repoName}\`: ${params.toolCall?.title || params.toolCall?.toolCallId}`,
+    kind: 'approval',
+    options: params.options.map(option => option.name),
+    dbPath,
+  })
+  if (!result.ok) return cancelled
+  const chosen = params.options.find(option => option.name === result.answer?.label)
+  return chosen ? selectedOption(chosen) : cancelled
+}
+
+async function handlePermissionRequest({ env, dbPath, channel, threadTs, requestedBy, params, delegation, repoName }) {
+  if (delegation) return handleDelegatedPermission({ env, dbPath, requestedBy, params, delegation, repoName })
   const optionLabels = params.options.map(option => option.name)
   const result = await ask({
     botToken: env.SLACK_BOT_TOKEN,
@@ -246,13 +352,17 @@ async function tryResumeSession({ env, config, dbPath, channel, threadTs, reques
   if (!persisted || persisted.kind !== 'acp-session' || persisted.status === 'closed') {
     return { ok: false, error: 'no-active-session-for-thread', retryable: false }
   }
-  if (!isAllowedToStartSession(config, requestedBy)) {
+  const delegation = persisted.metadata?.delegation
+  const { backend: backendName, repoName, repoPath, acpSessionId, model } = persisted.metadata || {}
+  if (delegation) {
+    const gate = getHub(dbPath)?.canPrompt({ requestId: delegation.requestId, userId: requestedBy, startedBy: persisted.metadata?.requestedBy, repo: repoName })
+    if (!gate?.ok) return { ok: false, error: 'no-active-session-for-thread', retryable: false }
+  } else if (!isAllowedToStartSession(config, requestedBy)) {
     return { ok: false, error: 'no-active-session-for-thread', retryable: false }
   }
-  const { backend: backendName, repoName, repoPath, acpSessionId, model } = persisted.metadata || {}
   const backend = getBackend(backendName)
   if (!backend || !acpSessionId || !repoPath) return { ok: false, error: 'no-active-session-for-thread', retryable: false }
-  if (!isAllowedToUseRepo(config, requestedBy, repoName)) {
+  if (!delegation && !isAllowedToUseRepo(config, requestedBy, repoName)) {
     return { ok: false, error: 'no-active-session-for-thread', retryable: false }
   }
 
@@ -263,25 +373,34 @@ async function tryResumeSession({ env, config, dbPath, channel, threadTs, reques
   // found in startAgentSession; catch it and degrade the same way every
   // other resume failure already does.
   let connection, sessions, activeSession
+  if (persisted.metadata?.worktree && !existsSync(repoPath)) {
+    const { origin } = persisted.metadata.worktree
+    const remade = createWorktree({ repoPath: origin, repoName, sessionKey: `${threadTs}`, home: sessionHome(env, dbPath) })
+    if (!remade.ok) return { ok: false, error: 'no-active-session-for-thread', retryable: false }
+    persisted.metadata.worktree = { path: remade.path, origin, base: remade.base }
+    persisted.metadata.repoPath = remade.path
+    updateAgentSession({ dbPath, id: persisted.id, metadata: persisted.metadata })
+  }
+  const workPath = persisted.metadata?.repoPath || repoPath
   try {
-    const backendConnection = await getBackendConnection(backend, env)
+    const backendConnection = await getBackendConnection(backend, env, dbPath)
     connection = backendConnection.connection
     sessions = backendConnection.sessions
     const caps = backendConnection.initializeResponse?.agentCapabilities
     let response
     if (caps?.sessionCapabilities?.resume) {
-      response = await connection.agent.request(methods.agent.session.resume, { sessionId: acpSessionId, cwd: repoPath })
+      response = await connection.agent.request(methods.agent.session.resume, { sessionId: acpSessionId, cwd: workPath })
     } else if (caps?.loadSession) {
-      response = await connection.agent.request(methods.agent.session.load, { sessionId: acpSessionId, cwd: repoPath, mcpServers: [] })
+      response = await connection.agent.request(methods.agent.session.load, { sessionId: acpSessionId, cwd: workPath, mcpServers: [] })
     } else {
       return { ok: false, error: 'no-active-session-for-thread', retryable: false }
     }
 
     const updateQueue = createUpdateQueue()
     registerSession(sessions, acpSessionId, {
-      fsHandlers: createFsHandlers(repoPath),
-      terminalHandlers: createTerminalHandlers(repoPath),
-      onPermissionRequest: params => handlePermissionRequest({ env, dbPath, channel, threadTs, requestedBy, params }),
+      fsHandlers: createFsHandlers(workPath, { protectedList: delegation ? protectedPaths() : [] }),
+      terminalHandlers: createTerminalHandlers(workPath, { delegated: Boolean(delegation), sandbox: config.hub?.delegatedSandbox }),
+      onPermissionRequest: params => handlePermissionRequest({ env, dbPath, channel, threadTs, requestedBy, params, delegation, repoName }),
       updateQueue,
     })
     activeSession = createResumedSessionHandle({ connection, sessionId: acpSessionId, response, updateQueue })
@@ -310,6 +429,10 @@ async function tryResumeSession({ env, config, dbPath, channel, threadTs, reques
     model,
     agentSessionRowId: persisted.id,
     startedBy: persisted.metadata?.requestedBy,
+    delegation,
+    dbPath,
+    worktree: persisted.metadata?.worktree,
+    lastActiveAt: Date.now(),
     progressTs: progressPost.ts,
     channel,
     threadTs,
@@ -318,7 +441,7 @@ async function tryResumeSession({ env, config, dbPath, channel, threadTs, reques
     accumulatedText: '',
     transcript: [],
   }
-  activeSessionsByKey.set(sessionKey(channel, threadTs), entry)
+  activeSessionsByKey.set(sessionKey(channel, threadTs, dbPath), entry)
   updateAgentSession({ dbPath, id: persisted.id, status: 'active' })
   return { ok: true, entry }
 }
@@ -354,6 +477,7 @@ function sessionLabel(entry) {
 // (no rate-limit-aware coalescing exists in core/progress.js itself — this
 // is that missing piece, kept here rather than in progress.js).
 export async function runPromptTurn(entry, promptText) {
+  entry.lastActiveAt = Date.now()
   // Appended, never reset — every turn (the initial task and every reply
   // after it) lands in the SAME log message (entry.progressTs), separated
   // and prefixed with the prompt that triggered it, so the whole session
@@ -613,7 +737,7 @@ async function handleContextFullReply({ entry, text, env, config, dbPath, reques
     // restart would happily resume it with the "full" gate forgotten
     // (contextState only ever lives in memory), contradicting what this
     // thread was just told.
-    const key = sessionKey(entry.channel, entry.threadTs)
+    const key = sessionKey(entry.channel, entry.threadTs, entry.dbPath)
     entry.activeSession.dispose()
     unregisterSession(entry.sessions, entry.activeSession.sessionId)
     activeSessionsByKey.delete(key)
@@ -752,17 +876,35 @@ async function handleRewindStep({ entry, text, env, config, dbPath, requestedBy 
   return { ok: started.ok, stopReason: started.stopReason, error: started.error }
 }
 
-export async function startAgentSession({ env, config, dbPath, channel, threadTs, backendName, repoName, modelName, task, requestedBy }) {
-  if (!isAllowedToStartSession(config, requestedBy)) {
+export async function startAgentSession({ env, config, dbPath, channel, threadTs, backendName, repoName, modelName, task, requestedBy, delegation }) {
+  // D74 — a blocked user never starts anything here, whatever the older
+  // allowlist says. `delegation` is only ever supplied by the hub, and it is
+  // checked against a one-time approval the hub itself minted, so no other
+  // caller can claim a delegated start.
+  const hub = getHub(dbPath)
+  if (hub?.isBlocked(requestedBy)) return { ok: false, error: 'not-allowed-to-start-agent-session', retryable: false }
+  if (!delegation && !isAllowedToStartSession(config, requestedBy)) {
     return { ok: false, error: 'not-allowed-to-start-agent-session', retryable: false }
   }
   const backend = getBackend(backendName)
   if (!backend) return { ok: false, error: 'unknown-backend', retryable: false }
 
+  const limit = checkSessionLimits({ config, dbPath, requestedBy })
+  if (!limit.ok) {
+    if (channel) await startProgress({ token: env.SLACK_BOT_TOKEN, channel, label: 'Agent session', detail: limit.message, threadTs, config })
+    return { ok: false, error: limit.error, retryable: true }
+  }
+
   const repo = resolveRepoPath(repoName)
   if (!repo.ok) return repo
-  if (!isAllowedToUseRepo(config, requestedBy, repo.name)) {
+  if (!delegation && !isAllowedToUseRepo(config, requestedBy, repo.name)) {
     return { ok: false, error: 'not-allowed-to-use-repo', retryable: false }
+  }
+  let verifiedDelegation = null
+  if (delegation) {
+    const approved = hub?.consumeApproval(delegation.token, { requesterId: requestedBy, repo: repo.name })
+    if (!approved) return { ok: false, error: 'delegation-not-approved', retryable: false }
+    verifiedDelegation = { ownerId: hub.ownerId, requestId: approved.requestId }
   }
 
   // Post first, then anchor everything (the DB row, the in-memory session
@@ -787,10 +929,10 @@ export async function startAgentSession({ env, config, dbPath, channel, threadTs
   // activeSessionsByKey and call runPromptTurn on it a second time
   // concurrently, both mutating entry.accumulatedText and racing on the
   // same Slack message. Found in review before publishing.
-  return withKeyLock(sessionKey(channel, anchorThreadTs), () => startAgentSessionBody({ env, config, dbPath, channel, threadTs, backend, repo, modelName, task, requestedBy, progressPost, anchorThreadTs }))
+  return withKeyLock(sessionKey(channel, anchorThreadTs, dbPath), () => startAgentSessionBody({ env, config, dbPath, channel, threadTs, backend, repo, modelName, task, requestedBy, progressPost, anchorThreadTs, delegation: verifiedDelegation }))
 }
 
-async function startAgentSessionBody({ env, config, dbPath, channel, backend, repo, modelName, task, requestedBy, progressPost, anchorThreadTs }) {
+async function startAgentSessionBody({ env, config, dbPath, channel, backend, repo, modelName, task, requestedBy, progressPost, anchorThreadTs, delegation }) {
   // Everything from here through runPromptTurn's own setup can throw
   // (spawn failure, initialize/session-new rejection, a DB error) — found
   // in review before publishing that NONE of it was caught. The consequence
@@ -799,8 +941,23 @@ async function startAgentSessionBody({ env, config, dbPath, channel, backend, re
   // sees. Anything past this point that fails now updates the Slack
   // message with the real error instead of hanging silently.
   try {
-    const { connection, sessions } = await getBackendConnection(backend, env)
-    const activeSession = await connection.agent.buildSession(repo.path).start()
+    const { connection, sessions } = await getBackendConnection(backend, env, dbPath)
+    let workPath = repo.path
+    let worktree
+    const wantWorktree = config.agentSessions?.worktrees === 'all' || (config.agentSessions?.worktrees === 'delegated' && delegation)
+    if (wantWorktree) {
+      const made = createWorktree({ repoPath: repo.path, repoName: repo.name, sessionKey: `${anchorThreadTs}`, home: sessionHome(env, dbPath) })
+      if (made.ok) {
+        workPath = made.path
+        worktree = { path: made.path, origin: made.origin, base: made.base }
+      } else if (delegation) {
+        // A delegated session must not fall back to editing the owner's real
+        // checkout; refuse instead.
+        await finishProgress({ token: env.SLACK_BOT_TOKEN, channel, ts: progressPost.ts, label: `Agent session (${backend.name} · ${repo.name})`, detail: `Could not isolate this session in a worktree (${made.error}).`, ok: false, config })
+        return { ok: false, error: 'worktree-failed', message: made.error, retryable: false }
+      }
+    }
+    const activeSession = await connection.agent.buildSession(workPath).start()
 
     let appliedModel
     if (modelName) {
@@ -831,17 +988,27 @@ async function startAgentSessionBody({ env, config, dbPath, channel, backend, re
       // acpSessionId is what makes resume-after-restart (Phase 4) possible
       // — without it, a restarted listener has no way to reconnect this
       // thread to the agent's own persisted conversation state.
-      metadata: { backend: backend.name, repoName: repo.name, repoPath: repo.path, requestedBy, model: appliedModel, acpSessionId: activeSession.sessionId },
+      metadata: {
+        backend: backend.name,
+        repoName: repo.name,
+        repoPath: workPath,
+        ...(worktree ? { worktree } : {}),
+        requestedBy,
+        model: appliedModel,
+        acpSessionId: activeSession.sessionId,
+        ...(delegation ? { delegation, hubRequestId: delegation.requestId } : {}),
+      },
     })
     if (!created.ok) {
       activeSession.dispose()
       return created
     }
+    notifySessionBound(dbPath, { channel, threadTs: anchorThreadTs })
 
     registerSession(sessions, activeSession.sessionId, {
-      fsHandlers: createFsHandlers(repo.path),
-      terminalHandlers: createTerminalHandlers(repo.path),
-      onPermissionRequest: params => handlePermissionRequest({ env, dbPath, channel, threadTs: anchorThreadTs, requestedBy, params }),
+      fsHandlers: createFsHandlers(workPath, { protectedList: delegation ? protectedPaths() : [] }),
+      terminalHandlers: createTerminalHandlers(workPath, { delegated: Boolean(delegation), sandbox: config.hub?.delegatedSandbox }),
+      onPermissionRequest: params => handlePermissionRequest({ env, dbPath, channel, threadTs: anchorThreadTs, requestedBy, params, delegation, repoName: repo.name }),
     })
 
     // progressPost (posted by startAgentSession, before this ran) is the
@@ -891,6 +1058,10 @@ async function startAgentSessionBody({ env, config, dbPath, channel, backend, re
       model: appliedModel,
       agentSessionRowId: created.session.id,
       startedBy: requestedBy,
+      delegation,
+      dbPath,
+      worktree,
+      lastActiveAt: Date.now(),
       progressTs: logPost.ts,
       channel,
       threadTs: anchorThreadTs,
@@ -899,7 +1070,7 @@ async function startAgentSessionBody({ env, config, dbPath, channel, backend, re
       accumulatedText: '',
       transcript: [],
     }
-    activeSessionsByKey.set(sessionKey(channel, anchorThreadTs), entry)
+    activeSessionsByKey.set(sessionKey(channel, anchorThreadTs, dbPath), entry)
 
     const response = await runPromptTurn(entry, task)
     return { ok: true, sessionId: activeSession.sessionId, channel, threadTs: anchorThreadTs, stopReason: response.stopReason }
@@ -923,15 +1094,47 @@ async function startAgentSessionBody({ env, config, dbPath, channel, backend, re
 // exactly as before whenever it returns ok:false, whether that's "never had
 // a session" or "had one but it's unresumable now".
 export async function routeThreadReply({ env, config, dbPath, channel, threadTs, text, requestedBy }) {
-  const key = sessionKey(channel, threadTs)
+  const key = sessionKey(channel, threadTs, dbPath)
   return withKeyLock(key, async () => {
     let entry = activeSessionsByKey.get(key)
     if (!entry) {
       const resumed = await tryResumeSession({ env, config, dbPath, channel, threadTs, requestedBy })
-      if (!resumed.ok) return resumed
+      if (!resumed.ok) {
+        // D74 — a delegated session the owner stopped (or whose requester was
+        // blocked) must say so instead of going silent: from the requester's
+        // side an ignored message is indistinguishable from a broken bot.
+        const persisted = findAgentSessionBySlackThread({ dbPath, slackChannel: channel, slackThreadTs: threadTs })
+        if (persisted?.kind === 'acp-session' && persisted.metadata?.delegation) {
+          await startProgress({
+            token: env.SLACK_BOT_TOKEN,
+            channel,
+            label: 'Agent session',
+            detail: 'This session is stopped. The machine owner has to restart it before it accepts more messages.',
+            threadTs,
+            config,
+          })
+          return { ok: true }
+        }
+        return resumed
+      }
       entry = resumed.entry
       const response = await runPromptTurn(entry, text)
       return { ok: true, stopReason: response.stopReason }
+    }
+
+    if (entry.delegation) {
+      const gate = getHub(dbPath)?.canPrompt({ requestId: entry.delegation.requestId, userId: requestedBy, startedBy: entry.startedBy, repo: entry.repoName })
+      if (!gate?.ok) {
+        await startProgress({
+          token: entry.env.SLACK_BOT_TOKEN,
+          channel: entry.channel,
+          label: sessionLabel(entry),
+          detail: 'Access to this session was removed by the machine owner.',
+          threadTs: entry.threadTs,
+          config: entry.config,
+        })
+        return { ok: true }
+      }
     }
 
     if (entry.pendingRewind) return handleRewindStep({ entry, text, env, config, dbPath, requestedBy })
@@ -991,7 +1194,7 @@ export async function routeThreadReply({ env, config, dbPath, channel, threadTs,
 // flows was otherwise unguarded, letting a "stop" get silently undone by a
 // fresh session that started concurrently and re-registered the key.
 export async function closeAgentSession({ dbPath, config, channel, threadTs, requestedBy }) {
-  const key = sessionKey(channel, threadTs)
+  const key = sessionKey(channel, threadTs, dbPath)
   return withKeyLock(key, async () => {
     const entry = activeSessionsByKey.get(key)
     if (entry) {
@@ -1002,6 +1205,7 @@ export async function closeAgentSession({ dbPath, config, channel, threadTs, req
       unregisterSession(entry.sessions, entry.activeSession.sessionId)
       activeSessionsByKey.delete(key)
       if (entry.agentSessionRowId) updateAgentSession({ dbPath, id: entry.agentSessionRowId, status: 'closed' })
+      await cleanupWorktree(entry, { channel, threadTs, env: entry.env, config })
       // id comes back on every successful close so the "Session closed."
       // confirmation can show it inline — without it, reopening one later
       // (`/agent-session reopen <id>`) means separately running
@@ -1016,6 +1220,7 @@ export async function closeAgentSession({ dbPath, config, channel, threadTs, req
       return { ok: false, error: 'not-allowed-to-close-agent-session', retryable: false }
     }
     updateAgentSession({ dbPath, id: persisted.id, status: 'closed' })
+    await cleanupWorktree(persisted, { channel, threadTs, config })
     return { ok: true, id: persisted.id }
   })
 }
@@ -1051,7 +1256,7 @@ export async function closeAgentSessionById({ dbPath, config, id, requestedBy })
   // still holding this same row (an older, already-superseded id won't be
   // — startFreshSessionInPlace always disposes+closes the old one before
   // registering the new one under the same key).
-  const key = sessionKey(persisted.slackChannel, persisted.slackThreadTs)
+  const key = sessionKey(persisted.slackChannel, persisted.slackThreadTs, dbPath)
   return withKeyLock(key, async () => {
     const entry = activeSessionsByKey.get(key)
     if (entry && entry.agentSessionRowId === id) {
@@ -1060,6 +1265,7 @@ export async function closeAgentSessionById({ dbPath, config, id, requestedBy })
       activeSessionsByKey.delete(key)
     }
     updateAgentSession({ dbPath, id, status: 'closed' })
+    await cleanupWorktree(entry && entry.agentSessionRowId === id ? entry : persisted, { channel: persisted.slackChannel, threadTs: persisted.slackThreadTs, env: entry?.env, config })
     return { ok: true, id }
   })
 }
@@ -1119,4 +1325,20 @@ export function reopenAgentSession({ dbPath, config, id, requestedBy }) {
   }
   updateAgentSession({ dbPath, id, status: 'active' })
   return { ok: true, channel: persisted.slackChannel, threadTs: persisted.slackThreadTs }
+}
+
+// D74 — the hub's "block this user" and "stop all of theirs" paths. Returns the
+// thread each stopped session lived in so the hub can tell the requester why
+// their session went quiet. Delegated sessions only: a user's sessions on
+// their own machine are not the hub's to stop.
+export async function closeSessionsByRequester({ dbPath, config, requesterId, ownerId }) {
+  const candidates = listAgentSessions({ dbPath, kind: 'acp-session', limit: 1000 }).filter(
+    row => row.status !== 'closed' && row.metadata?.requestedBy === requesterId && row.metadata?.delegation
+  )
+  const stopped = []
+  for (const row of candidates) {
+    const result = await closeAgentSessionById({ dbPath, config, id: row.id, requestedBy: ownerId })
+    if (result.ok) stopped.push({ id: row.id, channel: row.slackChannel, threadTs: row.slackThreadTs })
+  }
+  return stopped
 }

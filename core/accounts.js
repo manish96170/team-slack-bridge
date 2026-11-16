@@ -54,6 +54,24 @@ export function listAccounts() {
   return { default: raw.default || Object.keys(accounts)[0] || 'default', accounts }
 }
 
+// Per-account listener opt-out (PLAN D75): an account listens unless its
+// registry entry says `"listen": false`.
+export function listListenableAccounts() {
+  const raw = readRegistry()
+  const { accounts } = listAccounts()
+  return Object.entries(accounts)
+    .filter(([name]) => raw?.accounts?.[name]?.listen !== false)
+    .map(([name, home]) => ({ name, home }))
+}
+
+export function setAccountListen(name, listen) {
+  const registry = readRegistry()
+  if (!registry?.accounts?.[name]) return { ok: false, error: 'account-not-found', retryable: false }
+  registry.accounts[name].listen = listen !== false
+  writeRegistry(registry)
+  return { ok: true, name, listen: registry.accounts[name].listen }
+}
+
 export function resolveAccountHome(name) {
   const { default: defaultName, accounts } = listAccounts()
   const resolvedName = name || defaultName
